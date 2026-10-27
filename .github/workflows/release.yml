@@ -1,14 +1,26 @@
-# On every push to main, semantic-release reads the Conventional Commits since
-# the last v* tag and, if any warrant a release: bumps the version in the
-# dashboard and agents, updates CHANGELOG.md, commits that back to main, tags
-# vX.Y.Z and creates a GitHub release with the dashboard tarball (used by
-# install/dashboard.sh), both agents and SHA256SUMS. The docker job then
-# publishes that version's image to GHCR. Config: .releaserc.json
+# On pushes to main that touch shipped code, semantic-release reads the
+# Conventional Commits since the last v* tag and, if any warrant a release:
+# bumps the version in the dashboard and agents, updates CHANGELOG.md, commits
+# that back to main, tags vX.Y.Z and creates a GitHub release with the
+# dashboard tarball (used by install/dashboard.sh), both agents and SHA256SUMS.
+# The docker job then publishes that version's image to GHCR.
+# Config: .releaserc.json
+#
+# Docs, install scripts (served from main, not from releases), compose and
+# example config never trigger a run. Releasable commits that only touch those
+# are still picked up in the changelog of the next release.
 name: release
 
 on:
   push:
     branches: [main]
+    paths:
+      - "dashboard/**"
+      - "agent/**"
+      - ".releaserc.json"
+      - ".github/workflows/release.yml"
+      - ".github/scripts/prepare-release.sh"
+      - "!**/*.md"
   workflow_dispatch:
 
 concurrency:

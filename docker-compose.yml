@@ -1,6 +1,6 @@
 services:
   llama-paddock:
-    image: ghcr.io/OWNER/llama-paddock:latest
+    image: ghcr.io/splendidchip758/llama-paddock:latest
     # build: ./dashboard   # build locally instead of pulling
     container_name: llama-paddock
     restart: unless-stopped

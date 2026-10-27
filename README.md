@@ -6,10 +6,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/OWNER/llama-paddock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/OWNER/llama-paddock?style=flat-square&color=c8a04a&label=release"></a>
+  <a href="https://github.com/SplendidChip758/llama-paddock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/SplendidChip758/llama-paddock?style=flat-square&color=c8a04a&label=release"></a>
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-c8a04a?style=flat-square"></a>
-  <a href="https://github.com/OWNER/llama-paddock/commits"><img alt="Last commit" src="https://img.shields.io/github/last-commit/OWNER/llama-paddock?style=flat-square"></a>
-  <a href="https://github.com/OWNER/llama-paddock/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/OWNER/llama-paddock?style=flat-square"></a>
+  <a href="https://github.com/SplendidChip758/llama-paddock/commits"><img alt="Last commit" src="https://img.shields.io/github/last-commit/SplendidChip758/llama-paddock?style=flat-square"></a>
+  <a href="https://github.com/SplendidChip758/llama-paddock/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/SplendidChip758/llama-paddock?style=flat-square"></a>
   <br>
   <img alt="Ollama" src="https://img.shields.io/badge/Ollama-compatible-1b1814?style=flat-square&logo=ollama&logoColor=white">
   <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-1b1814?style=flat-square&logo=nextdotjs&logoColor=white">
@@ -22,7 +22,7 @@
   <a href="#quick-install">Install</a> ·
   <a href="#using-it">Features</a> ·
   <a href="#api">API</a> ·
-  <a href="https://github.com/OWNER/llama-paddock/issues">Issues</a>
+  <a href="https://github.com/SplendidChip758/llama-paddock/issues">Issues</a>
 </p>
 
 A self-hosted dashboard for monitoring and managing a fleet of Ollama instances on Linux and Windows.
@@ -39,10 +39,10 @@ Run these on a **Proxmox VE host**, or inside an existing LXC/VM:
 
 ```bash
 # Dashboard: creates its own LXC when run on the Proxmox host
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/OWNER/llama-paddock/main/install/dashboard.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/dashboard.sh)"
 
 # Agent: run on the Proxmox host and pick your Ollama LXC, or run inside it
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/OWNER/llama-paddock/main/install/agent.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/agent.sh)"
 ```
 
 Windows hosts: see [the Windows agent](#1b-install-the-agent-on-windows).
@@ -90,7 +90,7 @@ An instance without an agent still gets `ollama ps` and full model management.
 Run this **on the Proxmox host** or **inside the Ollama LXC/VM**:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/OWNER/llama-paddock/main/install/agent.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/agent.sh)"
 ```
 
 - **On a Proxmox host** it lists your containers, pre-selects the one with "ollama" in its name, and installs into it with `pct exec`.
@@ -149,7 +149,7 @@ The Windows agent only ever shows or changes Ollama-related variables (`OLLAMA_*
 Run this **on the Proxmox host** to create a dedicated LXC, or **inside any Debian/Ubuntu LXC or VM** to install there:
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/OWNER/llama-paddock/main/install/dashboard.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/dashboard.sh)"
 ```
 
 **On a Proxmox host** it asks for:
@@ -219,7 +219,9 @@ Every push to `main` runs `.github/workflows/release.yml`. When there's somethin
 - bumps the version in `dashboard/package.json` and both agents, updates `CHANGELOG.md`, and tags `vX.Y.Z`,
 - builds the dashboard once and attaches `llama-paddock-dashboard-vX.Y.Z.tar.gz` to the GitHub release (the one-line installer downloads this),
 - attaches both agents and a `SHA256SUMS` file,
-- pushes `ghcr.io/OWNER/llama-paddock:X.Y.Z`, `:X.Y` and `:latest` for amd64 and arm64.
+- pushes `ghcr.io/splendidchip758/llama-paddock:X.Y.Z`, `:X.Y` and `:latest` for amd64 and arm64.
+
+The workflow only runs when `dashboard/`, `agent/` or the release config change, so docs-only pushes never build an image or cut a release. Dependabot (`.github/dependabot.yml`) opens weekly update PRs; runtime dependency and base-image bumps are titled `fix(deps): …` and ship as a patch release once merged.
 
 Configuration lives in `.releaserc.json`. PR titles are checked by `.github/workflows/pr-title.yml`, since the squash-merge commit is what semantic-release reads.
 

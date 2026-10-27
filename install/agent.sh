@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # llama-paddock Linux agent installer
 #
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/OWNER/llama-paddock/main/install/agent.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/agent.sh)"
 #
 # On a Proxmox VE host: lists your containers, you pick the Ollama LXC, and the
 # agent is installed inside it (via pct exec).
@@ -10,7 +10,7 @@
 #
 # Options (environment variables):
 #   PADDOCK_VERSION      latest (default) | v1.2.3 | main  — which agent version to fetch
-#   PADDOCK_REPO         GitHub repo (default: OWNER/llama-paddock)
+#   PADDOCK_REPO         GitHub repo (default: SplendidChip758/llama-paddock)
 #   PADDOCK_BRANCH       branch used when there is no release yet (default: main)
 #   PADDOCK_AGENT_TOKEN  reuse an existing token instead of generating one
 #   PADDOCK_AGENT_PORT   default 11435
@@ -19,7 +19,7 @@
 #   PADDOCK_YES=1        non-interactive
 set -euo pipefail
 
-REPO="${PADDOCK_REPO:-OWNER/llama-paddock}"
+REPO="${PADDOCK_REPO:-SplendidChip758/llama-paddock}"
 BRANCH="${PADDOCK_BRANCH:-main}"
 VERSION="${PADDOCK_VERSION:-latest}"
 AGENT_PORT="${PADDOCK_AGENT_PORT:-11435}"

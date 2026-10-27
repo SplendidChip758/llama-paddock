@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # llama-paddock dashboard installer
 #
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/OWNER/llama-paddock/main/install/dashboard.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/dashboard.sh)"
 #
 # On a Proxmox VE host: creates a new Debian LXC and installs the dashboard in it.
 # Anywhere else (LXC, VM, bare metal; Debian/Ubuntu): installs the dashboard directly.
@@ -10,7 +10,7 @@
 # Options (environment variables):
 #   PADDOCK_VERSION   latest (default) | v1.2.3 | source  — "source" builds PADDOCK_BRANCH
 #   PADDOCK_BRANCH    git branch for source builds and helper files (default: main)
-#   PADDOCK_REPO      GitHub repo (default: OWNER/llama-paddock)
+#   PADDOCK_REPO      GitHub repo (default: SplendidChip758/llama-paddock)
 #   PADDOCK_PORT      port to listen on (default: 8080)
 #   PADDOCK_LOCAL=1   install here even on a Proxmox host
 #   PADDOCK_YES=1     non-interactive: accept all defaults
@@ -18,7 +18,7 @@
 #   PADDOCK_SOURCE_DIR path to a local checkout to build from
 set -euo pipefail
 
-REPO="${PADDOCK_REPO:-OWNER/llama-paddock}"
+REPO="${PADDOCK_REPO:-SplendidChip758/llama-paddock}"
 BRANCH="${PADDOCK_BRANCH:-main}"
 VERSION="${PADDOCK_VERSION:-latest}"
 PORT="${PADDOCK_PORT:-8080}"
