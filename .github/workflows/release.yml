@@ -1,32 +1,35 @@
-# On a version tag (v1.2.3): build the dashboard once and attach it to a GitHub
-# release (used by install/dashboard.sh), attach the agents, and publish the
-# Docker image to GHCR. Normally called by release-please.yml; pushing a tag by
-# hand still works.
+# On every push to main, semantic-release reads the Conventional Commits since
+# the last v* tag and, if any warrant a release: bumps the version in the
+# dashboard and agents, updates CHANGELOG.md, commits that back to main, tags
+# vX.Y.Z and creates a GitHub release with the dashboard tarball (used by
+# install/dashboard.sh), both agents and SHA256SUMS. The docker job then
+# publishes that version's image to GHCR. Config: .releaserc.json
 name: release
 
 on:
   push:
-    tags: ["v*"]
-  workflow_call:
-    inputs:
-      tag:
-        required: true
-        type: string
+    branches: [main]
+  workflow_dispatch:
 
-env:
-  TAG: ${{ inputs.tag || github.ref_name }}
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: write
+  issues: write
+  pull-requests: write
   packages: write
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semrel.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.TAG }}
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -34,37 +37,24 @@ jobs:
           cache: npm
           cache-dependency-path: dashboard/package-lock.json
 
-      - name: Build dashboard
-        working-directory: dashboard
+      - id: semrel
         env:
-          NEXT_TELEMETRY_DISABLED: "1"
-        run: |
-          npm ci --no-audit --no-fund
-          npm run build
-
-      - name: Package release assets
-        run: |
-          mkdir -p dist/llama-paddock-dashboard/.next
-          cp -a dashboard/.next/standalone/. dist/llama-paddock-dashboard/
-          cp -a dashboard/.next/static dist/llama-paddock-dashboard/.next/static
-          echo "${TAG}" > dist/llama-paddock-dashboard/VERSION
-          tar -C dist -czf "dist/llama-paddock-dashboard-${TAG}.tar.gz" llama-paddock-dashboard
-          cp agent/linux/paddock-agent.mjs dist/paddock-agent-linux.mjs
-          cp agent/windows/paddock-agent.mjs dist/paddock-agent-windows.mjs
-          (cd dist && sha256sum *.tar.gz *.mjs > SHA256SUMS)
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.TAG }}
-          generate_release_notes: true
-          files: |
-            dist/llama-paddock-dashboard-*.tar.gz
-            dist/paddock-agent-linux.mjs
-            dist/paddock-agent-windows.mjs
-            dist/SHA256SUMS
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >-
+          npx --yes
+          -p semantic-release@25
+          -p @semantic-release/changelog@7
+          -p @semantic-release/git@11
+          -p @semantic-release/exec@7
+          -p conventional-changelog-conventionalcommits@9
+          semantic-release
 
   docker:
+    needs: release
+    if: needs.release.outputs.version != ''
     runs-on: ubuntu-latest
+    env:
+      TAG: v${{ needs.release.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:

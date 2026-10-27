@@ -2,7 +2,7 @@
 
 ## Commit messages
 
-Releases are fully automated: [release-please](https://github.com/googleapis/release-please) reads the commit messages on `main` to decide the next version and write `CHANGELOG.md`. Every commit (or PR title, when squash-merging) must follow [Conventional Commits](https://www.conventionalcommits.org):
+Releases are fully automated: [semantic-release](https://github.com/semantic-release/semantic-release) reads the commit messages on `main` to decide the next version and write `CHANGELOG.md`. Every commit (or PR title, when squash-merging) must follow [Conventional Commits](https://www.conventionalcommits.org):
 
 ```
 <type>(<optional scope>): <short summary>
@@ -48,7 +48,7 @@ BREAKING CHANGE: agents now reject unauthenticated requests. Set
 PADDOCK_AGENT_TOKEN on each host and in config.yaml before upgrading.
 ```
 
-While the project is pre-1.0 this bumps the **minor** version (`0.3.2` → `0.4.0`); from `1.0.0` on it bumps the **major** version.
+While the project is pre-1.0 this bumps the **minor** version (`0.3.2` → `0.4.0`). See [Going to 1.0.0](#going-to-100).
 
 ### Examples
 
@@ -62,15 +62,23 @@ ci: cache npm in the release workflow
 chore: tidy .gitignore
 ```
 
-### Forcing a specific version
+### Going to 1.0.0
 
-To cut a particular version (for example the first stable release), put this footer in the body of a commit on `main`:
+Pre-1.0 behaviour comes from this rule in `.releaserc.json`, which turns breaking changes into minor bumps:
+
+```json
+"releaseRules": [{ "breaking": true, "release": "minor" }]
+```
+
+When the project is ready for 1.0, remove that rule in the same PR as a breaking commit, for example:
 
 ```
-chore: release 1.0.0
+feat!: first stable release
 
-Release-As: 1.0.0
+BREAKING CHANGE: the config.yaml and agent APIs are now stable.
 ```
+
+From then on, breaking changes bump the major version as usual.
 
 ## Pull requests
 
@@ -79,6 +87,14 @@ Release-As: 1.0.0
 
 ## How a release happens
 
-1. Conventional commits land on `main`.
-2. release-please keeps a `chore(main): release x.y.z` PR open with the version bumps and changelog.
-3. Merging that PR tags `vX.Y.Z`, creates the GitHub release, and runs `release.yml` to attach the build artifacts and publish the container image.
+Every push to `main` runs `.github/workflows/release.yml`. If any commit since the last tag is a `feat`, `fix`, `perf`, `revert` or breaking change, semantic-release:
+
+1. works out the next version from those commits,
+2. stamps it into `dashboard/package.json`, `dashboard/package-lock.json` and both agents, and updates `CHANGELOG.md`,
+3. builds the dashboard tarball and agents into `dist/`,
+4. commits the bumped files as `chore(release): x.y.z [skip ci]` and tags `vX.Y.Z`,
+5. creates the GitHub release with the generated notes and the `dist/` assets.
+
+Then the `docker` job builds and pushes `ghcr.io/…/llama-paddock:X.Y.Z`, `:X.Y` and `:latest`.
+
+If nothing releasable landed (only `docs`, `chore`, `ci` and so on), the workflow exits without releasing.

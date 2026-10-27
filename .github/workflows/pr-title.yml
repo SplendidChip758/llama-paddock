@@ -1,6 +1,6 @@
-# release-please derives the next version from commit messages, so PR titles
+# semantic-release derives the next version from commit messages, so PR titles
 # (the squash-merge commit message) must follow Conventional Commits:
-#   fix: …  → patch    feat: …  → minor    feat!: … / BREAKING CHANGE → major
+#   fix: …  → patch    feat: …  → minor    feat!: … / BREAKING CHANGE → minor while 0.x
 name: pr-title
 
 on:

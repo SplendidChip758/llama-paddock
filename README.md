@@ -206,23 +206,22 @@ PADDOCK_CONFIG=../config.yaml PORT=8080 node .next/standalone/server.js
 
 ## Releases
 
-Versions follow [SemVer](https://semver.org) and are driven by [Conventional Commits](https://www.conventionalcommits.org) through [release-please](https://github.com/googleapis/release-please); see [CONTRIBUTING.md](CONTRIBUTING.md) for how to prefix commit messages.
+Versions follow [SemVer](https://semver.org) and are released automatically by [semantic-release](https://github.com/semantic-release/semantic-release) from [Conventional Commits](https://www.conventionalcommits.org). See [CONTRIBUTING.md](CONTRIBUTING.md) for how to prefix commit messages.
 
-| Commit / PR title | Bump while `0.x` | Bump from `1.0.0` on |
-|---|---|---|
-| `fix: …`, `perf: …` | patch (`0.1.0` → `0.1.1`) | patch |
-| `feat: …` | minor (`0.1.0` → `0.2.0`) | minor |
-| `feat!: …` or a `BREAKING CHANGE:` footer | minor (`0.1.0` → `0.2.0`) | major |
-| `chore:`, `docs:`, `ci:`, `refactor:`, `test:` … | none | none |
+| Commit / PR title | Bump while `0.x` |
+|---|---|
+| `fix: …`, `perf: …` | patch (`0.1.0` → `0.1.1`) |
+| `feat: …` | minor (`0.1.0` → `0.2.0`) |
+| `feat!: …` or a `BREAKING CHANGE:` footer | minor (`0.1.0` → `0.2.0`) |
+| `chore:`, `docs:`, `ci:`, `refactor:`, `test:` … | none |
 
-The project is pre-1.0, so breaking changes only bump the minor version. To cut `1.0.0`, add `Release-As: 1.0.0` to the body of a commit on `main`.
-
-On each push to `main`, `.github/workflows/release-please.yml` keeps a release PR open that bumps the version in `dashboard/package.json` and both agents and updates `CHANGELOG.md`. Merging it tags `vX.Y.Z` and runs `.github/workflows/release.yml`, which:
+Every push to `main` runs `.github/workflows/release.yml`. When there's something to release, it:
+- bumps the version in `dashboard/package.json` and both agents, updates `CHANGELOG.md`, and tags `vX.Y.Z`,
 - builds the dashboard once and attaches `llama-paddock-dashboard-vX.Y.Z.tar.gz` to the GitHub release (the one-line installer downloads this),
 - attaches both agents and a `SHA256SUMS` file,
 - pushes `ghcr.io/OWNER/llama-paddock:X.Y.Z`, `:X.Y` and `:latest` for amd64 and arm64.
 
-PR titles are checked by `.github/workflows/pr-title.yml`, since the squash-merge commit is what release-please reads. Pushing a `v*` tag by hand still runs `release.yml` directly.
+Configuration lives in `.releaserc.json`. PR titles are checked by `.github/workflows/pr-title.yml`, since the squash-merge commit is what semantic-release reads.
 
 ## Using it
 
@@ -283,7 +282,7 @@ dashboard/        Next.js app (App Router, TypeScript)
   lib/server.ts   poller, job runner, Ollama/agent clients
   components/     React UI
   proxy.ts        optional basic auth
-.github/workflows release.yml (release tarball, agents, GHCR image)
+.github/workflows release.yml (semantic-release: tag, tarball, agents, GHCR image)
 docs/logo/        logo-mark.svg (app icon), banner-dark.svg / banner-light.svg (README header)
 ```
 
