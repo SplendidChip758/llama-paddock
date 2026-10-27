@@ -1,3 +1,14 @@
+## [0.2.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.1.1...v0.2.0) (2026-10-27)
+
+### Features
+
+* add hosts from the UI and a sign-in page ([39d42f6](https://github.com/SplendidChip758/llama-paddock/commit/39d42f6b401f24e0d1f0c825ce6369e024712d5c))
+* **install:** choose Ubuntu LTS (default) or Debian for the Proxmox LXC ([6b9e6a7](https://github.com/SplendidChip758/llama-paddock/commit/6b9e6a7bc90c95efb252bca16e5469d3566a1f97))
+
+### Bug Fixes
+
+* **install:** silence locale and NodeSource noise in Proxmox installs ([e01907e](https://github.com/SplendidChip758/llama-paddock/commit/e01907ebb2285243d16b4d454fedfe3cf5dfcefb))
+
 ## [0.1.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.1.0...v0.1.1) (2026-10-27)
 
 ### Bug Fixes
