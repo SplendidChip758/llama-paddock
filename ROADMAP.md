@@ -9,7 +9,7 @@ Progress is tracked in [GitHub milestones](https://github.com/SplendidChip758/ll
 | M1 | [Foundations](#m1-foundations) | Data that survives a restart, secured Ollama, Grafana | 0.x |
 | M2 | [Model workbench](#m2-model-workbench) | Find, size, create and benchmark models | 0.x |
 | M3 | [Alerts](#m3-alerts) | Find out when something breaks | 0.x |
-| M4 | [Access & displays](#m4-access--displays) | More people, more screens | 0.x |
+| M4 | [Access & displays](#m4-access--displays) | More people, more screens, your own colors | 0.x |
 | M5 | [Fleet management](#m5-fleet-management--10) | Manage many hosts as one | ends with **1.0** |
 | M6 | [Platforms](#m6-platforms) | Run the agent everywhere Ollama runs | 1.x |
 | M7 | [Routing gateway](#m7-routing-gateway) | One OpenAI-compatible API for the whole fleet | 1.x |
@@ -72,8 +72,9 @@ Everything about choosing and tuning a model for your hardware.
 - **Users and roles.** Several users, each with an **admin** role (full control) or a **viewer** role (read-only). Admins manage users in the UI. The current single login becomes the first admin.
 - **Wall display.** A view-only page for a wall-mounted screen or TV: large fleet overview, no controls, auto-refresh, dark theme, works without signing in via a revocable display link/token.
 - **Mobile layout and PWA.** Usable on a phone. Installable as an app, with the alert badge visible.
+- **Themes.** A light / dark / system switch, built-in presets (including high contrast), and a custom theme editor for the accent, background, text and status colors, with a contrast check. Themes are saved per user and can be imported and exported as JSON. Charts and the wall display follow the theme.
 
-**Done when:** a viewer account can't change anything, a TV shows the fleet from a display link, and the dashboard works on a phone home screen.
+**Done when:** a viewer account can't change anything, a TV shows the fleet from a display link, the dashboard works on a phone home screen, and each user can pick or build their own color theme.
 
 ## M5: Fleet management → 1.0
 
