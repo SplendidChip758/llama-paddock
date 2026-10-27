@@ -12,12 +12,19 @@ interface Check {
   detail: string;
 }
 
-/** Host part of a (possibly half-typed) URL; "" while only the scheme is typed so far ("h", "http", "https:/"). */
+/** Only the scheme typed so far: "h", "http", "https:/", "http://". */
+const partialScheme = (s: string) => "http://".startsWith(s.toLowerCase()) || "https://".startsWith(s.toLowerCase());
+
+const HOST_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i;
+
+/** Host name or IPv4 of a (possibly half-typed) URL; "" until there is one, or if the text isn't an http(s) URL. */
 const hostOf = (url: string) => {
   const s = url.trim();
-  const lower = s.toLowerCase();
-  if (!s.includes("://") && ("http://".startsWith(lower) || "https://".startsWith(lower))) return "";
-  return s.replace(/^[a-z]+:\/\//i, "").split(/[:/]/)[0];
+  if (partialScheme(s)) return "";
+  const rest = s.replace(/^https?:\/\//i, "");
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(rest)) return ""; // some other scheme, e.g. ftp://
+  const host = rest.split(/[:/?#]/)[0];
+  return HOST_RE.test(host) ? host : "";
 };
 
 /** Agent default: same host as Ollama, port 11435. */
@@ -104,7 +111,13 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
           <span>Ollama URL</span>
           <input type="text" value={ollamaUrl} onChange={(e) => onOllama(e.target.value)} placeholder="http://192.168.30.101:11434"
             required autoFocus={!host} />
-          <div className="hint">Ollama must listen on the network: <code>OLLAMA_HOST=0.0.0.0</code>.</div>
+          {ollamaUrl.trim() && !partialScheme(ollamaUrl.trim()) && !hostOf(ollamaUrl) ? (
+            <div className="hint" style={{ color: "var(--bad)" }}>
+              That doesn't look like a URL. Enter the Ollama address, e.g. <code>http://192.168.30.101:11434</code>.
+            </div>
+          ) : (
+            <div className="hint">Ollama must listen on the network: <code>OLLAMA_HOST=0.0.0.0</code>.</div>
+          )}
         </label>
 
         <label className="field">
