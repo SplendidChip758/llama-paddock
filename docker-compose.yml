@@ -1,0 +1,11 @@
+services:
+  llama-paddock:
+    image: ghcr.io/OWNER/llama-paddock:latest
+    # build: ./dashboard   # build locally instead of pulling
+    container_name: llama-paddock
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro

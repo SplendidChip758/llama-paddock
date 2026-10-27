@@ -1,0 +1,18 @@
+[Unit]
+Description=llama-paddock agent (Ollama host stats + management)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=/etc/llama-paddock-agent.env
+ExecStart=@NODE@ /opt/llama-paddock-agent/paddock-agent.mjs
+Restart=on-failure
+RestartSec=3
+# Runs as root: it must write the Ollama systemd drop-in and restart the service.
+NoNewPrivileges=true
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

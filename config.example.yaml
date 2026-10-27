@@ -1,0 +1,36 @@
+# llama-paddock dashboard config
+# Copy to config.yaml. ${VAR} and ${VAR:-default} are expanded from the
+# container environment (.env), so tokens don't have to live in this file.
+
+poll_interval: 3        # seconds between polls of every instance
+history_points: 400     # samples kept in memory for sparklines (~20 min at 3s)
+
+instances:
+  - id: ollama-01
+    name: ollama-01 · Node-01 P100
+    ollama_url: http://192.168.30.101:11434
+    agent_url: http://192.168.30.101:11435
+    agent_token: ${OLLAMA01_AGENT_TOKEN}
+    tags: [p100, node-01]
+
+  - id: ollama-02
+    name: ollama-02 · Node-02 P100
+    ollama_url: http://192.168.30.102:11434
+    agent_url: http://192.168.30.102:11435
+    agent_token: ${OLLAMA02_AGENT_TOKEN}
+    tags: [p100, node-02]
+
+  # A Windows PC running the Ollama desktop app + the Windows agent.
+  # Ollama on Windows listens on localhost only by default: set OLLAMA_HOST=0.0.0.0
+  # (the dashboard's Environment tab can do it once the agent is installed).
+  # - id: gaming-pc
+  #   name: gaming-pc · RTX
+  #   ollama_url: http://192.168.5.50:11434
+  #   agent_url: http://192.168.5.50:11435
+  #   agent_token: ${GAMINGPC_AGENT_TOKEN}
+
+  # An instance without an agent still gets ollama ps + full model management;
+  # GPU/system stats, env editing, restart and logs need the agent.
+  # - id: laptop
+  #   name: laptop
+  #   ollama_url: http://192.168.5.60:11434
