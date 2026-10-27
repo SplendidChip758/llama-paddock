@@ -153,11 +153,12 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-pa
 ```
 
 **On a Proxmox host** it asks for:
+- distribution (`ubuntu` or `debian`, default `ubuntu`),
 - CT ID, hostname, cores, RAM and disk (defaults: next free ID, 2 cores, 1 GiB, 6 GiB),
 - storage, bridge, VLAN tag, and DHCP or a static IP,
 - optionally your first Ollama instance and its agent token.
 
-It then downloads the latest Debian template, creates an unprivileged container, and installs the dashboard inside it.
+It then downloads the latest template for the distribution you pick (latest **Ubuntu LTS** by default, or **Debian**), creates an unprivileged container, and installs the dashboard inside it.
 
 **Inside a container or VM** it:
 - installs Node.js 22 if needed,

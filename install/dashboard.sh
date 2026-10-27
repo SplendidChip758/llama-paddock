@@ -3,7 +3,8 @@
 #
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/dashboard.sh)"
 #
-# On a Proxmox VE host: creates a new Debian LXC and installs the dashboard in it.
+# On a Proxmox VE host: creates a new LXC (latest Ubuntu LTS by default, or Debian)
+# and installs the dashboard in it.
 # Anywhere else (LXC, VM, bare metal; Debian/Ubuntu): installs the dashboard directly.
 # Re-running it on an existing install updates it and keeps your config.
 #
@@ -76,6 +77,9 @@ proxmox_install() {
   local def_storage; def_storage=$(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && $3=="active" {print $1; exit}')
   local def_tstorage; def_tstorage=$(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 && $3=="active" {print $1; exit}')
 
+  ask CT_OS       "Distribution (ubuntu or debian)" "ubuntu"
+  CT_OS=${CT_OS,,}
+  [[ $CT_OS == ubuntu || $CT_OS == debian ]] || die "unknown distribution '$CT_OS' — use ubuntu or debian"
   ask CT_ID       "Container ID" "$next_id"
   ask CT_HOSTNAME "Hostname" "llama-paddock"
   ask CT_CORES    "CPU cores" "2"
@@ -94,11 +98,16 @@ proxmox_install() {
 
   pct status "$CT_ID" &>/dev/null && die "container $CT_ID already exists"
 
-  msg_info "Finding the latest Debian template"
+  local pattern label
+  case $CT_OS in
+    ubuntu) pattern='^ubuntu-[0-9]*[02468]\.04-standard_'; label="Ubuntu LTS" ;;  # LTS = even year, .04
+    debian) pattern='^debian-1[2-9]-standard_';             label="Debian" ;;
+  esac
+  msg_info "Finding the latest $label template"
   pveam update >/dev/null 2>&1 || true
   local template
-  template=$(pveam available --section system 2>/dev/null | awk '{print $2}' | grep -E '^debian-1[2-9]-standard_' | sort -V | tail -1)
-  [[ -n $template ]] || die "no Debian standard template found (pveam available --section system)"
+  template=$(pveam available --section system 2>/dev/null | awk '{print $2}' | grep -E "$pattern" | sort -V | tail -1)
+  [[ -n $template ]] || die "no $label standard template found (pveam available --section system)"
   if ! pveam list "$CT_TSTORAGE" 2>/dev/null | grep -q "$template"; then
     msg_info "Downloading $template to $CT_TSTORAGE"
     pveam download "$CT_TSTORAGE" "$template" >/dev/null
@@ -113,7 +122,7 @@ proxmox_install() {
   pct create "$CT_ID" "${CT_TSTORAGE}:vztmpl/${template}" \
     --hostname "$CT_HOSTNAME" --cores "$CT_CORES" --memory "$CT_RAM" --swap 512 \
     --rootfs "${CT_STORAGE}:${CT_DISK}" --net0 "$net" \
-    --unprivileged 1 --features nesting=1 --onboot 1 --ostype debian \
+    --unprivileged 1 --features nesting=1 --onboot 1 --ostype "$CT_OS" \
     --tags "llama-paddock" --description "llama-paddock dashboard — https://github.com/${REPO}" >/dev/null
   pct start "$CT_ID"
   msg_ok "Container $CT_ID started"
