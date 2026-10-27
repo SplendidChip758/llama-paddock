@@ -12,7 +12,13 @@ interface Check {
   detail: string;
 }
 
-const hostOf = (url: string) => url.trim().replace(/^[a-z]+:\/\//i, "").split(/[:/]/)[0];
+/** Host part of a (possibly half-typed) URL; "" while only the scheme is typed so far ("h", "http", "https:/"). */
+const hostOf = (url: string) => {
+  const s = url.trim();
+  const lower = s.toLowerCase();
+  if (!s.includes("://") && ("http://".startsWith(lower) || "https://".startsWith(lower))) return "";
+  return s.replace(/^[a-z]+:\/\//i, "").split(/[:/]/)[0];
+};
 
 /** Agent default: same host as Ollama, port 11435. */
 const suggestAgent = (ollamaUrl: string) => (hostOf(ollamaUrl) ? `http://${hostOf(ollamaUrl)}:11435` : "");

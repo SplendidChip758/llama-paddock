@@ -152,10 +152,18 @@ Run this **on the Proxmox host** to create a dedicated LXC, or **inside any Debi
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/dashboard.sh)"
 ```
 
-**On a Proxmox host** it asks for:
-- distribution (`ubuntu` or `debian`, default `ubuntu`),
-- CT ID, hostname, cores, RAM and disk (defaults: next free ID, 2 cores, 1 GiB, 6 GiB),
-- storage, bridge, VLAN tag, and DHCP or a static IP.
+**On a Proxmox host** it opens a menu (whiptail dialogs, or plain text prompts without a terminal):
+
+- **Default** shows a summary (Ubuntu LTS, next free CT ID, 2 cores, 1 GiB RAM, 6 GiB disk, DHCP on `vmbr0`, no root password) and creates the container when you choose **Create**.
+- **Advanced** asks for every setting, then shows the same summary. **Change** goes back through the settings.
+  - distribution: latest **Ubuntu LTS** or **Debian**,
+  - CT ID, hostname, cores, RAM and disk,
+  - storage and bridge, picked from what the node has,
+  - VLAN tag, DHCP or a static IP (the gateway defaults to the first address of the subnet),
+  - root password (blank means none, use `pct enter <ctid>` from the host),
+  - root SSH login: `key` (default, key only), `password`, or `off`, plus an optional SSH public key file.
+
+Every setting can be preset in the environment (`CT_OS`, `CT_ID`, `CT_HOSTNAME`, `CT_CORES`, `CT_RAM`, `CT_DISK`, `CT_STORAGE`, `CT_TSTORAGE`, `CT_BRIDGE`, `CT_VLAN`, `CT_IP`, `CT_GW`, `CT_PASSWORD`, `CT_ROOT_SSH`, `CT_SSH_KEY`). Add `PADDOCK_YES=1` to skip the menu entirely, or `PADDOCK_TUI=0` for text prompts instead of dialogs.
 
 It then downloads the latest template for the distribution you pick (latest **Ubuntu LTS** by default, or **Debian**), creates an unprivileged container, and installs the dashboard inside it.
 
@@ -190,7 +198,7 @@ docker compose up -d
 
 Sign in at `http://<docker-host>:8080`, choose a new password, then **Add host**. Hosts and the login are kept in the `paddock-data` volume (`/data`).
 
-To build the image yourself instead, swap `image:` for `build: ./dashboard` in `docker-compose.yml`. In an unprivileged LXC, Docker needs `nesting=1,keyctl=1`.
+For the latest prerelease from the `dev` branch, use the `:dev` tag. To build the image yourself instead, swap `image:` for `build: ./dashboard` in `docker-compose.yml`. In an unprivileged LXC, Docker needs `nesting=1,keyctl=1`.
 
 `config.yaml` is optional: mount it for `poll_interval` / `history_points`, or to define hosts declaratively (those are read-only in the UI). It expands `${VAR}` from the environment, so tokens can stay in `.env`.
 
@@ -224,11 +232,18 @@ Versions follow [SemVer](https://semver.org) and are released automatically by [
 | `feat!: …` or a `BREAKING CHANGE:` footer | minor (`0.1.0` → `0.2.0`) |
 | `chore:`, `docs:`, `ci:`, `refactor:`, `test:` … | none |
 
-Every push to `main` runs `.github/workflows/release.yml`. When there's something to release, it:
+Every push to `main` or `dev` runs `.github/workflows/release.yml`. When there's something to release, it:
 - bumps the version in `dashboard/package.json` and both agents, updates `CHANGELOG.md`, and tags `vX.Y.Z`,
 - builds the dashboard once and attaches `llama-paddock-dashboard-vX.Y.Z.tar.gz` to the GitHub release (the one-line installer downloads this),
 - attaches both agents and a `SHA256SUMS` file,
-- pushes `ghcr.io/splendidchip758/llama-paddock:X.Y.Z`, `:X.Y` and `:latest` for amd64 and arm64.
+- builds the image natively on amd64 and arm64 runners and pushes it as one multi-arch tag.
+
+| Branch | Version | GitHub release | Image tags |
+|---|---|---|---|
+| `main` | `vX.Y.Z` | release | `:X.Y.Z`, `:X.Y`, `:latest` |
+| `dev` | `vX.Y.Z-dev.N` | prerelease | `:X.Y.Z-dev.N`, `:dev` |
+
+Prereleases are never picked up by `latest`: the installer and the `:latest` image only follow `main`. To try one, use `PADDOCK_VERSION=vX.Y.Z-dev.N` with the installer or the `:dev` image.
 
 The workflow only runs when `dashboard/`, `agent/` or the release config change, so docs-only pushes never build an image or cut a release. Dependabot (`.github/dependabot.yml`) opens weekly update PRs; runtime dependency and base-image bumps are titled `fix(deps): …` and ship as a patch release once merged.
 
@@ -293,7 +308,7 @@ dashboard/        Next.js app (App Router, TypeScript)
   lib/server.ts   poller, job runner, Ollama/agent clients
   components/     React UI
   lib/auth.ts     login, sessions (checked for every request by proxy.ts)
-.github/workflows release.yml (semantic-release: tag, tarball, agents, GHCR image)
+.github/workflows release.yml (semantic-release: tag, tarball, agents, GHCR image; main + dev)
 docs/logo/        logo-mark.svg (app icon), banner-dark.svg / banner-light.svg (README header)
 ```
 

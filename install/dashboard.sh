@@ -17,6 +17,8 @@
 #   PADDOCK_YES=1     non-interactive: accept all defaults
 #   PADDOCK_TARBALL   path to a prebuilt dashboard tarball (offline install)
 #   PADDOCK_SOURCE_DIR path to a local checkout to build from
+#   PADDOCK_TUI=0     plain text prompts instead of whiptail dialogs
+#   CT_OS, CT_ID, CT_PASSWORD, CT_ROOT_SSH, CT_SSH_KEY, CT_IP, …  preset the Proxmox settings
 set -euo pipefail
 
 REPO="${PADDOCK_REPO:-SplendidChip758/llama-paddock}"
@@ -50,14 +52,81 @@ ${C_B}
 EOF
 }
 
-# ask VAR "Question" default  — reads from the terminal even when piped; PADDOCK_YES skips
+# ------------------------------------------------------------------ prompts
+# Questions use whiptail dialogs when it's available and we have a terminal, otherwise
+# plain text prompts (PADDOCK_TUI=0 forces text). PADDOCK_YES=1 asks nothing.
+interactive() { [[ -z ${PADDOCK_YES-} && -r /dev/tty ]]; }
+TUI=""
+if interactive && [[ ${PADDOCK_TUI:-1} != 0 && ${TERM:-dumb} != dumb ]] && command -v whiptail >/dev/null; then TUI=1; fi
+BACKTITLE="llama-paddock · dashboard installer"
+
+# wt ARGS… — run whiptail on the terminal and print the answer; fails on Cancel/Esc
+wt() { whiptail --backtitle "$BACKTITLE" "$@" 3>&1 1>&2 2>&3 </dev/tty; }
+cancelled() { [[ -n $TUI ]] && clear; die "cancelled, nothing was created"; }
+# notice "Message" — a message box, or a warning line in text mode
+notice() { if [[ -n $TUI ]]; then wt --title " llama-paddock " --msgbox "$1" 10 68 || true; else msg_warn "$1"; fi; }
+
+# ask VAR "Question" — free text; the current value of VAR is the default ("-" clears it in text mode)
 ask() {
-  local __var=$1 __q=$2 __def=${3-} __ans=""
-  if [[ -n ${!__var-} ]]; then return; fi          # already set via environment
-  if [[ -z ${PADDOCK_YES-} && -r /dev/tty ]]; then
-    read -r -p "   ${__q}${__def:+ [${__def}]}: " __ans </dev/tty || true
+  local __var=$1 __q=$2 __ans=""
+  interactive || return 0
+  if [[ -n $TUI ]]; then
+    __ans=$(wt --title " Advanced settings " --inputbox "$__q" 9 72 "${!__var-}") || cancelled
+  else
+    read -r -p "   ${__q}${!__var:+ [${!__var}]}: " __ans </dev/tty || true
+    __ans=${__ans:-${!__var-}}
+    [[ $__ans == - ]] && __ans=""
   fi
-  printf -v "$__var" '%s' "${__ans:-$__def}"
+  printf -v "$__var" '%s' "$__ans"
+}
+
+# choose VAR "Question" tag "description" … — one of a fixed set; the current value of VAR is the default
+choose() {
+  local __var=$1 __q=$2 __ans="" __i __n __d __def=1 __tags=()
+  shift 2
+  interactive || return 0
+  for ((__i = 1; __i <= $#; __i += 2)); do __tags+=("${!__i}"); done
+  if [[ -n $TUI ]]; then
+    __ans=$(wt --title " $__q " --default-item "${!__var-}" --menu "" $((${#__tags[@]} + 7)) 76 ${#__tags[@]} "$@") || cancelled
+  else
+    echo "   ${__q}:"
+    for ((__i = 1; __i <= $#; __i += 2)); do
+      __n=$(((__i + 1) / 2)); __d=$((__i + 1))
+      printf '     %d) %-14s %s\n' "$__n" "${!__i}" "${!__d}"
+      [[ ${!__i} == "${!__var-}" ]] && __def=$__n
+    done
+    while :; do
+      read -r -p "   Choose [${__def}]: " __ans </dev/tty || true
+      __ans=${__ans:-$__def}
+      if [[ $__ans =~ ^[0-9]+$ ]] && ((__ans >= 1 && __ans <= ${#__tags[@]})); then __ans=${__tags[__ans - 1]}; break; fi
+      for __i in "${__tags[@]}"; do [[ $__ans == "$__i" ]] && break 2; done
+      msg_warn "Pick 1-${#__tags[@]}"
+    done
+  fi
+  printf -v "$__var" '%s' "$__ans"
+}
+
+# ask_secret VAR "Question" — hidden input, typed twice; blank means none,
+# or keeps the current value if VAR is already set ("-" then clears it)
+ask_secret() {
+  local __var=$1 __q=$2 __a="" __b="" __cur=${!1-}
+  interactive || return 0
+  [[ -n $__cur ]] && __q+=" (blank keeps the current one, - for none)"
+  while :; do
+    if [[ -n $TUI ]]; then
+      __a=$(wt --title " Advanced settings " --passwordbox "$__q" 9 72) || cancelled
+      [[ -z $__a ]] && break
+      __b=$(wt --title " Advanced settings " --passwordbox "Type it again to confirm." 8 72) || cancelled
+    else
+      read -r -s -p "   ${__q}: " __a </dev/tty || true; echo >/dev/tty
+      [[ -z $__a ]] && break
+      read -r -s -p "   Confirm: " __b </dev/tty || true; echo >/dev/tty
+    fi
+    [[ $__a == "$__b" ]] && break
+    notice "The passwords don't match, try again."
+  done
+  if [[ -z $__a ]]; then __a=$__cur; elif [[ $__a == - ]]; then __a=""; fi
+  printf -v "$__var" '%s' "$__a"
 }
 
 confirm() { # confirm "Question" (default yes)
@@ -76,9 +145,147 @@ quiet() {
   return $rc
 }
 
+# First host of the network an IP/CIDR is in, the usual gateway: 192.168.30.100/24 → 192.168.30.1.
+# Prints nothing for input it can't use (dhcp, no prefix, /31, /32).
+guess_gateway() {
+  [[ $1 =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})/([0-9]{1,2})$ ]] || return 0
+  local -a o=("${BASH_REMATCH[@]:1:4}")
+  local bits=${BASH_REMATCH[5]}
+  (( bits >= 1 && bits <= 30 )) || return 0
+  local x
+  for x in "${o[@]}"; do (( 10#$x <= 255 )) || return 0; done
+  local ip=$(( 10#${o[0]} << 24 | 10#${o[1]} << 16 | 10#${o[2]} << 8 | 10#${o[3]} ))
+  local gw=$(( (ip & (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF) + 1 ))
+  echo "$(( gw >> 24 & 255 )).$(( gw >> 16 & 255 )).$(( gw >> 8 & 255 )).$(( gw & 255 ))"
+}
+
 version_ge() { [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" == "$2" ]]; }
 
 # ================================================================= Proxmox host
+# storage_items CONTENT — active storages that hold CONTENT (rootdir, vztmpl): "name" and
+# "type · N GiB free" on alternate lines, ready for choose()
+storage_items() {
+  pvesm status -content "$1" 2>/dev/null \
+    | awk 'NR > 1 && $3 == "active" { printf "%s\n%s · %.0f GiB free\n", $1, $2, $6 / 1048576 }'
+}
+
+bridge_items() {
+  local b addr
+  for b in $(ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//'); do
+    addr=$(ip -4 -o addr show dev "$b" 2>/dev/null | awk '{print $4; exit}')
+    printf '%s\n%s\n' "$b" "${addr:-bridge}"
+  done
+}
+
+# choose_from VAR "Question" ITEMS-COMMAND… — choose() over a command's output, or free text if it lists nothing
+choose_from() {
+  local __v=$1 __q=$2 __items=()
+  shift 2
+  mapfile -t __items < <("$@")
+  if ((${#__items[@]})); then choose "$__v" "$__q" "${__items[@]}"; else ask "$__v" "$__q"; fi
+}
+
+advanced_settings() {
+  choose CT_OS "Distribution" ubuntu "Ubuntu, latest LTS" debian "Debian, latest stable"
+  ask CT_ID "Container ID"
+  ask CT_HOSTNAME "Hostname"
+  ask CT_CORES "CPU cores"
+  ask CT_RAM "Memory (MiB)"
+  ask CT_DISK "Disk size (GiB)"
+  choose_from CT_STORAGE "Storage for the root disk" storage_items rootdir
+  choose_from CT_TSTORAGE "Storage for the CT template" storage_items vztmpl
+  choose_from CT_BRIDGE "Network bridge" bridge_items
+  ask CT_VLAN "VLAN tag (blank for none)"
+  ask CT_IP "IPv4 address in CIDR (e.g. 192.168.30.100/24) or dhcp"
+  if [[ $CT_IP == dhcp ]]; then
+    CT_GW=""
+  else
+    # follow the IP's subnet unless a gateway was typed in by hand
+    if [[ -z $CT_GW || $CT_GW == "${GW_GUESS-}" ]]; then CT_GW=$(guess_gateway "$CT_IP"); fi
+    GW_GUESS=$CT_GW
+    ask CT_GW "Gateway"
+  fi
+  ask_secret CT_PASSWORD "Root password (blank: none, use 'pct enter' from this host)"
+  choose CT_ROOT_SSH "Root SSH login" \
+    key      "Key only (the distro default)" \
+    password "Key or root password" \
+    off      "No root login over SSH"
+  while [[ $CT_ROOT_SSH == password && -z $CT_PASSWORD ]]; do
+    notice "Password SSH login needs a root password."
+    ask_secret CT_PASSWORD "Root password"
+  done
+  if [[ $CT_ROOT_SSH != off ]]; then ask CT_SSH_KEY "SSH public key file for root (blank to skip)"; fi
+}
+
+# Validates the settings; in an interactive run shows the first problem and returns 1
+check_settings() {
+  local err=""
+  bad() { [[ -n $err ]] || err=$1; }
+  [[ $CT_OS == ubuntu || $CT_OS == debian ]] || bad "Unknown distribution '$CT_OS': use ubuntu or debian."
+  if [[ $CT_ID =~ ^[0-9]+$ ]] && ((CT_ID >= 100)); then
+    if pct status "$CT_ID" &>/dev/null; then bad "Container $CT_ID already exists."; fi
+  else
+    bad "Container ID must be a number of 100 or more."
+  fi
+  [[ $CT_HOSTNAME =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] || bad "Hostname may only use letters, digits and '-'."
+  [[ $CT_CORES =~ ^[0-9]+$ ]] && ((CT_CORES >= 1)) || bad "CPU cores must be a whole number."
+  [[ $CT_RAM =~ ^[0-9]+$ ]] && ((CT_RAM >= 512)) || bad "Memory must be at least 512 MiB."
+  [[ $CT_DISK =~ ^[0-9]+$ ]] && ((CT_DISK >= 4)) || bad "Disk size must be at least 4 GiB."
+  [[ -z $CT_VLAN || ($CT_VLAN =~ ^[0-9]+$ && CT_VLAN -ge 1 && CT_VLAN -le 4094) ]] || bad "VLAN tag must be 1-4094, or blank."
+  if [[ $CT_IP != dhcp ]]; then
+    [[ -n $(guess_gateway "$CT_IP") ]] || bad "IP must look like 192.168.30.100/24 (prefix /1-/30), or be dhcp."
+    [[ -z $CT_GW || $CT_GW =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || bad "Gateway must be an IPv4 address."
+  fi
+  case $CT_ROOT_SSH in
+    key | off) ;;
+    password) [[ -n $CT_PASSWORD ]] || bad "Root SSH login 'password' needs a root password." ;;
+    *) bad "Root SSH login must be key, password or off." ;;
+  esac
+  [[ $CT_ROOT_SSH == off || -z $CT_SSH_KEY || -f $CT_SSH_KEY ]] || bad "SSH key file not found: $CT_SSH_KEY"
+  unset -f bad
+
+  [[ -z $err ]] && return 0
+  interactive || die "$err"
+  notice "$err"
+  return 1
+}
+
+settings_summary() {
+  local os="Ubuntu, latest LTS" net=$CT_IP root="no password (pct enter)"
+  [[ $CT_OS == debian ]] && os="Debian, latest stable"
+  [[ $CT_IP != dhcp ]] && net+=" via ${CT_GW:-no gateway}"
+  [[ -n $CT_PASSWORD ]] && root="password set"
+  root+=", SSH: ${CT_ROOT_SSH}"
+  [[ $CT_ROOT_SSH != off && -n $CT_SSH_KEY ]] && root+=" + key"
+  printf '%-14s %s\n' \
+    "Distribution" "$os" \
+    "Container" "$CT_ID ($CT_HOSTNAME)" \
+    "CPU / RAM" "$CT_CORES cores / $CT_RAM MiB" \
+    "Disk" "$CT_DISK GiB on $CT_STORAGE" \
+    "Template" "stored on $CT_TSTORAGE" \
+    "Network" "$net on $CT_BRIDGE${CT_VLAN:+, VLAN $CT_VLAN}" \
+    "Root login" "$root" \
+    "Dashboard" "port $PORT, version $VERSION"
+}
+
+# Shows the summary; 0 = create, 1 = change settings
+confirm_settings() {
+  if [[ -n $TUI ]]; then
+    local rc=0
+    whiptail --backtitle "$BACKTITLE" --title " Create the container? " --yes-button "Create" --no-button "Change" \
+      --yesno "$(settings_summary)" 17 76 </dev/tty || rc=$?
+    ((rc == 255)) && cancelled
+    return "$rc"
+  fi
+  echo
+  settings_summary | sed 's/^/   /'
+  echo
+  local a=""
+  read -r -p "   Create the container with these settings? [Y/n]: " a </dev/tty || true
+  echo
+  [[ -z $a || $a =~ ^[Yy] ]]
+}
+
 proxmox_install() {
   msg_info "Proxmox VE detected — creating a new LXC for the dashboard (set PADDOCK_LOCAL=1 to install on the host instead)"
   echo
@@ -86,28 +293,42 @@ proxmox_install() {
   # generated (perl/apt then warn on every call); C.UTF-8 exists in every template.
   export LANG=C.UTF-8; unset LANGUAGE "${!LC_@}"
 
-  local next_id; next_id=$(pvesh get /cluster/nextid)
-  local def_storage; def_storage=$(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && $3=="active" {print $1; exit}')
-  local def_tstorage; def_tstorage=$(pvesm status -content vztmpl 2>/dev/null | awk 'NR>1 && $3=="active" {print $1; exit}')
+  # defaults; anything already set in the environment (CT_ID=…, CT_IP=…) wins
+  CT_OS=${CT_OS:-ubuntu}
+  CT_ID=${CT_ID:-$(pvesh get /cluster/nextid)}
+  CT_HOSTNAME=${CT_HOSTNAME:-llama-paddock}
+  CT_PASSWORD=${CT_PASSWORD-}
+  CT_ROOT_SSH=${CT_ROOT_SSH:-key}
+  CT_SSH_KEY=${CT_SSH_KEY-}
+  CT_CORES=${CT_CORES:-2}
+  CT_RAM=${CT_RAM:-1024}
+  CT_DISK=${CT_DISK:-6}
+  CT_STORAGE=${CT_STORAGE:-$(storage_items rootdir | sed -n 1p)}
+  CT_STORAGE=${CT_STORAGE:-local-lvm}
+  CT_TSTORAGE=${CT_TSTORAGE:-$(storage_items vztmpl | sed -n 1p)}
+  CT_TSTORAGE=${CT_TSTORAGE:-local}
+  CT_BRIDGE=${CT_BRIDGE:-vmbr0}
+  CT_VLAN=${CT_VLAN-}
+  CT_IP=${CT_IP:-dhcp}
+  CT_GW=${CT_GW-}
+  if [[ $CT_IP != dhcp && -z $CT_GW ]]; then CT_GW=$(guess_gateway "$CT_IP"); GW_GUESS=$CT_GW; fi
+  CT_OS=${CT_OS,,}; CT_ROOT_SSH=${CT_ROOT_SSH,,}
 
-  ask CT_OS       "Distribution (ubuntu or debian)" "ubuntu"
-  CT_OS=${CT_OS,,}
-  [[ $CT_OS == ubuntu || $CT_OS == debian ]] || die "unknown distribution '$CT_OS' — use ubuntu or debian"
-  ask CT_ID       "Container ID" "$next_id"
-  ask CT_HOSTNAME "Hostname" "llama-paddock"
-  ask CT_CORES    "CPU cores" "2"
-  ask CT_RAM      "Memory (MiB)" "1024"
-  ask CT_DISK     "Disk size (GiB)" "6"
-  ask CT_STORAGE  "Storage for the root disk" "${def_storage:-local-lvm}"
-  ask CT_TSTORAGE "Storage for the CT template" "${def_tstorage:-local}"
-  ask CT_BRIDGE   "Network bridge" "vmbr0"
-  ask CT_VLAN     "VLAN tag (blank for none)" ""
-  ask CT_IP       "IPv4 address in CIDR (e.g. 192.168.20.50/24) or dhcp" "dhcp"
-  CT_GW="${CT_GW-}"
-  [[ $CT_IP != dhcp ]] && ask CT_GW "Gateway" ""
-  echo
-
-  pct status "$CT_ID" &>/dev/null && die "container $CT_ID already exists"
+  if interactive; then
+    local mode=default
+    choose mode "Setup mode" \
+      default  "${CT_OS^} · ${CT_CORES} CPU · ${CT_RAM} MiB · ${CT_DISK} GiB · ${CT_IP} on ${CT_BRIDGE}" \
+      advanced "Choose every setting"
+    [[ $mode == advanced ]] && advanced_settings
+    while :; do
+      if ! check_settings; then advanced_settings; continue; fi
+      confirm_settings && break
+      advanced_settings
+    done
+    [[ -n $TUI ]] && { clear; header; }
+  else
+    check_settings
+  fi
 
   local pattern label
   case $CT_OS in
@@ -129,14 +350,32 @@ proxmox_install() {
   [[ -n $CT_GW ]] && net+=",gw=${CT_GW}"
   [[ -n $CT_VLAN ]] && net+=",tag=${CT_VLAN}"
 
+  local extra=()
+  [[ -n $CT_SSH_KEY && $CT_ROOT_SSH != off ]] && extra+=(--ssh-public-keys "$CT_SSH_KEY")
+
   msg_info "Creating container $CT_ID ($CT_HOSTNAME)"
   pct create "$CT_ID" "${CT_TSTORAGE}:vztmpl/${template}" \
     --hostname "$CT_HOSTNAME" --cores "$CT_CORES" --memory "$CT_RAM" --swap 512 \
     --rootfs "${CT_STORAGE}:${CT_DISK}" --net0 "$net" \
     --unprivileged 1 --features nesting=1 --onboot 1 --ostype "$CT_OS" \
-    --tags "llama-paddock" --description "llama-paddock dashboard — https://github.com/${REPO}" >/dev/null
+    --tags "llama-paddock" --description "llama-paddock dashboard — https://github.com/${REPO}" \
+    "${extra[@]}" >/dev/null
   pct start "$CT_ID"
   msg_ok "Container $CT_ID started"
+
+  # set via stdin rather than pct create --password, so it never shows up in the process list
+  if [[ -n $CT_PASSWORD ]]; then
+    printf 'root:%s\n' "$CT_PASSWORD" | pct exec "$CT_ID" -- chpasswd || die "could not set the root password"
+    msg_ok "Root password set"
+  fi
+
+  # sshd reads the first value it finds, and sshd_config.d/ is included before the main file
+  local permit
+  case $CT_ROOT_SSH in key) permit=prohibit-password ;; password) permit=yes ;; off) permit=no ;; esac
+  pct exec "$CT_ID" -- bash -c "[[ -d /etc/ssh/sshd_config.d ]] || exit 0
+    printf '# set by the llama-paddock installer\nPermitRootLogin ${permit}\n' > /etc/ssh/sshd_config.d/10-llama-paddock.conf
+    systemctl try-reload-or-restart ssh.service >/dev/null 2>&1 || true" || msg_warn "could not configure SSH"
+  msg_ok "Root SSH login: ${CT_ROOT_SSH}"
 
   msg_info "Waiting for network"
   local i
@@ -158,6 +397,13 @@ proxmox_install() {
   local ip; ip=$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}')
   echo
   msg_ok "${C_B}llama-paddock is running in CT ${CT_ID}: http://${ip:-<ct-ip>}:${PORT}${C_0}"
+  local how=()
+  [[ -n $CT_PASSWORD ]] && how+=("console with your password")
+  [[ $CT_ROOT_SSH == password ]] && how+=("ssh root@${ip:-<ct-ip>} with your password")
+  [[ $CT_ROOT_SSH != off && -n $CT_SSH_KEY ]] && how+=("ssh root@${ip:-<ct-ip>} with your key")
+  how+=("pct enter ${CT_ID} from this host")
+  local joined; printf -v joined '%s, ' "${how[@]}"
+  echo "   Root login:  ${joined%, }"
   echo "   Update later from the Proxmox host:  pct exec ${CT_ID} -- update-llama-paddock"
 }
 

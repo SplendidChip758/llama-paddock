@@ -1,5 +1,7 @@
 # Contributing
 
+By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
+
 ## Commit messages
 
 Releases are fully automated: [semantic-release](https://github.com/semantic-release/semantic-release) reads the commit messages on `main` to decide the next version and write `CHANGELOG.md`. Every commit (or PR title, when squash-merging) must follow [Conventional Commits](https://www.conventionalcommits.org):
@@ -80,14 +82,29 @@ BREAKING CHANGE: the config.yaml and agent APIs are now stable.
 
 From then on, breaking changes bump the major version as usual.
 
+## Branches
+
+| Branch | Purpose | Releases |
+|---|---|---|
+| `dev` | Integration branch. Open feature and fix PRs against `dev`. | prereleases `vX.Y.Z-dev.N`, image `:dev` |
+| `main` | Stable. Only receives `dev` once it's ready to ship (and urgent hotfixes). | `vX.Y.Z`, image `:latest` |
+
+To ship what's on `dev`:
+
+1. Open a PR from `dev` into `main` and merge it with **Create a merge commit**, not squash. Squashing would collapse every change into one changelog line and leave `dev` and `main` with diverging histories.
+2. The release workflow on `main` publishes `vX.Y.Z` with a changelog covering everything since the last stable release.
+3. Merge `main` back into `dev` (`git checkout dev && git merge main && git push`). This brings the `chore(release)` commit and the new tag into `dev`, so the next prerelease counts up from the new version instead of reusing it.
+
+A hotfix can go straight to `main` as a normal squash-merged PR. Merge `main` back into `dev` afterwards in the same way.
+
 ## Pull requests
 
-- PRs are squash-merged, so the **PR title** becomes the commit message on `main`. The `pr-title` check fails if it isn't a valid Conventional Commit.
+- Feature and fix PRs are squash-merged, so the **PR title** becomes the commit message on `main`. The `pr-title` check fails if it isn't a valid Conventional Commit.
 - One logical change per PR keeps the changelog readable.
 
 ## How a release happens
 
-Every push to `main` runs `.github/workflows/release.yml`. If any commit since the last tag is a `feat`, `fix`, `perf`, `revert` or breaking change, semantic-release:
+Every push to `main` or `dev` runs `.github/workflows/release.yml`. If any commit since the last tag is a `feat`, `fix`, `perf`, `revert` or breaking change, semantic-release:
 
 1. works out the next version from those commits,
 2. stamps it into `dashboard/package.json`, `dashboard/package-lock.json` and both agents, and updates `CHANGELOG.md`,
@@ -95,6 +112,8 @@ Every push to `main` runs `.github/workflows/release.yml`. If any commit since t
 4. commits the bumped files as `chore(release): x.y.z [skip ci]` and tags `vX.Y.Z`,
 5. creates the GitHub release with the generated notes and the `dist/` assets.
 
-Then the `docker` job builds and pushes `ghcr.io/…/llama-paddock:X.Y.Z`, `:X.Y` and `:latest`.
+Then the `docker-build` jobs build the image on native amd64 and arm64 runners, and the `docker` job combines them into `ghcr.io/…/llama-paddock:X.Y.Z`, `:X.Y` and `:latest`.
+
+On `dev` the same steps produce a prerelease instead: version `X.Y.Z-dev.N`, a GitHub release marked as a prerelease, and images `:X.Y.Z-dev.N` and `:dev`. `:latest` and `:X.Y` are left alone.
 
 If nothing releasable landed (only `docs`, `chore`, `ci` and so on), the workflow exits without releasing.

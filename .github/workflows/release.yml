@@ -1,10 +1,16 @@
-# On pushes to main that touch shipped code, semantic-release reads the
+# On pushes to main or dev that touch shipped code, semantic-release reads the
 # Conventional Commits since the last v* tag and, if any warrant a release:
 # bumps the version in the dashboard and agents, updates CHANGELOG.md, commits
-# that back to main, tags vX.Y.Z and creates a GitHub release with the
+# that back to the branch, tags it and creates a GitHub release with the
 # dashboard tarball (used by install/dashboard.sh), both agents and SHA256SUMS.
-# The docker job then publishes that version's image to GHCR.
+# The docker jobs then publish that version's image to GHCR.
 # Config: .releaserc.json
+#
+#   main → vX.Y.Z           stable release, images :X.Y.Z, :X.Y and :latest
+#   dev  → vX.Y.Z-dev.N     GitHub prerelease, images :X.Y.Z-dev.N and :dev
+#
+# Each architecture is built on a native runner (arm64 under QEMU took ~35 min
+# and crashed npm), pushed by digest, then merged into one multi-arch tag.
 #
 # Docs, install scripts (served from main, not from releases), compose and
 # example config never trigger a run. Releasable commits that only touch those
@@ -13,7 +19,7 @@ name: release
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
     paths:
       - "dashboard/**"
       - "agent/**"
@@ -24,7 +30,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: release
+  group: release-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -38,6 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.semrel.outputs.version }}
+      prerelease: ${{ contains(steps.semrel.outputs.version, '-') }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -61,17 +68,27 @@ jobs:
           -p conventional-changelog-conventionalcommits@9
           semantic-release
 
-  docker:
+  docker-build:
     needs: release
     if: needs.release.outputs.version != ''
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            arch: amd64
+            runner: ubuntu-latest
+          - platform: linux/arm64
+            arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
       TAG: v${{ needs.release.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
-      - uses: docker/setup-qemu-action@v4
+      # GHCR names must be lowercase
+      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
       - uses: docker/setup-buildx-action@v4
       - uses: docker/login-action@v4
         with:
@@ -81,17 +98,61 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v6
         with:
-          images: ghcr.io/${{ github.repository }}
+          images: ${{ env.IMAGE }}
+          tags: type=semver,pattern={{version}},value=${{ env.TAG }}
+      - id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: ./dashboard
+          platforms: ${{ matrix.platform }}
+          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ env.IMAGE }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,scope=${{ matrix.arch }},mode=max
+      - run: |
+          mkdir -p "$RUNNER_TEMP/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "$RUNNER_TEMP/digests/${digest#sha256:}"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  docker:
+    needs: [release, docker-build]
+    runs-on: ubuntu-latest
+    env:
+      TAG: v${{ needs.release.outputs.version }}
+    steps:
+      - run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+      - uses: actions/download-artifact@v8
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # semver {{major}}.{{minor}} is skipped for prereleases automatically
+      - id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.IMAGE }}
+          flavor: latest=false
           tags: |
             type=semver,pattern={{version}},value=${{ env.TAG }}
             type=semver,pattern={{major}}.{{minor}},value=${{ env.TAG }}
-            type=raw,value=latest
-      - uses: docker/build-push-action@v7
-        with:
-          context: ./dashboard
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            type=raw,value=latest,enable=${{ needs.release.outputs.prerelease == 'false' }}
+            type=raw,value=dev,enable=${{ needs.release.outputs.prerelease == 'true' }}
+      - working-directory: ${{ runner.temp }}/digests
+        run: |
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf "$IMAGE@sha256:%s " *)
+      - run: docker buildx imagetools inspect "$IMAGE:${{ steps.meta.outputs.version }}"
