@@ -1,3 +1,9 @@
+## [0.3.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.2.0...v0.3.0) (2026-10-27)
+
+### Features
+
+* add dev branch for prereleases and update release workflow ([37ac732](https://github.com/SplendidChip758/llama-paddock/commit/37ac7328ac88ca1c26ddc12eef9b689372a0203d))
+
 ## [0.2.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.1.1...v0.2.0) (2026-10-27)
 
 ### Features
