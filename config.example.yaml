@@ -1,6 +1,8 @@
-# llama-paddock dashboard config
-# Copy to config.yaml. ${VAR} and ${VAR:-default} are expanded from the
-# container environment (.env), so tokens don't have to live in this file.
+# llama-paddock dashboard config (optional)
+# Hosts are normally added in the dashboard with "Add host". Use this file for
+# the settings below, or to define hosts declaratively; hosts listed here are
+# read-only in the UI. Copy to config.yaml. ${VAR} and ${VAR:-default} are
+# expanded from the container environment (.env), so tokens don't have to live here.
 
 poll_interval: 3        # seconds between polls of every instance
 history_points: 400     # samples kept in memory for sparklines (~20 min at 3s)

@@ -1,15 +1,32 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { fmtDur, fmtMiB, pct } from "@/lib/format";
 import type { InstanceSnapshot } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
 import { Meter, Stat, statusOf } from "./ui";
+import { HostEditor } from "./HostEditor";
 
 export function Overview() {
   const { instances, loaded, pollInterval } = usePaddock();
+  const [adding, setAdding] = useState(false);
   if (!loaded) return <div className="empty">Connecting…</div>;
-  if (!instances.length) return <div className="notice">No instances configured. Add them to <code>config.yaml</code>.</div>;
+
+  const editor = adding && <HostEditor onClose={() => setAdding(false)} />;
+  if (!instances.length) {
+    return (
+      <div className="welcome card">
+        <h1>Add your first Ollama host</h1>
+        <p className="sub">
+          Point the dashboard at an Ollama server. Install the agent on that host as well for GPU and host stats, environment
+          editing, restart and logs.
+        </p>
+        <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>
+        {editor}
+      </div>
+    );
+  }
 
   const gpus = instances.flatMap((s) => s.stats?.nvidia?.gpus ?? []);
   const vUsed = gpus.reduce((a, g) => a + (g.mem_used_mib ?? 0), 0);
@@ -25,7 +42,9 @@ export function Overview() {
             {instances.length} instance{instances.length === 1 ? "" : "s"} · refreshing every {pollInterval}s
           </div>
         </div>
+        <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>
       </div>
+      {editor}
       <div className="stats" style={{ marginBottom: 18 }}>
         <Stat k="Online" v={instances.filter((s) => s.ollama_ok).length} unit={`/ ${instances.length}`} />
         <Stat k="GPUs" v={gpus.length} />

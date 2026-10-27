@@ -8,4 +8,9 @@ services:
       - "8080:8080"
     env_file: .env
     volumes:
-      - ./config.yaml:/config/config.yaml:ro
+      - paddock-data:/data # hosts added in the UI + login; keep it across upgrades
+      # Optional: settings and read-only hosts from a file (see config.example.yaml)
+      # - ./config.yaml:/config/config.yaml:ro
+
+volumes:
+  paddock-data:

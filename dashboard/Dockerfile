@@ -19,11 +19,16 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=8080 \
     HOSTNAME=0.0.0.0 \
-    PADDOCK_CONFIG=/config/config.yaml
+    PADDOCK_CONFIG=/config/config.yaml \
+    PADDOCK_DATA_DIR=/data
 
 # standalone output = server.js + only the node_modules it needs
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
+
+# hosts added in the UI and the login; mount a volume here
+RUN mkdir -p /data && chown node:node /data
+VOLUME /data
 
 USER node
 EXPOSE 8080

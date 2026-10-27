@@ -26,6 +26,7 @@ PORT="${PADDOCK_PORT:-8080}"
 SELF_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/install/dashboard.sh"
 APP_DIR=/opt/llama-paddock
 CFG_DIR=/etc/llama-paddock
+DATA_DIR=/var/lib/llama-paddock
 SVC_USER=llama-paddock
 NODE_MIN="20.9"
 
@@ -105,8 +106,6 @@ proxmox_install() {
   CT_GW="${CT_GW-}"
   [[ $CT_IP != dhcp ]] && ask CT_GW "Gateway" ""
   echo
-  ask_first_instance
-  echo
 
   pct status "$CT_ID" &>/dev/null && die "container $CT_ID already exists"
 
@@ -151,29 +150,15 @@ proxmox_install() {
   msg_info "Installing curl in the container"
   pct exec "$CT_ID" -- bash -c "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates >/dev/null"
 
-  # run this same script inside the container, non-interactively, with the answers collected here
+  # run this same script inside the container, non-interactively
   pct exec "$CT_ID" -- env \
     PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_NESTED=1 PADDOCK_REPO="$REPO" PADDOCK_BRANCH="$BRANCH" PADDOCK_VERSION="$VERSION" PADDOCK_PORT="$PORT" \
-    FIRST_NAME="$FIRST_NAME" FIRST_OLLAMA="$FIRST_OLLAMA" FIRST_AGENT="$FIRST_AGENT" FIRST_TOKEN="$FIRST_TOKEN" \
     bash -c "curl -fsSL '$SELF_URL' | bash"
 
   local ip; ip=$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}')
   echo
   msg_ok "${C_B}llama-paddock is running in CT ${CT_ID}: http://${ip:-<ct-ip>}:${PORT}${C_0}"
   echo "   Update later from the Proxmox host:  pct exec ${CT_ID} -- update-llama-paddock"
-}
-
-# Optional: first Ollama instance, so the dashboard isn't empty on first open
-ask_first_instance() {
-  [[ -n ${PADDOCK_YES-} ]] || echo "   ${C_B}First Ollama instance${C_0} (leave the URL blank to skip — you can add more later)"
-  ask FIRST_OLLAMA "Ollama URL (e.g. http://192.168.30.101:11434)" ""
-  FIRST_NAME="${FIRST_NAME-}"; FIRST_AGENT="${FIRST_AGENT-}"; FIRST_TOKEN="${FIRST_TOKEN-}"
-  if [[ -n $FIRST_OLLAMA ]]; then
-    local host; host=$(sed -E 's#^https?://##; s#[:/].*$##' <<<"$FIRST_OLLAMA")
-    ask FIRST_NAME  "Display name" "$host"
-    ask FIRST_AGENT "Agent URL (blank if no agent yet)" "http://${host}:11435"
-    [[ -n $FIRST_AGENT ]] && ask FIRST_TOKEN "Agent token (printed by the agent installer)" ""
-  fi
 }
 
 # ================================================================= local install
@@ -270,34 +255,20 @@ fetch_app() {
 write_config() {
   mkdir -p "$CFG_DIR"
   if [[ ! -f $CFG_DIR/config.yaml ]]; then
-    {
-      echo "# llama-paddock config — restart after editing: systemctl restart llama-paddock"
-      echo "# Tokens can live in ${CFG_DIR}/llama-paddock.env and be referenced as \${VAR}."
-      echo "poll_interval: 3"
-      echo "history_points: 400"
-      echo
-      if [[ -n ${FIRST_OLLAMA-} ]]; then
-        local id; id=$(tr 'A-Z' 'a-z' <<<"${FIRST_NAME:-instance-1}" | tr -c -- '-a-z0-9_.\n' '-' | tr -s '-' | sed 's/^-//; s/-$//' | head -c 40)
-        echo "instances:"
-        echo "  - id: ${id}"
-        echo "    name: \"${FIRST_NAME//\"/}\""
-        echo "    ollama_url: ${FIRST_OLLAMA}"
-        if [[ -n ${FIRST_AGENT-} ]]; then
-          echo "    agent_url: ${FIRST_AGENT}"
-          echo "    agent_token: \${AGENT_TOKEN_1}"
-        fi
-      else
-        echo "instances: []"
-        echo
-        echo "# Example:"
-        echo "# instances:"
-        echo "#   - id: ollama-01"
-        echo "#     name: ollama-01"
-        echo "#     ollama_url: http://192.168.30.101:11434"
-        echo "#     agent_url: http://192.168.30.101:11435"
-        echo "#     agent_token: \${AGENT_TOKEN_1}"
-      fi
-    } > "$CFG_DIR/config.yaml"
+    cat > "$CFG_DIR/config.yaml" <<EOF
+# llama-paddock config. Restart after editing: systemctl restart llama-paddock
+poll_interval: 3        # seconds between polls of every host
+history_points: 400     # samples kept in memory for sparklines
+
+# Add hosts in the dashboard (Add host). Hosts listed here also work, but are
+# read-only in the UI. Tokens can live in llama-paddock.env as \${VAR}.
+# instances:
+#   - id: ollama-01
+#     name: ollama-01
+#     ollama_url: http://192.168.30.101:11434
+#     agent_url: http://192.168.30.101:11435
+#     agent_token: \${AGENT_TOKEN_1}
+EOF
     msg_ok "Wrote $CFG_DIR/config.yaml"
   else
     msg_ok "Keeping existing $CFG_DIR/config.yaml"
@@ -311,11 +282,12 @@ PORT=${PORT}
 HOSTNAME=0.0.0.0
 PADDOCK_CONFIG=${CFG_DIR}/config.yaml
 NEXT_TELEMETRY_DISABLED=1
-# Dashboard login (HTTP basic auth). Empty both to disable, e.g. behind an auth proxy.
+# Initial login. You must change the password on first sign-in; after that it
+# lives (hashed) in ${DATA_DIR}/auth.json and these two lines are ignored.
+# Forgot it? rm ${DATA_DIR}/auth.json && systemctl restart llama-paddock
 PADDOCK_USERNAME=admin
 PADDOCK_PASSWORD=${ADMIN_PASSWORD}
-# Agent tokens referenced from config.yaml
-AGENT_TOKEN_1=${FIRST_TOKEN-}
+# PADDOCK_AUTH=off disables the login, e.g. behind an auth proxy.
 EOF
     msg_ok "Wrote $CFG_DIR/llama-paddock.env"
   fi
@@ -346,6 +318,10 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadOnlyPaths=${APP_DIR} ${CFG_DIR}
+# hosts added in the UI and the login live here (${DATA_DIR})
+StateDirectory=llama-paddock
+StateDirectoryMode=0700
+Environment=PADDOCK_DATA_DIR=${DATA_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -367,12 +343,7 @@ local_install() {
   local updating=""
   [[ -f $APP_DIR/server.js ]] && updating=1
 
-  if [[ -z $updating ]]; then
-    ask_first_instance
-    [[ -n ${PADDOCK_YES-} ]] || echo
-  else
-    msg_info "Existing install found ($(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)) — updating, config is kept"
-  fi
+  [[ -n $updating ]] && msg_info "Existing install found ($(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)) — updating, config is kept"
 
   ensure_deps
   id "$SVC_USER" &>/dev/null || useradd --system --home-dir "$APP_DIR" --no-create-home --shell /usr/sbin/nologin "$SVC_USER"
@@ -416,7 +387,7 @@ local_install() {
   echo
   echo "   ${C_B}llama-paddock ${INSTALLED_VERSION}${C_0}  →  http://${ip:-localhost}:${PORT}"
   if [[ -z $updating && -n ${ADMIN_PASSWORD-} ]]; then
-    echo "   Login:   admin / ${ADMIN_PASSWORD}   (change in ${CFG_DIR}/llama-paddock.env)"
+    echo "   Login:   admin / ${ADMIN_PASSWORD}   (you'll choose a new password on first sign-in)"
   fi
   echo "   Config:  ${CFG_DIR}/config.yaml   then: systemctl restart llama-paddock"
   echo "   Update:  update-llama-paddock"

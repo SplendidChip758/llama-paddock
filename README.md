@@ -100,7 +100,7 @@ Either way it:
 - installs Node.js if it's missing or older than 18.15 (distro package, falling back to NodeSource 22.x),
 - installs the agent to `/opt/llama-paddock-agent` and enables `llama-paddock-agent.service`,
 - writes `/etc/llama-paddock-agent.env` (mode 600) with a generated token,
-- prints the `ollama_url`, `agent_url` and `agent_token` to paste into the dashboard config.
+- prints the Ollama URL, agent URL and agent token to enter under **Add host** in the dashboard.
 
 Re-running it, or running `update-llama-paddock-agent` inside the container, updates the agent and **keeps the token**. To share one token across hosts, set `PADDOCK_AGENT_TOKEN=<token>` before the command. Running `bash install/agent.sh` from a clone of the repo uses the agent files in the clone.
 
@@ -155,8 +155,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-pa
 **On a Proxmox host** it asks for:
 - distribution (`ubuntu` or `debian`, default `ubuntu`),
 - CT ID, hostname, cores, RAM and disk (defaults: next free ID, 2 cores, 1 GiB, 6 GiB),
-- storage, bridge, VLAN tag, and DHCP or a static IP,
-- optionally your first Ollama instance and its agent token.
+- storage, bridge, VLAN tag, and DHCP or a static IP.
 
 It then downloads the latest template for the distribution you pick (latest **Ubuntu LTS** by default, or **Debian**), creates an unprivileged container, and installs the dashboard inside it.
 
@@ -164,10 +163,10 @@ It then downloads the latest template for the distribution you pick (latest **Ub
 - installs Node.js 22 if needed,
 - downloads the prebuilt dashboard from the latest GitHub release, or builds from `main` if there's no release yet,
 - installs it to `/opt/llama-paddock` as the `llama-paddock` systemd service, running as an unprivileged user,
-- writes `/etc/llama-paddock/config.yaml` and `/etc/llama-paddock/llama-paddock.env`, including a generated `admin` password,
+- writes `/etc/llama-paddock/config.yaml` and `/etc/llama-paddock/llama-paddock.env`, including a generated initial `admin` password,
 - prints the URL and login.
 
-Add instances by editing `/etc/llama-paddock/config.yaml`, then run `systemctl restart llama-paddock`. Agent tokens can go in the `.env` file and be referenced as `${AGENT_TOKEN_1}`.
+Open the URL, sign in with the printed password, and choose your own password (required on first sign-in). Then use **Add host** to add your Ollama servers. Hosts added in the UI and the login are stored in `/var/lib/llama-paddock`.
 
 Update with `update-llama-paddock` inside the container, or `pct exec <ctid> -- update-llama-paddock` from the host. Your config is kept.
 
@@ -185,14 +184,23 @@ Example: `PADDOCK_VERSION=v0.1.0 bash -c "$(curl -fsSL …/install/dashboard.sh)
 A multi-arch image is published to GHCR for every release:
 
 ```bash
-cp config.example.yaml config.yaml   # instance names, URLs
-cp .env.example .env                 # agent tokens, dashboard login
+cp .env.example .env    # initial dashboard login
 docker compose up -d
 ```
 
+Sign in at `http://<docker-host>:8080`, choose a new password, then **Add host**. Hosts and the login are kept in the `paddock-data` volume (`/data`).
+
 To build the image yourself instead, swap `image:` for `build: ./dashboard` in `docker-compose.yml`. In an unprivileged LXC, Docker needs `nesting=1,keyctl=1`.
 
-`config.yaml` expands `${VAR}` from the environment, so tokens stay in `.env`. Login is HTTP basic auth from `PADDOCK_USERNAME` / `PADDOCK_PASSWORD`. Leave both empty if a reverse proxy with auth already sits in front of it. `/api/healthz` stays open for health checks.
+`config.yaml` is optional: mount it for `poll_interval` / `history_points`, or to define hosts declaratively (those are read-only in the UI). It expands `${VAR}` from the environment, so tokens can stay in `.env`.
+
+### Login
+
+- `PADDOCK_USERNAME` / `PADDOCK_PASSWORD` set the **initial** login. The first sign-in requires choosing a new password, which is stored hashed (scrypt) in `auth.json` in the data directory. After that the env values are ignored.
+- If `PADDOCK_PASSWORD` is empty, a random one is printed to the log on first start.
+- Change it later from the account menu (top right). Changing it signs out other sessions. Five wrong attempts lock that address out for 5 minutes.
+- **Forgot the password:** delete `auth.json` from the data directory (`/var/lib/llama-paddock`, or the Docker volume) and restart. The login is recreated from the env values.
+- `PADDOCK_AUTH=off` disables the login, e.g. when a reverse proxy with auth already sits in front of it. `/api/healthz` stays open for health checks.
 
 ### From source
 
@@ -202,7 +210,7 @@ Requires Node 20.9 or newer:
 cd dashboard
 npm ci && npm run build
 cp -r .next/static .next/standalone/.next/static
-PADDOCK_CONFIG=../config.yaml PORT=8080 node .next/standalone/server.js
+PADDOCK_DATA_DIR=../data PORT=8080 node .next/standalone/server.js
 ```
 
 ## Releases
@@ -284,12 +292,12 @@ dashboard/        Next.js app (App Router, TypeScript)
   app/api/        route handlers (the JSON API above)
   lib/server.ts   poller, job runner, Ollama/agent clients
   components/     React UI
-  proxy.ts        optional basic auth
+  lib/auth.ts     login, sessions (checked for every request by proxy.ts)
 .github/workflows release.yml (semantic-release: tag, tarball, agents, GHCR image)
 docs/logo/        logo-mark.svg (app icon), banner-dark.svg / banner-light.svg (README header)
 ```
 
-Development: `cd dashboard && npm install && PADDOCK_CONFIG=../config.yaml npm run dev`.
+Development: `cd dashboard && npm install && PADDOCK_DATA_DIR=../data npm run dev`.
 
 ## Limitations
 

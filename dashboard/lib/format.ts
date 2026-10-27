@@ -57,7 +57,14 @@ export async function api<T = any>(path: string, opts: { method?: string; body?:
   } catch {
     /* empty body */
   }
-  if (!r.ok) throw new Error(data?.detail ?? `HTTP ${r.status}`);
+  if (!r.ok) {
+    // session expired or first-login password change pending: send the browser to the right page
+    if (typeof window !== "undefined" && !path.startsWith("/api/auth/")) {
+      if (r.status === 401) window.location.assign(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+      else if (r.status === 403 && data?.code === "must_change") window.location.assign("/change-password");
+    }
+    throw new Error(data?.detail ?? `HTTP ${r.status}`);
+  }
   return data as T;
 }
 

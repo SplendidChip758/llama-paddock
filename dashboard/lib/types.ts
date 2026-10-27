@@ -94,7 +94,11 @@ export interface InstanceSnapshot {
   name: string;
   tags: string[];
   ollama_url: string;
+  agent_url: string | null;
   has_agent: boolean;
+  has_token: boolean;
+  /** "config": from config.yaml (read-only here); "ui": added in the dashboard. */
+  source: "config" | "ui";
   ollama_ok: boolean;
   ollama_error: string | null;
   agent_ok: boolean;

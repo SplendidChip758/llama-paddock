@@ -10,10 +10,12 @@ import { ModelsTab } from "./ModelsTab";
 import { EnvTab } from "./EnvTab";
 import { LogsTab } from "./LogsTab";
 import { TABS, type Tab } from "@/lib/tabs";
+import { HostEditor } from "./HostEditor";
 
 export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
   const { instances, loaded, toast } = usePaddock();
   const [restarting, setRestarting] = useState(false);
+  const [editing, setEditing] = useState(false);
   const st = instances.find((i) => i.id === id);
 
   if (!loaded) return <div className="empty">Connecting…</div>;
@@ -52,14 +54,20 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
             {svc && <span>service: {svc.active}{svc.sub ? `/${svc.sub}` : ""}</span>}
           </div>
         </div>
-        {st.has_agent && (
-          <div className="row">
+        <div className="row">
+          {st.source === "ui" ? (
+            <button className="btn" onClick={() => setEditing(true)}>Edit host</button>
+          ) : (
+            <span className="chip" title="Defined in config.yaml. Edit it there and restart the dashboard.">config.yaml</span>
+          )}
+          {st.has_agent && (
             <button className="btn" onClick={restart} disabled={restarting}>
               {restarting ? "Restarting…" : "Restart Ollama"}
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
+      {editing && <HostEditor host={st} onClose={() => setEditing(false)} />}
       {st.ollama_error && <div className="notice bad">Ollama: {st.ollama_error}</div>}
       {st.agent_error && <div className="notice warn">Agent: {st.agent_error}</div>}
       <nav className="tabs">

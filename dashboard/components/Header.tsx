@@ -6,9 +6,10 @@ import { usePaddock } from "./PaddockProvider";
 import { JobsDrawer } from "./JobsDrawer";
 import { statusOf } from "./ui";
 import { Logo } from "./Logo";
+import { api } from "@/lib/format";
 
 export function Header() {
-  const { instances, jobs, setJobsOpen } = usePaddock();
+  const { instances, jobs, setJobsOpen, me } = usePaddock();
   const path = usePathname();
   const m = path.match(/^\/i\/([^/]+)(?:\/([^/]+))?/);
   const currentId = m ? decodeURIComponent(m[1]) : null;
@@ -37,8 +38,25 @@ export function Header() {
           <span>Jobs</span>
           <span className={`pill ${running ? "live" : ""}`}>{running || jobs.length}</span>
         </button>
+        {me?.auth && me.username && <UserMenu username={me.username} />}
       </header>
       <JobsDrawer />
     </>
+  );
+}
+
+function UserMenu({ username }: { username: string }) {
+  const signOut = async () => {
+    await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    window.location.assign("/login");
+  };
+  return (
+    <details className="usermenu">
+      <summary title="Account">{username}</summary>
+      <div className="menu">
+        <Link href="/change-password">Change password</Link>
+        <button onClick={signOut}>Sign out</button>
+      </div>
+    </details>
   );
 }

@@ -1,6 +1,8 @@
 import "server-only";
 import crypto from "node:crypto";
-import { loadSettings, type Instance, type Settings } from "./config";
+import {
+  loadSettings, makeId, normalizeTags, normalizeUrl, saveUiInstances, type Instance, type InstanceInput, type Settings,
+} from "./config";
 import type { AgentStats, HistoryPoint, InstanceSnapshot, JobInfo, PsModel } from "./types";
 
 // ============================================================================ errors
@@ -59,7 +61,8 @@ class InstanceState {
   snapshot(): InstanceSnapshot {
     const i = this.inst;
     return {
-      id: i.id, name: i.name, tags: i.tags, ollama_url: i.ollama_url, has_agent: !!i.agent_url,
+      id: i.id, name: i.name, tags: i.tags, ollama_url: i.ollama_url, agent_url: i.agent_url, has_agent: !!i.agent_url,
+      has_token: !!i.agent_token, source: i.source,
       ollama_ok: this.ollama_ok, ollama_error: this.ollama_error, agent_ok: this.agent_ok,
       agent_error: this.agent_error, version: this.version, ps: this.ps, stats: this.stats, updated: this.updated,
     };
@@ -107,6 +110,95 @@ export function getInstance(id: string): Instance {
 export function getState(id: string): InstanceState {
   getInstance(id);
   return paddock().instances.get(id)!;
+}
+
+// ============================================================================ hosts added in the UI
+function hostFields(body: InstanceInput, existing?: Instance) {
+  let ollama_url: string | null, agent_url: string | null;
+  try {
+    ollama_url = normalizeUrl(body.ollama_url, "Ollama URL");
+    agent_url = normalizeUrl(body.agent_url, "Agent URL");
+  } catch (e) {
+    throw new HttpError(400, (e as Error).message);
+  }
+  if (!ollama_url) throw new HttpError(400, "Ollama URL is required");
+  const name = String(body.name ?? "").trim().slice(0, 80) || new URL(ollama_url).hostname;
+  const token = String(body.agent_token ?? "").trim();
+  return {
+    name,
+    ollama_url,
+    agent_url,
+    // blank keeps the stored token; no agent means no token
+    agent_token: agent_url ? token || existing?.agent_token || null : null,
+    tags: normalizeTags(body.tags),
+  };
+}
+
+function editable(id: string): InstanceState {
+  const st = getState(id);
+  if (st.inst.source !== "ui") throw new HttpError(409, `${st.inst.name} is defined in config.yaml; edit it there`);
+  return st;
+}
+
+function persistHosts(p: Paddock) {
+  saveUiInstances([...p.instances.values()].map((s) => s.inst));
+}
+
+export function addInstance(body: InstanceInput): Instance {
+  const p = paddock();
+  const fields = hostFields(body);
+  const inst: Instance = { id: makeId(fields.name, new Set(p.instances.keys())), ...fields, source: "ui" };
+  p.instances.set(inst.id, new InstanceState(inst, p.settings.history_points));
+  persistHosts(p);
+  return inst;
+}
+
+export function updateInstance(id: string, body: InstanceInput): Instance {
+  const p = paddock();
+  const st = editable(id);
+  const prev = st.inst;
+  const inst: Instance = { ...prev, ...hostFields(body, prev) };
+  // New endpoints mean the old status and history no longer apply.
+  const moved = inst.ollama_url !== prev.ollama_url || inst.agent_url !== prev.agent_url || inst.agent_token !== prev.agent_token;
+  if (moved) p.instances.set(id, new InstanceState(inst, p.settings.history_points));
+  else st.inst = inst;
+  persistHosts(p);
+  return inst;
+}
+
+export function removeInstance(id: string) {
+  const p = paddock();
+  editable(id);
+  p.instances.delete(id);
+  persistHosts(p);
+}
+
+export interface CheckResult {
+  ok: boolean;
+  detail: string;
+}
+
+/** Try the URLs/token from the host form without saving. A blank token falls back to the stored one for `id`. */
+export async function testConnection(body: InstanceInput & { id?: unknown }) {
+  const existing = typeof body.id === "string" ? paddock().instances.get(body.id)?.inst : undefined;
+  const f = hostFields(body, existing);
+  const probe: Instance = { id: "probe", ...f, source: "ui" };
+  const [o, a] = await Promise.allSettled([
+    ollama<{ version: string }>(probe, "GET", "/api/version", undefined, 5000),
+    probe.agent_url ? agent<AgentStats>(probe, "GET", "/stats", undefined, 10_000) : Promise.resolve(null),
+  ]);
+  const ollamaResult: CheckResult =
+    o.status === "fulfilled" ? { ok: true, detail: `Ollama ${o.value.version}` } : { ok: false, detail: errText(o.reason) };
+  let agentResult: CheckResult | null = null;
+  if (probe.agent_url) {
+    if (a.status === "fulfilled" && a.value) {
+      const gpus = a.value.nvidia?.gpus?.length ?? 0;
+      agentResult = { ok: true, detail: `${a.value.system.hostname} (${a.value.platform ?? "linux"}) · ${gpus} GPU${gpus === 1 ? "" : "s"}` };
+    } else {
+      agentResult = { ok: false, detail: a.status === "rejected" ? errText(a.reason) : "no response" };
+    }
+  }
+  return { ollama: ollamaResult, agent: agentResult };
 }
 
 // ============================================================================ upstream calls

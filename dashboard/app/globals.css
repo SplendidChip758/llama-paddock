@@ -206,6 +206,43 @@ pre.logs .wrn { color: var(--warn); }
 .toast.bad { border-left-color: var(--bad); }
 .toast.ok { border-left-color: var(--ok); }
 
+/* account menu */
+.usermenu { position: relative; flex: none; }
+.usermenu summary {
+  list-style: none; cursor: pointer; padding: 6px 12px; border-radius: 999px; color: var(--muted);
+  border: 1px solid var(--line); background: var(--panel);
+}
+.usermenu summary::-webkit-details-marker { display: none; }
+.usermenu summary::after { content: " ▾"; font-size: 11px; }
+.usermenu[open] summary, .usermenu summary:hover { color: var(--text); }
+.usermenu .menu {
+  position: absolute; right: 0; top: calc(100% + 6px); min-width: 180px; padding: 6px; z-index: 25;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  display: flex; flex-direction: column;
+}
+.usermenu .menu a, .usermenu .menu button {
+  text-align: left; padding: 7px 10px; border-radius: 6px; background: none; border: none; cursor: pointer; font-size: 13px;
+}
+.usermenu .menu a:hover, .usermenu .menu button:hover { background: var(--panel2); }
+
+/* login / change password */
+main.authwrap { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; max-width: none; }
+.authcard { width: min(400px, 100%); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 28px 26px; }
+.authlogo { display: flex; justify-content: center; margin-bottom: 22px; }
+.authcard h1 { font-size: 19px; margin-bottom: 16px; }
+.authcard .sub { margin: -6px 0 16px; font-size: 13px; }
+.authfoot { margin-top: 16px; }
+.btn.wide { width: 100%; padding: 9px 12px; font-size: 14px; }
+
+/* host editor, empty state */
+.checks { display: grid; gap: 6px; padding: 10px 12px; background: var(--bg2); border-radius: 8px; font-size: 13px; }
+.checks > div { display: flex; align-items: baseline; gap: 8px; word-break: break-word; }
+.checks .dot { transform: translateY(-1px); }
+.welcome { max-width: 560px; margin: 8vh auto 0; padding: 28px; text-align: center; }
+.welcome h1 { margin-bottom: 8px; }
+.welcome .sub { margin: 0 0 18px; }
+code { font-family: var(--mono); font-size: .92em; background: var(--panel2); padding: 1px 5px; border-radius: 4px; }
+
 @media (max-width: 720px) {
   main { padding: 16px; }
   .g2, .g3 { grid-template-columns: 1fr; }

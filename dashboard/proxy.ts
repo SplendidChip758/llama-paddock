@@ -1,35 +1,40 @@
 import { NextResponse, type NextRequest } from "next/server";
+import { SESSION_COOKIE, authEnabled, readSession } from "./lib/auth";
 
-/** Optional HTTP basic auth, enabled when PADDOCK_USERNAME and PADDOCK_PASSWORD are both set. */
+const AUTH_PAGES = ["/login", "/change-password"];
+
+/** Session check for every page and API route; see lib/auth.ts. */
 export function proxy(req: NextRequest) {
-  const user = process.env.PADDOCK_USERNAME;
-  const pass = process.env.PADDOCK_PASSWORD;
-  if (!user || !pass) return NextResponse.next();
+  const { pathname, search } = req.nextUrl;
+  const isApi = pathname.startsWith("/api/");
 
-  const header = req.headers.get("authorization") ?? "";
-  if (header.toLowerCase().startsWith("basic ")) {
-    try {
-      const decoded = atob(header.slice(6));
-      const sep = decoded.indexOf(":");
-      if (sep >= 0 && safeEqual(decoded.slice(0, sep), user) && safeEqual(decoded.slice(sep + 1), pass)) {
-        return NextResponse.next();
-      }
-    } catch {
-      /* fall through */
-    }
+  if (!authEnabled()) {
+    return AUTH_PAGES.includes(pathname) ? NextResponse.redirect(new URL("/", req.url)) : NextResponse.next();
   }
-  return new NextResponse("Authentication required", {
-    status: 401,
-    headers: { "WWW-Authenticate": 'Basic realm="llama-paddock"' },
-  });
-}
 
-function safeEqual(a: string, b: string) {
-  let diff = a.length ^ b.length;
-  for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
-  return diff === 0;
+  const session = readSession(req.cookies.get(SESSION_COOKIE)?.value);
+
+  if (pathname === "/login" || pathname === "/api/auth/login") {
+    if (session && pathname === "/login") return NextResponse.redirect(new URL(session.mustChange ? "/change-password" : "/", req.url));
+    return NextResponse.next();
+  }
+
+  if (!session) {
+    if (isApi) return NextResponse.json({ detail: "not signed in" }, { status: 401 });
+    const login = new URL("/login", req.url);
+    if (pathname !== "/") login.searchParams.set("next", pathname + search);
+    return NextResponse.redirect(login);
+  }
+
+  // First login: nothing but the password change until the initial password is replaced.
+  if (session.mustChange && pathname !== "/change-password" && !pathname.startsWith("/api/auth/")) {
+    if (isApi) return NextResponse.json({ detail: "password change required", code: "must_change" }, { status: 403 });
+    return NextResponse.redirect(new URL("/change-password", req.url));
+  }
+
+  return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/((?!api/healthz|_next/static|_next/image|favicon.ico).*)"],
+  matcher: ["/((?!api/healthz|_next/static|_next/image|favicon.ico|icon.svg).*)"],
 };

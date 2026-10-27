@@ -95,7 +95,7 @@ proxmox_install() {
 
   local ip; ip=$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}')
   echo
-  msg_ok "Agent installed in CT ${CT_ID}.  In the dashboard config use:  agent_url: http://${ip:-<ct-ip>}:${AGENT_PORT}"
+  msg_ok "Agent installed in CT ${CT_ID}.  In the dashboard, Add host with agent URL http://${ip:-<ct-ip>}:${AGENT_PORT}"
   echo "   Update later:  pct exec ${CT_ID} -- update-llama-paddock-agent"
 }
 
@@ -205,13 +205,13 @@ EOF
 
   local ip; ip=$(hostname -I 2>/dev/null | awk '{print $1}')
   echo
-  echo "   ${C_B}Add this host to the dashboard config:${C_0}"
-  echo "     ollama_url: http://${ip:-<this-host>}:11434"
-  echo "     agent_url:  http://${ip:-<this-host>}:${AGENT_PORT}"
+  echo "   ${C_B}Add this host in the dashboard${C_0} (Add host):"
+  echo "     Ollama URL:   http://${ip:-<this-host>}:11434"
+  echo "     Agent URL:    http://${ip:-<this-host>}:${AGENT_PORT}"
   if [[ -n $new_token ]]; then
-    echo "     agent_token: ${C_B}${new_token}${C_0}"
+    echo "     Agent token:  ${C_B}${new_token}${C_0}"
   else
-    echo "     agent_token: (unchanged — see PADDOCK_AGENT_TOKEN in $ENV_FILE)"
+    echo "     Agent token:  (unchanged — see PADDOCK_AGENT_TOKEN in $ENV_FILE)"
   fi
   echo
   echo "   Restrict port ${AGENT_PORT} to the dashboard host, e.g.:  ufw allow from <dashboard-ip> to any port ${AGENT_PORT} proto tcp"
