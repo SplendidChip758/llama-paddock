@@ -7,6 +7,7 @@
 # and installs the dashboard in it.
 # Anywhere else (LXC, VM, bare metal; Debian/Ubuntu): installs the dashboard directly.
 # Re-running it on an existing install updates it and keeps your config.
+# PADDOCK_UNINSTALL=1 removes it again (on a Proxmox host: destroys the dashboard CT).
 #
 # Options (environment variables):
 #   PADDOCK_VERSION   latest (default) | v1.2.3 | source  — "source" builds PADDOCK_BRANCH
@@ -18,6 +19,8 @@
 #   PADDOCK_TARBALL   path to a prebuilt dashboard tarball (offline install)
 #   PADDOCK_SOURCE_DIR path to a local checkout to build from
 #   PADDOCK_TUI=0     plain text prompts instead of whiptail dialogs
+#   PADDOCK_UNINSTALL=1  remove the dashboard instead (same as uninstall-llama-paddock)
+#   PADDOCK_PURGE=1   with PADDOCK_UNINSTALL: also delete config, saved hosts and login
 #   CT_OS, CT_ID, CT_PASSWORD, CT_ROOT_SSH, CT_SSH_KEY, CT_IP, …  preset the Proxmox settings
 set -euo pipefail
 
@@ -33,11 +36,14 @@ SVC_USER=llama-paddock
 NODE_MIN="20.9"
 
 # ---------------------------------------------------------------- ui helpers
-if [[ -t 1 ]]; then
-  C_OK=$'\e[32m'; C_INFO=$'\e[36m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_B=$'\e[1m'; C_0=$'\e[0m'
-else
-  C_OK=""; C_INFO=""; C_WARN=""; C_ERR=""; C_B=""; C_0=""
-fi
+init_colors() {
+  if [[ -t 1 ]]; then
+    C_OK=$'\e[32m'; C_INFO=$'\e[36m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_B=$'\e[1m'; C_0=$'\e[0m'
+  else
+    C_OK=""; C_INFO=""; C_WARN=""; C_ERR=""; C_B=""; C_0=""
+  fi
+}
+init_colors
 msg_info() { echo -e " ${C_INFO}▸${C_0} $*"; }
 msg_ok()   { echo -e " ${C_OK}✔${C_0} $*"; }
 msg_warn() { echo -e " ${C_WARN}!${C_0} $*"; }
@@ -129,11 +135,12 @@ ask_secret() {
   printf -v "$__var" '%s' "$__a"
 }
 
-confirm() { # confirm "Question" (default yes)
-  local a=""
-  [[ -n ${PADDOCK_YES-} || ! -r /dev/tty ]] && return 0
-  read -r -p "   $1 [Y/n]: " a </dev/tty || true
-  [[ -z $a || $a =~ ^[Yy] ]]
+# confirm "Question" [y|n] — y/n is the default answer; PADDOCK_YES answers yes
+confirm() {
+  local a="" def=${2:-y}
+  [[ -n ${PADDOCK_YES-} ]] && return 0
+  [[ -r /dev/tty ]] && { read -r -p "   $1 $([[ $def == y ]] && echo "[Y/n]" || echo "[y/N]"): " a </dev/tty || true; }
+  [[ ${a:-$def} =~ ^[Yy] ]]
 }
 
 # quiet CMD...  — run CMD with its output hidden, printing it only if CMD fails
@@ -405,6 +412,45 @@ proxmox_install() {
   local joined; printf -v joined '%s, ' "${how[@]}"
   echo "   Root login:  ${joined%, }"
   echo "   Update later from the Proxmox host:  pct exec ${CT_ID} -- update-llama-paddock"
+  echo "   Remove it:   PADDOCK_UNINSTALL=1 with the same one-liner on this host (destroys CT ${CT_ID})"
+}
+
+# The dashboard has its own CT (created by proxmox_install and tagged llama-paddock), so
+# uninstalling from the host destroys that CT. Only tagged CTs are offered.
+proxmox_uninstall() {
+  msg_info "Proxmox VE detected — the dashboard runs in its own container, so uninstalling destroys it (PADDOCK_LOCAL=1 removes it from the host instead)"
+  echo
+  local preset=${CT_ID-} items=() f id name state
+  for f in /etc/pve/lxc/*.conf; do
+    [[ -f $f ]] && grep -Eq '^tags:.*\bllama-paddock\b' "$f" || continue
+    id=$(basename "$f" .conf)
+    name=$(sed -n 's/^hostname: //p' "$f")
+    state=$(pct status "$id" 2>/dev/null | awk '{print $2}')
+    items+=("$id" "${name:-?} (${state:-unknown})")
+  done
+  ((${#items[@]})) || die "no container tagged llama-paddock on this node; remove it with: pct destroy <ctid>"
+
+  CT_ID=${preset:-${items[0]}}
+  choose CT_ID "Dashboard container to destroy" "${items[@]}"
+  local i found=""
+  for ((i = 0; i < ${#items[@]}; i += 2)); do [[ ${items[i]} == "$CT_ID" ]] && found=1; done
+  [[ -n $found ]] || die "CT $CT_ID is not a llama-paddock dashboard container"
+
+  if interactive; then
+    local typed=""
+    ask typed "Type ${CT_ID} to destroy CT ${CT_ID} and everything in it (dashboard, saved hosts, login)"
+    [[ -n $TUI ]] && clear
+    [[ $typed == "$CT_ID" ]] || die "cancelled, nothing was removed"
+  else
+    [[ -n $preset ]] || die "set CT_ID=<ctid> to destroy a dashboard container non-interactively"
+  fi
+
+  if pct status "$CT_ID" | grep -q running; then
+    msg_info "Stopping container $CT_ID"
+    pct stop "$CT_ID"
+  fi
+  pct destroy "$CT_ID" --purge >/dev/null
+  msg_ok "Container $CT_ID destroyed"
 }
 
 # ================================================================= local install
@@ -580,6 +626,52 @@ export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BR
 exec bash -c "\$(curl -fsSL ${SELF_URL})"
 EOF
   chmod 755 /usr/local/bin/update-llama-paddock
+  write_uninstaller
+}
+
+# Remove the dashboard from this machine. Config, saved hosts and login stay unless you
+# say so (or PADDOCK_PURGE=1), so a reinstall picks them up again.
+local_uninstall() {
+  [[ $EUID -eq 0 ]] || die "run as root"
+  if [[ ! -d $APP_DIR && ! -e /etc/systemd/system/llama-paddock.service ]]; then
+    msg_ok "The llama-paddock dashboard is not installed on $(hostname)"
+    return 0
+  fi
+  confirm "Remove the llama-paddock dashboard from $(hostname)?" n || die "cancelled, nothing was removed"
+  local purge=${PADDOCK_PURGE-}
+  if [[ -z $purge && -z ${PADDOCK_YES-} ]] && confirm "Also delete its config, saved hosts and login (${CFG_DIR}, ${DATA_DIR})?" n; then
+    purge=1
+  fi
+
+  systemctl disable --now llama-paddock >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/llama-paddock.service /usr/local/bin/update-llama-paddock /usr/local/bin/uninstall-llama-paddock
+  rm -rf "$APP_DIR" "${APP_DIR}.old"
+  systemctl daemon-reload 2>/dev/null || true
+  if [[ -n $purge ]]; then
+    rm -rf "$CFG_DIR" "$DATA_DIR"
+    if id "$SVC_USER" &>/dev/null; then userdel "$SVC_USER" 2>/dev/null || true; fi
+    msg_ok "Dashboard, config and data removed from $(hostname)"
+  else
+    msg_ok "Dashboard removed from $(hostname)"
+    echo "   Kept ${CFG_DIR} and ${DATA_DIR} (settings, saved hosts, login); a reinstall picks them up."
+    echo "   To delete them too:  PADDOCK_PURGE=1 uninstall-llama-paddock  (or rm -rf both)"
+  fi
+  echo "   Node.js was left installed."
+}
+
+# uninstall-llama-paddock: local_uninstall copied out of this script, so it works offline
+write_uninstaller() {
+  {
+    echo '#!/usr/bin/env bash'
+    echo '# Remove the llama-paddock dashboard from this machine (written by install/dashboard.sh)'
+    echo '# PADDOCK_YES=1 skips the questions; PADDOCK_PURGE=1 also deletes config, saved hosts and login.'
+    echo 'set -euo pipefail'
+    declare -p APP_DIR CFG_DIR DATA_DIR SVC_USER
+    declare -f init_colors msg_info msg_ok msg_warn die confirm local_uninstall
+    echo 'init_colors'
+    echo 'local_uninstall'
+  } > /usr/local/bin/uninstall-llama-paddock
+  chmod 755 /usr/local/bin/uninstall-llama-paddock
 }
 
 local_install() {
@@ -637,13 +729,14 @@ local_install() {
   fi
   echo "   Config:  ${CFG_DIR}/config.yaml   then: systemctl restart llama-paddock"
   echo "   Update:  update-llama-paddock"
+  echo "   Remove:  uninstall-llama-paddock"
   echo
 }
 
 # ================================================================= main
 [[ -n ${PADDOCK_NESTED-} ]] || header   # set when re-run inside the new CT from proxmox_install
 if command -v pveversion >/dev/null 2>&1 && [[ -z ${PADDOCK_LOCAL-} ]]; then
-  proxmox_install
+  if [[ -n ${PADDOCK_UNINSTALL-} ]]; then proxmox_uninstall; else proxmox_install; fi
 else
-  local_install
+  if [[ -n ${PADDOCK_UNINSTALL-} ]]; then local_uninstall; else local_install; fi
 fi

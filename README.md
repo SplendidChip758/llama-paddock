@@ -104,6 +104,8 @@ Either way it:
 
 Re-running it, or running `update-llama-paddock-agent` inside the container, updates the agent and **keeps the token**. To share one token across hosts, set `PADDOCK_AGENT_TOKEN=<token>` before the command. Running `bash install/agent.sh` from a clone of the repo uses the agent files in the clone.
 
+**Uninstall:** run `uninstall-llama-paddock-agent` inside the container (or `pct exec <ctid> -- uninstall-llama-paddock-agent` from the host), or the one-liner with `PADDOCK_UNINSTALL=1`, which on a Proxmox host asks which container to remove it from. It removes the service, `/opt/llama-paddock-agent` and the token file. Ollama and the settings you made from the Environment tab stay, so Ollama keeps running as configured. Add `PADDOCK_YES=1` to skip the question.
+
 The agent runs as root and can restart Ollama, so only the dashboard host should reach port 11435:
 
 ```bash
@@ -177,6 +179,10 @@ It then downloads the latest template for the distribution you pick (latest **Ub
 Open the URL, sign in with the printed password, and choose your own password (required on first sign-in). Then use **Add host** to add your Ollama servers. Hosts added in the UI and the login are stored in `/var/lib/llama-paddock`.
 
 Update with `update-llama-paddock` inside the container, or `pct exec <ctid> -- update-llama-paddock` from the host. Your config is kept.
+
+**Uninstall:**
+- **Inside the container or VM:** `uninstall-llama-paddock` removes the service and `/opt/llama-paddock`. It asks whether to also delete the config, saved hosts and login (`/etc/llama-paddock`, `/var/lib/llama-paddock`); keep them and a reinstall picks them up again. Unattended: `PADDOCK_YES=1`, plus `PADDOCK_PURGE=1` to delete the data too.
+- **On the Proxmox host:** run the one-liner with `PADDOCK_UNINSTALL=1`. The dashboard has its own container, so this **destroys that container**. Only containers tagged `llama-paddock` (set by the installer) are offered, and you confirm by typing the CT ID. Unattended: `PADDOCK_UNINSTALL=1 PADDOCK_YES=1 CT_ID=<ctid>`.
 
 | Option | Default | |
 |---|---|---|

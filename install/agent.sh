@@ -7,6 +7,7 @@
 # agent is installed inside it (via pct exec).
 # Inside the Ollama LXC/VM itself: installs the agent directly.
 # Re-running it updates the agent and keeps its token.
+# PADDOCK_UNINSTALL=1 removes it again (same as uninstall-llama-paddock-agent).
 #
 # Options (environment variables):
 #   PADDOCK_VERSION      latest (default) | v1.2.3 | main  — which agent version to fetch
@@ -17,6 +18,7 @@
 #   PADDOCK_CTID         Proxmox: container to install into (skips the prompt)
 #   PADDOCK_LOCAL=1      install here even on a Proxmox host
 #   PADDOCK_YES=1        non-interactive
+#   PADDOCK_UNINSTALL=1  remove the agent instead (Ollama and its settings are left alone)
 set -euo pipefail
 
 REPO="${PADDOCK_REPO:-SplendidChip758/llama-paddock}"
@@ -29,15 +31,26 @@ ENV_FILE=/etc/llama-paddock-agent.env
 UNIT_FILE=/etc/systemd/system/llama-paddock-agent.service
 NODE_MIN="18.15"
 
-if [[ -t 1 ]]; then
-  C_OK=$'\e[32m'; C_INFO=$'\e[36m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_B=$'\e[1m'; C_0=$'\e[0m'
-else
-  C_OK=""; C_INFO=""; C_WARN=""; C_ERR=""; C_B=""; C_0=""
-fi
+init_colors() {
+  if [[ -t 1 ]]; then
+    C_OK=$'\e[32m'; C_INFO=$'\e[36m'; C_WARN=$'\e[33m'; C_ERR=$'\e[31m'; C_B=$'\e[1m'; C_0=$'\e[0m'
+  else
+    C_OK=""; C_INFO=""; C_WARN=""; C_ERR=""; C_B=""; C_0=""
+  fi
+}
+init_colors
 msg_info() { echo -e " ${C_INFO}▸${C_0} $*"; }
 msg_ok()   { echo -e " ${C_OK}✔${C_0} $*"; }
 msg_warn() { echo -e " ${C_WARN}!${C_0} $*"; }
 die()      { echo -e " ${C_ERR}✖ $*${C_0}" >&2; exit 1; }
+
+# confirm "Question" [y|n] — y/n is the default answer; PADDOCK_YES answers yes
+confirm() {
+  local a="" def=${2:-y}
+  [[ -n ${PADDOCK_YES-} ]] && return 0
+  [[ -r /dev/tty ]] && { read -r -p "   $1 $([[ $def == y ]] && echo "[Y/n]" || echo "[y/N]"): " a </dev/tty || true; }
+  [[ ${a:-$def} =~ ^[Yy] ]]
+}
 # quiet CMD...  — run CMD with its output hidden, printing it only if CMD fails
 quiet() {
   local log rc=0; log=$(mktemp)
@@ -67,9 +80,8 @@ ${C_B}
 EOF
 
 # ================================================================= Proxmox host
-proxmox_install() {
-  msg_info "Proxmox VE detected — the agent goes inside your Ollama container (PADDOCK_LOCAL=1 installs on the host instead)"
-  echo
+# pick_ct "Question" — list the node's containers and set CT_ID (PADDOCK_CTID skips the question)
+pick_ct() {
   # pct exec passes the host's locale into the container, where it usually isn't
   # generated (perl/apt then warn on every call); C.UTF-8 exists in every template.
   export LANG=C.UTF-8; unset LANGUAGE "${!LC_@}"
@@ -77,10 +89,16 @@ proxmox_install() {
   pct list | awk 'NR==1 {printf "     %s\n", $0; next} {printf "     %s\n", $0}'
   echo
   local guess; guess=$(pct list | awk 'NR>1 && tolower($0) ~ /ollama/ {print $1; exit}')
-  local CT_ID="${PADDOCK_CTID-}"
-  ask CT_ID "Container ID of the Ollama LXC" "$guess"
+  CT_ID="${PADDOCK_CTID-}"
+  ask CT_ID "$1" "$guess"
   [[ -n $CT_ID ]] || die "no container selected"
   pct status "$CT_ID" &>/dev/null || die "container $CT_ID does not exist on this node"
+}
+
+proxmox_install() {
+  msg_info "Proxmox VE detected — the agent goes inside your Ollama container (PADDOCK_LOCAL=1 installs on the host instead)"
+  echo
+  pick_ct "Container ID of the Ollama LXC"
   if ! pct status "$CT_ID" | grep -q running; then
     msg_info "Starting container $CT_ID"
     pct start "$CT_ID"; sleep 3
@@ -97,6 +115,25 @@ proxmox_install() {
   echo
   msg_ok "Agent installed in CT ${CT_ID}.  In the dashboard, Add host with agent URL http://${ip:-<ct-ip>}:${AGENT_PORT}"
   echo "   Update later:  pct exec ${CT_ID} -- update-llama-paddock-agent"
+  echo "   Uninstall:     pct exec ${CT_ID} -- uninstall-llama-paddock-agent"
+}
+
+proxmox_uninstall() {
+  msg_info "Proxmox VE detected — removing the agent from one of your containers (PADDOCK_LOCAL=1 removes it from the host instead)"
+  echo
+  pick_ct "Container ID to remove the agent from"
+  confirm "Remove the llama-paddock agent from CT ${CT_ID}? Ollama itself is not touched." n || die "cancelled, nothing was removed"
+  local was_stopped=""
+  if ! pct status "$CT_ID" | grep -q running; then
+    was_stopped=1
+    msg_info "Starting container $CT_ID"
+    pct start "$CT_ID"; sleep 3
+  fi
+  # the installed uninstaller works offline; older installs don't have it, so fall back to this script
+  pct exec "$CT_ID" -- env PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_NESTED=1 PADDOCK_UNINSTALL=1 bash -c \
+    "if [[ -x /usr/local/bin/uninstall-llama-paddock-agent ]]; then exec /usr/local/bin/uninstall-llama-paddock-agent; fi
+     curl -fsSL '$SELF_URL' | bash"
+  if [[ -n $was_stopped ]]; then pct stop "$CT_ID"; fi
 }
 
 # ================================================================= local install
@@ -142,6 +179,38 @@ fetch_agent() {
   curl -fsSL "$base/paddock-agent.mjs" -o "$tmp/paddock-agent.mjs" || die "could not download the agent from $base"
   curl -fsSL "$base/llama-paddock-agent.service" -o "$tmp/llama-paddock-agent.service" || die "could not download the service unit"
   AGENT_REF="$ref"
+}
+
+# Remove what local_install put down. Ollama's own settings (override.conf and the
+# .paddock-*.bak backups next to it) stay, so Ollama keeps running as configured.
+local_uninstall() {
+  [[ $EUID -eq 0 ]] || die "run as root"
+  if [[ ! -e $UNIT_FILE && ! -d $PREFIX && ! -e $ENV_FILE ]]; then
+    msg_ok "The llama-paddock agent is not installed on $(hostname)"
+    return 0
+  fi
+  confirm "Remove the llama-paddock agent from $(hostname)?" n || die "cancelled, nothing was removed"
+  systemctl disable --now llama-paddock-agent >/dev/null 2>&1 || true
+  rm -f "$UNIT_FILE" "$ENV_FILE" /usr/local/bin/update-llama-paddock-agent /usr/local/bin/uninstall-llama-paddock-agent
+  rm -rf "$PREFIX"
+  systemctl daemon-reload 2>/dev/null || true
+  msg_ok "Agent removed from $(hostname)"
+  echo "   Kept: Ollama's settings (ollama.service.d/override.conf) and Node.js."
+  echo "   In the dashboard, remove this host, or edit it and clear the agent URL."
+}
+
+# uninstall-llama-paddock-agent: local_uninstall copied out of this script, so it works offline
+write_uninstaller() {
+  {
+    echo '#!/usr/bin/env bash'
+    echo '# Remove the llama-paddock agent from this machine (written by install/agent.sh; PADDOCK_YES=1 skips the question)'
+    echo 'set -euo pipefail'
+    declare -p PREFIX ENV_FILE UNIT_FILE
+    declare -f init_colors msg_info msg_ok msg_warn die confirm local_uninstall
+    echo 'init_colors'
+    echo 'local_uninstall'
+  } > /usr/local/bin/uninstall-llama-paddock-agent
+  chmod 755 /usr/local/bin/uninstall-llama-paddock-agent
 }
 
 local_install() {
@@ -192,6 +261,7 @@ export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BR
 exec bash -c "\$(curl -fsSL ${SELF_URL})"
 EOF
   chmod 755 /usr/local/bin/update-llama-paddock-agent
+  write_uninstaller
 
   systemctl daemon-reload
   systemctl enable llama-paddock-agent >/dev/null 2>&1
@@ -216,11 +286,12 @@ EOF
   echo
   echo "   Restrict port ${AGENT_PORT} to the dashboard host, e.g.:  ufw allow from <dashboard-ip> to any port ${AGENT_PORT} proto tcp"
   echo "   Update later:  update-llama-paddock-agent"
+  echo "   Uninstall:     uninstall-llama-paddock-agent"
   echo
 }
 
 if command -v pveversion >/dev/null 2>&1 && [[ -z ${PADDOCK_LOCAL-} ]]; then
-  proxmox_install
+  if [[ -n ${PADDOCK_UNINSTALL-} ]]; then proxmox_uninstall; else proxmox_install; fi
 else
-  local_install
+  if [[ -n ${PADDOCK_UNINSTALL-} ]]; then local_uninstall; else local_install; fi
 fi
