@@ -66,12 +66,24 @@ confirm() { # confirm "Question" (default yes)
   [[ -z $a || $a =~ ^[Yy] ]]
 }
 
+# quiet CMD...  — run CMD with its output hidden, printing it only if CMD fails
+quiet() {
+  local log rc=0; log=$(mktemp)
+  "$@" >"$log" 2>&1 || rc=$?
+  (( rc == 0 )) || cat "$log" >&2
+  rm -f "$log"
+  return $rc
+}
+
 version_ge() { [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" == "$2" ]]; }
 
 # ================================================================= Proxmox host
 proxmox_install() {
   msg_info "Proxmox VE detected — creating a new LXC for the dashboard (set PADDOCK_LOCAL=1 to install on the host instead)"
   echo
+  # pct exec passes the host's locale into the container, where it usually isn't
+  # generated (perl/apt then warn on every call); C.UTF-8 exists in every template.
+  export LANG=C.UTF-8; unset LANGUAGE "${!LC_@}"
 
   local next_id; next_id=$(pvesh get /cluster/nextid)
   local def_storage; def_storage=$(pvesm status -content rootdir 2>/dev/null | awk 'NR>1 && $3=="active" {print $1; exit}')
@@ -141,7 +153,7 @@ proxmox_install() {
 
   # run this same script inside the container, non-interactively, with the answers collected here
   pct exec "$CT_ID" -- env \
-    PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="$REPO" PADDOCK_BRANCH="$BRANCH" PADDOCK_VERSION="$VERSION" PADDOCK_PORT="$PORT" \
+    PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_NESTED=1 PADDOCK_REPO="$REPO" PADDOCK_BRANCH="$BRANCH" PADDOCK_VERSION="$VERSION" PADDOCK_PORT="$PORT" \
     FIRST_NAME="$FIRST_NAME" FIRST_OLLAMA="$FIRST_OLLAMA" FIRST_AGENT="$FIRST_AGENT" FIRST_TOKEN="$FIRST_TOKEN" \
     bash -c "curl -fsSL '$SELF_URL' | bash"
 
@@ -153,7 +165,7 @@ proxmox_install() {
 
 # Optional: first Ollama instance, so the dashboard isn't empty on first open
 ask_first_instance() {
-  echo "   ${C_B}First Ollama instance${C_0} (leave the URL blank to skip — you can add more later)"
+  [[ -n ${PADDOCK_YES-} ]] || echo "   ${C_B}First Ollama instance${C_0} (leave the URL blank to skip — you can add more later)"
   ask FIRST_OLLAMA "Ollama URL (e.g. http://192.168.30.101:11434)" ""
   FIRST_NAME="${FIRST_NAME-}"; FIRST_AGENT="${FIRST_AGENT-}"; FIRST_TOKEN="${FIRST_TOKEN-}"
   if [[ -n $FIRST_OLLAMA ]]; then
@@ -182,8 +194,9 @@ ensure_deps() {
   if [[ -z $have ]] || ! version_ge "$have" "$NODE_MIN"; then
     msg_info "Installing Node.js 22 (NodeSource)${have:+ — found $have, need >= $NODE_MIN}"
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gnupg >/dev/null
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs >/dev/null
+    quiet bash -o pipefail -c "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -" \
+      || die "NodeSource setup failed"
+    quiet env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs || die "could not install nodejs"
   fi
   msg_ok "Node.js $(node -p 'process.versions.node')"
 }
@@ -356,7 +369,7 @@ local_install() {
 
   if [[ -z $updating ]]; then
     ask_first_instance
-    echo
+    [[ -n ${PADDOCK_YES-} ]] || echo
   else
     msg_info "Existing install found ($(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)) — updating, config is kept"
   fi
@@ -411,7 +424,7 @@ local_install() {
 }
 
 # ================================================================= main
-header
+[[ -n ${PADDOCK_NESTED-} ]] || header   # set when re-run inside the new CT from proxmox_install
 if command -v pveversion >/dev/null 2>&1 && [[ -z ${PADDOCK_LOCAL-} ]]; then
   proxmox_install
 else

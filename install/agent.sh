@@ -38,6 +38,15 @@ msg_info() { echo -e " ${C_INFO}▸${C_0} $*"; }
 msg_ok()   { echo -e " ${C_OK}✔${C_0} $*"; }
 msg_warn() { echo -e " ${C_WARN}!${C_0} $*"; }
 die()      { echo -e " ${C_ERR}✖ $*${C_0}" >&2; exit 1; }
+# quiet CMD...  — run CMD with its output hidden, printing it only if CMD fails
+quiet() {
+  local log rc=0; log=$(mktemp)
+  "$@" >"$log" 2>&1 || rc=$?
+  (( rc == 0 )) || cat "$log" >&2
+  rm -f "$log"
+  return $rc
+}
+
 version_ge() { [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" == "$2" ]]; }
 
 ask() {
@@ -49,7 +58,8 @@ ask() {
   printf -v "$__var" '%s' "${__ans:-$__def}"
 }
 
-cat <<EOF
+# PADDOCK_NESTED is set when re-run inside the CT from proxmox_install
+[[ -n ${PADDOCK_NESTED-} ]] || cat <<EOF
 ${C_B}
    llama${C_WARN}paddock${C_0}${C_B}  ·  Linux agent installer${C_0}
    Runs next to Ollama: GPU + host stats, env editing, restart, logs
@@ -60,6 +70,9 @@ EOF
 proxmox_install() {
   msg_info "Proxmox VE detected — the agent goes inside your Ollama container (PADDOCK_LOCAL=1 installs on the host instead)"
   echo
+  # pct exec passes the host's locale into the container, where it usually isn't
+  # generated (perl/apt then warn on every call); C.UTF-8 exists in every template.
+  export LANG=C.UTF-8; unset LANGUAGE "${!LC_@}"
   echo "   Containers on this node:"
   pct list | awk 'NR==1 {printf "     %s\n", $0; next} {printf "     %s\n", $0}'
   echo
@@ -76,7 +89,7 @@ proxmox_install() {
   pct exec "$CT_ID" -- bash -c "command -v curl >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates >/dev/null)" \
     || die "could not install curl inside CT $CT_ID"
   pct exec "$CT_ID" -- env \
-    PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="$REPO" PADDOCK_BRANCH="$BRANCH" PADDOCK_VERSION="$VERSION" \
+    PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_NESTED=1 PADDOCK_REPO="$REPO" PADDOCK_BRANCH="$BRANCH" PADDOCK_VERSION="$VERSION" \
     PADDOCK_AGENT_PORT="$AGENT_PORT" PADDOCK_AGENT_TOKEN="${PADDOCK_AGENT_TOKEN-}" \
     bash -c "curl -fsSL '$SELF_URL' | bash"
 
@@ -101,8 +114,9 @@ ensure_node() {
   if [[ -z $have ]] || ! version_ge "$have" "$NODE_MIN"; then
     msg_info "Distro Node.js too old — using NodeSource 22.x"
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates gnupg >/dev/null
-    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - >/dev/null
-    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs >/dev/null
+    quiet bash -o pipefail -c "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -" \
+      || die "NodeSource setup failed"
+    quiet env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs || die "could not install nodejs"
   fi
   msg_ok "Node.js $(node -p 'process.versions.node')"
 }
