@@ -1,3 +1,13 @@
+## [0.4.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.3.0...v0.4.0) (2026-10-27)
+
+### Features
+
+* **install:** add uninstallers for the agent and dashboard ([d81a60a](https://github.com/SplendidChip758/llama-paddock/commit/d81a60a17b5e023031142270f1f48f81e7422cd2))
+
+### Bug Fixes
+
+* improve URL validation and user feedback in HostEditor component ([5af2060](https://github.com/SplendidChip758/llama-paddock/commit/5af2060be7875c81d807a9bff22f6b2a60b6e552))
+
 ## [0.3.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.2.0...v0.3.0) (2026-10-27)
 
 ### Features
