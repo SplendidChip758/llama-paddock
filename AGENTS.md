@@ -50,7 +50,7 @@ Planned work has an issue (label `roadmap`, a milestone) and an item on the **ll
 | `Todo` | not started |
 | `In Progress` | being worked on, on a branch |
 | `In Review` | PR open, or merged to `dev` and being tested in a prerelease |
-| `Done` | shipped in a stable release (set automatically when the issue closes) |
+| `Done` | merged to `main`, so in a stable release. Set automatically when the issue closes |
 
 Keep the issue, its branch and its PR connected:
 
@@ -60,8 +60,8 @@ Keep the issue, its branch and its PR connected:
    ```
    Closing keywords in a PR only link it when the PR targets the default branch (`main`). Feature PRs target `dev`, so the linked branch is what connects them.
 2. **Set the project Status to `In Progress`** (`gh project item-edit`, project #6) when you start, and to **`In Review`** when you open the PR.
-3. **Put `Closes #<n>` in the commit body** and in the PR description. The commit carries it to `main`, and GitHub closes the issue when `dev` ships to `main`. The project then moves it to `Done` on its own.
-4. **After the PR merges to `dev`:** tick the finished items in the issue's scope checklist, note anything left over, and leave the issue open and `In Review` until the stable release closes it.
+3. **Put `Closes #<n>` in the commit body** and in the PR description. The commit carries it to `main`: when `dev` is merged to `main`, GitHub closes the issue and the project moves it to `Done`. A hotfix PR straight into `main` closes it on merge. Don't set `Done` by hand: the project's auto-close workflow would close the issue before the change is on `main`.
+4. **After the PR merges to `dev`:** tick the finished items in the issue's scope checklist, note anything left over, and leave the issue open and `In Review` until it reaches `main`.
 
 Small fixes and docs don't need an issue.
 
