@@ -10,7 +10,8 @@
 # PADDOCK_UNINSTALL=1 removes it again (on a Proxmox host: destroys the dashboard CT).
 #
 # Options (environment variables):
-#   PADDOCK_VERSION   latest (default) | v1.2.3 | source  — "source" builds PADDOCK_BRANCH
+#   PADDOCK_VERSION   latest (default) | dev | v1.2.3 | source  — "dev" is the newest release
+#                     including prereleases (see dashboard-dev.sh); "source" builds PADDOCK_BRANCH
 #   PADDOCK_BRANCH    git branch for source builds and helper files (default: main)
 #   PADDOCK_REPO      GitHub repo (default: SplendidChip758/llama-paddock)
 #   PADDOCK_PORT      port to listen on (default: 8080)
@@ -164,6 +165,36 @@ guess_gateway() {
   local ip=$(( 10#${o[0]} << 24 | 10#${o[1]} << 16 | 10#${o[2]} << 8 | 10#${o[3]} ))
   local gw=$(( (ip & (0xFFFFFFFF << (32 - bits)) & 0xFFFFFFFF) + 1 ))
   echo "$(( gw >> 24 & 255 )).$(( gw >> 16 & 255 )).$(( gw >> 8 & 255 )).$(( gw & 255 ))"
+}
+
+# A prerelease channel or tag (dev, v1.2.0-dev.3)
+is_prerelease() { [[ $VERSION == dev || $VERSION == v*-* ]]; }
+# What update-llama-paddock installs by default: stay on the channel this was installed from
+CHANNEL=latest
+[[ $VERSION == dev ]] && CHANNEL=dev
+
+prerelease_notice() {
+  local text="You are installing a PRERELEASE of llama-paddock (${VERSION}, from the ${BRANCH} branch).
+
+Prereleases are built from every change merged to ${BRANCH}, before it is released as stable. They are for testing:
+- features may be unfinished, change or be removed again,
+- there may be bugs, including ones that lose metric history or saved settings,
+- the data format may change, so going back to a stable release can mean waiting for the next one.
+
+update-llama-paddock keeps this install on prereleases. To go back to stable, re-run the normal installer.
+Please report problems at github.com/${REPO}/issues."
+  if [[ -n ${PADDOCK_YES-} ]] || ! interactive; then
+    msg_warn "Installing a prerelease (${VERSION}): for testing, may be unstable."
+    return
+  fi
+  if [[ -n $TUI ]]; then
+    wt --title " Prerelease " --defaultno --yes-button "Install" --no-button "Cancel" --yesno "$text" 22 78 || cancelled
+  else
+    echo -e "${C_WARN}${C_B}"
+    echo "$text" | sed 's/^/   /'
+    echo -e "${C_0}"
+    confirm "Install the prerelease anyway?" n || die "cancelled, nothing was changed"
+  fi
 }
 
 version_ge() { [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" == "$2" ]]; }
@@ -482,10 +513,15 @@ ensure_deps() {
 resolve_release() {
   RELEASE_TAG=""; ASSET_URL=""
   local api="https://api.github.com/repos/${REPO}/releases"
-  [[ $VERSION == latest ]] && api+="/latest" || api+="/tags/${VERSION}"
+  case $VERSION in
+    latest) api+="/latest" ;;
+    dev) api+="?per_page=30" ;;  # newest first, prereleases included
+    *) api+="/tags/${VERSION}" ;;
+  esac
   local json; json=$(curl -fsSL -H "Accept: application/vnd.github+json" "$api" 2>/dev/null) || return 0
   read -r RELEASE_TAG ASSET_URL < <(node -e '
-    const r = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    let r = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    if (Array.isArray(r)) r = r.find((x) => !x.draft) || {};
     const a = (r.assets || []).find((x) => /^llama-paddock-dashboard-.*\.tar\.gz$/.test(x.name));
     console.log(r.tag_name || "", a ? a.browser_download_url : "");
   ' <<<"$json") || true
@@ -521,7 +557,7 @@ fetch_app() {
         msg_ok "Release $RELEASE_TAG downloaded"
         return
       fi
-      [[ $VERSION == latest ]] || die "release $VERSION not found or has no dashboard asset"
+      [[ $VERSION == latest || $VERSION == dev ]] || die "release $VERSION not found or has no dashboard asset"
       msg_warn "No published release yet — building from the ${BRANCH} branch instead"
     fi
     msg_info "Downloading source (${BRANCH})"
@@ -622,8 +658,8 @@ EOF
 
   cat > /usr/local/bin/update-llama-paddock <<EOF
 #!/usr/bin/env bash
-# Update llama-paddock to the latest release (pass a tag like v1.2.0 to pin one)
-export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-latest}"
+# Update llama-paddock to the newest ${CHANNEL} release (pass a tag like v1.2.0 to pin one)
+export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
 exec bash -c "\$(curl -fsSL ${SELF_URL})"
 EOF
   chmod 755 /usr/local/bin/update-llama-paddock
@@ -736,6 +772,8 @@ local_install() {
 
 # ================================================================= main
 [[ -n ${PADDOCK_NESTED-} ]] || header   # set when re-run inside the new CT from proxmox_install
+# once, before anything is changed (the copy re-run inside a new CT skips it)
+if [[ -z ${PADDOCK_NESTED-} && -z ${PADDOCK_UNINSTALL-} ]] && is_prerelease; then prerelease_notice; fi
 if command -v pveversion >/dev/null 2>&1 && [[ -z ${PADDOCK_LOCAL-} ]]; then
   if [[ -n ${PADDOCK_UNINSTALL-} ]]; then proxmox_uninstall; else proxmox_install; fi
 else
