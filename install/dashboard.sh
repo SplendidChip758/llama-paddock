@@ -403,6 +403,7 @@ proxmox_install() {
     --hostname "$CT_HOSTNAME" --cores "$CT_CORES" --memory "$CT_RAM" --swap 512 \
     --rootfs "${CT_STORAGE}:${CT_DISK}" --net0 "$net" \
     --unprivileged 1 --features nesting=1 --onboot 1 --ostype "$CT_OS" \
+    --cmode console \
     --tags "llama-paddock" --description "llama-paddock dashboard — https://github.com/${REPO}" \
     "${extra[@]}" >/dev/null
   pct start "$CT_ID"
@@ -732,42 +733,28 @@ EOF
   msg_ok "Login banner added"
 }
 
-# ct_notes IP — HTML for the container's Notes panel in the Proxmox UI (which loads Font Awesome)
+# ct_notes IP — HTML for the container's Notes panel in the Proxmox UI. Proxmox drops every
+# attribute outside an allowlist (no style=), so sizes use width/height; it loads Font Awesome.
 ct_notes() {
   local ip=$1 open="" channel=""
   # a DHCP address can change, so only link a static one
   [[ $CT_IP != dhcp && -n $ip ]] && open="
-  <p style='margin: 16px 0;'>
-    <a href='http://${ip}:${PORT}' target='_blank' rel='noopener noreferrer'>
-      <img src='https://img.shields.io/badge/📈-Open%20the%20dashboard-c8a04a' alt='Open the dashboard' />
-    </a>
-  </p>"
+  <p><a href='http://${ip}:${PORT}'><img src='https://img.shields.io/badge/📈-Open%20the%20dashboard-c8a04a' alt='Open the dashboard'/></a></p>"
   is_prerelease && channel="
-  <p style='margin: 12px 0;'>
-    <img src='https://img.shields.io/badge/⚠️-Prerelease%20channel-8a6d2f' alt='Prerelease channel' />
-  </p>"
+  <p><img src='https://img.shields.io/badge/⚠️-Prerelease%20channel-8a6d2f' alt='Prerelease channel'/></p>"
   cat <<EOF
 <div align='center'>
-  <a href='https://github.com/${REPO}' target='_blank' rel='noopener noreferrer'>
-    <img src='https://raw.githubusercontent.com/${REPO}/main/docs/logo/logo-mark.svg' alt='llama-paddock' style='width:96px;height:96px;'/>
-  </a>
+  <a href='https://github.com/${REPO}'><img src='https://raw.githubusercontent.com/${REPO}/main/docs/logo/logo-mark.svg' alt='llama-paddock' width='80' height='80'/></a>
 
-  <h2 style='font-size: 24px; margin: 20px 0;'>llama-paddock dashboard</h2>
+  <h2>llama-paddock dashboard</h2>
 ${open}${channel}
-  <p style='margin: 12px 0;'>Update: <code>update-llama-paddock</code> in the container</p>
+  <p>Update: <code>update-llama-paddock</code> in the container</p>
 
-  <span style='margin: 0 10px;'>
-    <i class="fa fa-github fa-fw" style="color: #f5f5f5;"></i>
-    <a href='https://github.com/${REPO}' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #c8a04a;'>GitHub</a>
-  </span>
-  <span style='margin: 0 10px;'>
-    <i class="fa fa-tag fa-fw" style="color: #f5f5f5;"></i>
-    <a href='https://github.com/${REPO}/releases' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #c8a04a;'>Releases</a>
-  </span>
-  <span style='margin: 0 10px;'>
-    <i class="fa fa-exclamation-circle fa-fw" style="color: #f5f5f5;"></i>
-    <a href='https://github.com/${REPO}/issues' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #c8a04a;'>Issues</a>
-  </span>
+  <p>
+    <i class='fa fa-github fa-fw'></i> <a href='https://github.com/${REPO}'>GitHub</a> &nbsp;
+    <i class='fa fa-tag fa-fw'></i> <a href='https://github.com/${REPO}/releases'>Releases</a> &nbsp;
+    <i class='fa fa-exclamation-circle fa-fw'></i> <a href='https://github.com/${REPO}/issues'>Issues</a>
+  </p>
 </div>
 EOF
 }

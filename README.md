@@ -172,6 +172,8 @@ It then downloads the latest template for the distribution you pick (latest **Ub
 
 The container's **Notes** in the Proxmox UI get links to the dashboard (when it has a static IP), releases and issues. Logging in to the container shows a short banner with its version, OS, hostname, dashboard URL and status. Delete `/etc/profile.d/00_llama-paddock.sh` to turn the banner off.
 
+The container's console mode is `/dev/console`. In the default `tty` mode, newer distributions (util-linux 2.40.3+) show escape codes like `^[[1;1R` in the console's login prompt. For a container created by an older installer, run `pct set <ctid> --cmode console` on the host.
+
 **Inside a container or VM** it:
 - installs Node.js 22 if needed,
 - downloads the prebuilt dashboard from the latest GitHub release, or builds from `main` if there's no release yet,
