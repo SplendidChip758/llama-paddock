@@ -720,16 +720,18 @@ if systemctl is-active --quiet llama-paddock 2>/dev/null; then __lp_state='\033[
 case \$__lp_ver in *-*) __lp_ver="\$__lp_ver (prerelease)" ;; esac
 printf '\n\033[1mllama\033[33mpaddock\033[0m\033[1m dashboard\033[0m  %s\n' "\${__lp_ver:-}"
 printf '    🌐   GitHub:     https://github.com/${REPO}\n'
-printf '    🖥️    OS:         %s\n' "\$(. /etc/os-release 2>/dev/null; echo "\${PRETTY_NAME:-unknown}")"
+printf '    💻   OS:         %s\n' "\$(. /etc/os-release 2>/dev/null; echo "\${PRETTY_NAME:-unknown}")"
 printf '    🏠   Hostname:   %s\n' "\$(hostname)"
 printf "    💡   Dashboard:  http://%s:%s  (\$__lp_state)\n" "\${__lp_ip:-<ip>}" "\${__lp_port:-8080}"
 printf '    🔄   Update:     update-llama-paddock\n\n'
 unset __lp_ver __lp_port __lp_ip __lp_state
 EOF
   chmod 644 "$MOTD_FILE"
-  # Quiet the distribution's own login text (Ubuntu's update-motd scripts, Debian's /etc/motd)
+  # Quiet the distribution's own login text: Ubuntu's update-motd scripts, Debian's /etc/motd, and
+  # Ubuntu's /etc/legal notice, which pam_motd shows on a user's first login unless this marker exists
   [[ -d /etc/update-motd.d ]] && chmod -x /etc/update-motd.d/* 2>/dev/null || true
   [[ -f /etc/motd ]] && : > /etc/motd
+  mkdir -p /root/.cache && touch /root/.cache/motd.legal-displayed
   msg_ok "Login banner added"
 }
 
