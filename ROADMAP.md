@@ -42,8 +42,9 @@ Several later features need these: alerts and benchmarks need stored data, and t
 - **Long-range charts.** Pick a time range (1h / 24h / 7d / 30d) on the Monitor tab, as full charts rather than only sparklines.
 - **Ollama API keys.** Connect to Ollama instances that sit behind an API key or bearer token (reverse proxy, hosted Ollama). The key is stored per host and set from **Add host** / **Edit host**.
 - **Prometheus `/metrics` endpoint.** Expose GPU, host and model metrics for Prometheus/Grafana. It is protected by a token, or can be opened for a scraper.
+- **Version display.** Show the dashboard's version in the header, and each agent's version on its host page and in the fleet overview, so you can tell which build (stable or prerelease) is running. Older agents that don't report one show as unknown.
 
-**Done when:** a dashboard restart keeps its history, you can view a week of GPU usage, a key-protected Ollama works, and Grafana can scrape the fleet.
+**Done when:** a dashboard restart keeps its history, you can view a week of GPU usage, a key-protected Ollama works, Grafana can scrape the fleet, and the UI shows which dashboard and agent versions are running.
 
 ## M2: Model workbench
 
@@ -80,11 +81,12 @@ Everything about choosing and tuning a model for your hardware.
 
 - **Fleet-wide model actions.** Pull, delete or copy a model on several hosts at once, with progress for each host in the Jobs drawer.
 - **Model comparison.** A matrix of models across hosts showing which are missing or out of date, with one click to sync.
-- **Agent versions and one-click update.** Show each agent's version and flag outdated ones. Update an agent from the dashboard using the release assets and `SHA256SUMS`.
+- **Agent updates.** Flag agents older than the dashboard, and update one or all of them from the dashboard using the release assets and `SHA256SUMS`.
+- **Dashboard updates.** Check for a newer release on the install's channel (stable or prerelease) and show it with its release notes. On installer installs, one click updates the dashboard after backing up its data. Docker installs show the command to pull the new image.
 - **Remote agent install.** Install the agent from the dashboard over SSH (or `pct exec` on a Proxmox host). The token and host entry fill in automatically.
 - **Prepare 1.0.** Versioned agent protocol, automatic data migrations, documented `/api`, an upgrade test in CI, and the semantic-release change that cuts 1.0.0.
 
-**Done when:** you can roll a new model out to every host, and update every agent, without opening a terminal. Then 1.0 is tagged.
+**Done when:** you can roll a new model out to every host, and update every agent and the dashboard itself, without opening a terminal. Then 1.0 is tagged.
 
 ## M6: Platforms
 
