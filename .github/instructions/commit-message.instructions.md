@@ -20,7 +20,7 @@ Releases are fully automated: semantic-release reads every commit message on `ma
 
 - Summary: imperative mood, lowercase, no trailing period, under ~72 characters. `add GPU fan curve`, not `Added GPU fan curve.`
 - Body: explain why, plus anything a reviewer or user needs (new settings, upgrade notes). Bullets are fine. Leave it out for trivial changes.
-- Link issues with `Closes #N` in the body.
+- Link the issue with `Closes #N` in the body. PRs target `dev`, where closing keywords in the PR don't link or close anything; the keyword in the commit is what closes the issue once `dev` is merged to `main`.
 - Every commit must be valid, not only the PR title. Feature PRs are squash-merged, but `dev` → `main` and `main` → `dev` use merge commits, so branch commits reach the changelog too.
 
 ## Types

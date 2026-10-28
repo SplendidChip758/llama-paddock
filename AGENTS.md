@@ -40,7 +40,21 @@ Releases are fully automated: semantic-release reads every commit message to pic
 - Branch from `dev` and open the PR against `dev`. Merges to `dev` publish prereleases (`vX.Y.Z-dev.N`, image `:dev`). `main` is stable and only receives `dev` when it ships, plus urgent hotfixes.
 - Branch names: `<type>/<short-topic>`, e.g. `feat/persistent-history`, `fix/host-editor-url`, `docs/roadmap`.
 - The title and description rules are in [.github/instructions/pull-request.instructions.md](.github/instructions/pull-request.instructions.md).
-- Planned work has an issue with the `roadmap` label and a milestone. Reference it.
+
+## Issues and the roadmap project
+
+Planned work has an issue (label `roadmap`, a milestone) and an item on the **llama-paddock roadmap** project (user project #6 of `SplendidChip758`, Status `Todo` / `In Progress` / `Done`). Keep the issue, its branch and its PR connected:
+
+1. **Start from the issue**, so the branch is linked and its PR shows under the issue's Development section:
+   ```bash
+   gh issue develop <n> --base dev --name <type>/<topic> --checkout
+   ```
+   Closing keywords in a PR only link it when the PR targets the default branch (`main`). Feature PRs target `dev`, so the linked branch is what connects them.
+2. **Set the project Status to `In Progress`** (`gh project item-edit`, project #6).
+3. **Put `Closes #<n>` in the commit body** and in the PR description. The commit carries it to `main`, and GitHub closes the issue when `dev` ships to `main`. The project then moves it to `Done` on its own.
+4. **After the PR merges to `dev`:** tick the finished items in the issue's scope checklist, note anything left over, and leave the issue open and `In Progress` until the stable release closes it.
+
+Small fixes and docs don't need an issue.
 
 ## Code conventions
 
