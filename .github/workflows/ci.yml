@@ -1,6 +1,7 @@
 # Build checks for every pull request. The rulesets on main and dev require
-# both jobs, so they run on every PR (no path filters): a required check that
-# never starts would block docs-only PRs forever.
+# these jobs, so they run on every PR (no path filters): a required check that
+# never starts would block docs-only PRs forever. A job skipped by its `if`
+# counts as passed.
 name: ci
 
 on:
@@ -44,3 +45,28 @@ jobs:
 
       - name: Shell scripts parse
         run: for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
+
+  # PRs into main are merged with a merge commit, so every commit in them reaches
+  # semantic-release, not just the PR title. PRs into dev are squash-merged, and
+  # the pr-title check covers them.
+  commits:
+    if: github.base_ref == 'main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Conventional commit messages
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          types='feat|fix|perf|revert|docs|refactor|style|test|build|ci|chore'
+          bad=$(git log --no-merges --format='%h %s' "$BASE..$HEAD" \
+            | grep -Ev "^[0-9a-f]+ (($types)(\([a-z0-9-]+\))?!?: .+|Revert \")" || true)
+          if [[ -n $bad ]]; then
+            echo "::error::These commits aren't Conventional Commits (see CONTRIBUTING.md):"
+            echo "$bad"
+            exit 1
+          fi

@@ -37,7 +37,9 @@ Releases are fully automated: semantic-release reads every commit message to pic
 
 ## Branches and pull requests
 
-- Branch from `dev` and open the PR against `dev`. Merges to `dev` publish prereleases (`vX.Y.Z-dev.N`, image `:dev`). `main` is stable and only receives `dev` when it ships, plus urgent hotfixes.
+- Branch from `dev` and open the PR against `dev`. Merges to `dev` publish prereleases (`vX.Y.Z-dev.N`, image `:dev`). `main` is stable and only receives `dev` when it ships, plus urgent hotfixes (branched from `main`).
+- PRs into `dev` are squash-merged and PRs into `main` get a merge commit. The rulesets enforce both. The release workflow merges `main` back into `dev` after a stable release, so never open that PR yourself.
+- Don't open a PR per small change. Batch changes when only one needs a changelog line, and split them when each deserves its own (see CONTRIBUTING.md, Pull requests).
 - Branch names: `<type>/<short-topic>`, e.g. `feat/persistent-history`, `fix/host-editor-url`, `docs/roadmap`.
 - The title and description rules are in [.github/instructions/pull-request.instructions.md](.github/instructions/pull-request.instructions.md).
 

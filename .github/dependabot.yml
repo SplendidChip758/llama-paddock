@@ -1,6 +1,7 @@
 # Dependabot version updates:
 # https://docs.github.com/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
 #
+# Updates target dev, like every other change, and ship in the next prerelease.
 # Commit prefixes are chosen for semantic-release: updates that change what
 # ships (dashboard runtime deps, the Docker base image) are fix(deps) and cut a
 # patch release; dev deps and GitHub Actions are chore/ci and don't.
@@ -9,6 +10,7 @@ version: 2
 updates:
   - package-ecosystem: "npm"
     directory: "/dashboard"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
@@ -26,6 +28,7 @@ updates:
 
   - package-ecosystem: "docker"
     directory: "/dashboard"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
@@ -38,6 +41,7 @@ updates:
 
   - package-ecosystem: "github-actions"
     directory: "/"
+    target-branch: "dev"
     schedule:
       interval: "weekly"
     commit-message:
