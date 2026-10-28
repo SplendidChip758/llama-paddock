@@ -1,3 +1,15 @@
+## [0.5.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0-dev.1...v0.5.0-dev.2) (2026-10-28)
+
+### Features
+
+* **install:** add a login banner and Proxmox notes to the dashboard CT ([2d6451d](https://github.com/SplendidChip758/llama-paddock/commit/2d6451d37be8658d841d46586ddc7c2595509064))
+* **install:** add a prerelease installer with a disclaimer ([9bf2cde](https://github.com/SplendidChip758/llama-paddock/commit/9bf2cde0c5e802739c5dc177998353349eee7a3d))
+
+### Bug Fixes
+
+* **install:** describe bridges by their ports, not the host's IP ([21f7e9a](https://github.com/SplendidChip758/llama-paddock/commit/21f7e9ae0b5bf4d59f44e887b61fd71aa29651ca))
+* **install:** size the CT notes logo and use the console login mode ([f64df57](https://github.com/SplendidChip758/llama-paddock/commit/f64df578df03fc55dfd5a7af0b9bfa89e8b7df76))
+
 ## [0.5.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.4.0...v0.5.0-dev.1) (2026-10-28)
 
 ### Features
