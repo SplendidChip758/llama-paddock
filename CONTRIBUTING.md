@@ -93,13 +93,16 @@ To ship what's on `dev`:
 
 1. Open a PR from `dev` into `main` and merge it with **Create a merge commit**, not squash. Squashing would collapse every change into one changelog line and leave `dev` and `main` with diverging histories.
 2. The release workflow on `main` publishes `vX.Y.Z` with a changelog covering everything since the last stable release.
-3. Merge `main` back into `dev` (`git checkout dev && git merge main && git push`). This brings the `chore(release)` commit and the new tag into `dev`, so the next prerelease counts up from the new version instead of reusing it.
+3. Merge `main` back into `dev`: open a PR from `main` into `dev` (title e.g. `chore: merge main into dev`) and merge it with **Create a merge commit**. This brings the `chore(release)` commit and the new tag into `dev`, so the next prerelease counts up from the new version instead of reusing it.
 
 A hotfix can go straight to `main` as a normal squash-merged PR. Merge `main` back into `dev` afterwards in the same way.
+
+Both branches are protected by rulesets: changes go through a PR, force pushes and deletion are blocked, and the `ci` and `pr-title` checks must pass. Only the release workflow pushes directly, using the `RELEASE_DEPLOY_KEY` deploy key. `v*` tags can only be created by that key and can't be moved or deleted.
 
 ## Pull requests
 
 - Feature and fix PRs are squash-merged, so the **PR title** becomes the commit message on `main`. The `pr-title` check fails if it isn't a valid Conventional Commit.
+- The `ci` workflow typechecks and builds the dashboard and checks that the agents and shell scripts parse. Run `cd dashboard && npm run typecheck && npm run build` before pushing to catch failures early.
 - One logical change per PR keeps the changelog readable.
 
 ## How a release happens

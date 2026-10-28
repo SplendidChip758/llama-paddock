@@ -1,0 +1,115 @@
+# Roadmap
+
+Where llama-paddock is headed, grouped into milestones. Each milestone has a **done when** line: the point where it counts as finished.
+
+Progress is tracked in [GitHub milestones](https://github.com/SplendidChip758/llama-paddock/milestones) and their issues. This file is the overview, and the issues hold the details. Ideas and feedback are welcome: open a [feature request](https://github.com/SplendidChip758/llama-paddock/issues/new?template=feature_request.md).
+
+| | Milestone | Theme | Version |
+|---|---|---|---|
+| M1 | [Foundations](#m1-foundations) | Data that survives a restart, secured Ollama, Grafana | 0.x |
+| M2 | [Model workbench](#m2-model-workbench) | Find, size, create and benchmark models | 0.x |
+| M3 | [Alerts](#m3-alerts) | Find out when something breaks | 0.x |
+| M4 | [Access & displays](#m4-access--displays) | More people, more screens, your own colors | 0.x |
+| M5 | [Fleet management](#m5-fleet-management--10) | Manage many hosts as one | ends with **1.0** |
+| M6 | [Platforms](#m6-platforms) | Run the agent everywhere Ollama runs | 1.x |
+| M7 | [Routing gateway](#m7-routing-gateway) | One OpenAI-compatible API for the whole fleet | 1.x |
+| | [Later](#later) | Other providers | 1.x or 2.0 |
+
+## Versioning
+
+Versions are cut by semantic-release from commit messages, so a milestone usually ships across several releases. A version number isn't a milestone reward. It tells users what an upgrade will cost them.
+
+- **0.x (now).** Anything may change. Breaking changes only bump the minor version.
+- **1.0** comes at the end of M5. By then the changes that are likely to break things are done:
+  - the storage format (M1)
+  - the switch from one login to user accounts (M4)
+  - agent versioning and self-update (M5)
+
+  1.0 then promises that upgrading within 1.x never needs a manual step. [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) lists what has to be true before 1.0 is tagged.
+- **After 1.0**, new features are minor releases, however big they are. Platforms (M6) and the gateway (M7) are additions, so they ship as 1.x.
+- **The major version goes up (2.0, 3.0, …)** only when an upgrade needs you to act:
+  - the dashboard can no longer talk to agents from the previous major, and they can't update themselves
+  - a config key, env var or `/api` endpoint is removed or changes meaning
+  - the data directory can't be migrated automatically
+  - a platform or the minimum Node.js version is dropped
+- **A likely 2.0:** routing to other providers (see [Later](#later)). If "hosts" become general "providers" in the config and API, that change would be breaking.
+
+## M1: Foundations
+
+Several later features need these: alerts and benchmarks need stored data, and the gateway needs authenticated Ollama connections.
+
+- **Persistent metric history.** Store metrics on disk (SQLite in the data directory) instead of in memory, with downsampling so weeks of data stay small, and a retention setting. Job state survives a restart too.
+- **Long-range charts.** Pick a time range (1h / 24h / 7d / 30d) on the Monitor tab, as full charts rather than only sparklines.
+- **Ollama API keys.** Connect to Ollama instances that sit behind an API key or bearer token (reverse proxy, hosted Ollama). The key is stored per host and set from **Add host** / **Edit host**.
+- **Prometheus `/metrics` endpoint.** Expose GPU, host and model metrics for Prometheus/Grafana. It is protected by a token, or can be opened for a scraper.
+
+**Done when:** a dashboard restart keeps its history, you can view a week of GPU usage, a key-protected Ollama works, and Grafana can scrape the fleet.
+
+## M2: Model workbench
+
+Everything about choosing and tuning a model for your hardware.
+
+- **GPU/CPU split everywhere.** The Monitor tab already shows the split for each loaded model. Show it on the fleet overview and in the Models tab too, and flag any model that isn't fully on the GPU, with a hint on what to change.
+- **Create a new model from scratch.** A **New model** button instead of only Edit or Copy. The base can be a library model (pulled if missing), a Hugging Face GGUF or an uploaded GGUF. Set parameters, system prompt and template, or start from presets.
+- **Browse the Ollama library.** Search and filter available models (capability, size, quantization) from the Pull dialog, and pull a tag directly. Ollama has no official search API, so this falls back to a plain pull by name if the source changes.
+- **Fit estimates.** Estimate the memory a model needs at a given context length (weights + KV cache + overhead) and compare it with each GPU: fits / partly on CPU / doesn't fit, plus the largest context that still fits.
+- **Test prompt panel.** Chat with a model on a chosen host and see tokens/sec, time to first token and load time. Compare the same prompt on two hosts.
+- **Benchmarks.** Run a standard prompt set on a host and save prompt and generation tok/s, time to first token, VRAM and split. Compare across hosts, models and quantizations.
+- **"Fits on this GPU" filter.** In the library browser, pick a host/GPU and a context length, and see only the models that fit, with expected speed where benchmarks exist.
+
+**Done when:** you can find a model in the library, see whether it fits on a chosen GPU at your context length, create a custom model without a local copy, and benchmark it.
+
+## M3: Alerts
+
+- **Alert rules.** GPU temperature, VRAM usage, host/agent offline, Ollama crashed or restarting, disk nearly full, model partly on CPU. Rules have thresholds, a duration ("for 2 minutes"), and apply to the whole fleet or to single hosts.
+- **Notification channels.** Generic webhook, Discord, Slack and email (SMTP). Each rule can go to one or more channels, and each channel has a test button.
+- **Alert history.** A list of fired and resolved alerts in the UI, with a badge on affected hosts. Repeats are suppressed so a flapping host doesn't spam you.
+
+**Done when:** a host going offline and an overheating GPU each send a Discord message and an email, and a matching "resolved" message follows.
+
+## M4: Access & displays
+
+- **Users and roles.** Several users, each with an **admin** role (full control) or a **viewer** role (read-only). Admins manage users in the UI. The current single login becomes the first admin.
+- **Wall display.** A view-only page for a wall-mounted screen or TV: large fleet overview, no controls, auto-refresh, dark theme, works without signing in via a revocable display link/token.
+- **Mobile layout and PWA.** Usable on a phone. Installable as an app, with the alert badge visible.
+- **Themes.** A light / dark / system switch, built-in presets (including high contrast), and a custom theme editor for the accent, background, text and status colors, with a contrast check. Themes are saved per user and can be imported and exported as JSON. Charts and the wall display follow the theme.
+
+**Done when:** a viewer account can't change anything, a TV shows the fleet from a display link, the dashboard works on a phone home screen, and each user can pick or build their own color theme.
+
+## M5: Fleet management → 1.0
+
+- **Fleet-wide model actions.** Pull, delete or copy a model on several hosts at once, with progress for each host in the Jobs drawer.
+- **Model comparison.** A matrix of models across hosts showing which are missing or out of date, with one click to sync.
+- **Agent versions and one-click update.** Show each agent's version and flag outdated ones. Update an agent from the dashboard using the release assets and `SHA256SUMS`.
+- **Remote agent install.** Install the agent from the dashboard over SSH (or `pct exec` on a Proxmox host). The token and host entry fill in automatically.
+- **Prepare 1.0.** Versioned agent protocol, automatic data migrations, documented `/api`, an upgrade test in CI, and the semantic-release change that cuts 1.0.0.
+
+**Done when:** you can roll a new model out to every host, and update every agent, without opening a terminal. Then 1.0 is tagged.
+
+## M6: Platforms
+
+- **Windows agent as a Windows service.** Run without a logged-in user. The tricky part: Ollama for Windows is a tray app that reads *user* environment variables. The service has to either start and manage `ollama serve` itself, or work with a small helper in the user's session. Both modes should be supported, with the logon task kept as a fallback.
+- **Windows tray icon.** Agent and Ollama status at a glance. A menu to open the dashboard, restart Ollama, open logs or copy the token. It also serves as the user-session helper for service mode.
+- **WSL installer.** Install the agent inside WSL2 (systemd or not), including the Windows-side port forwarding/firewall needed for the dashboard to reach it.
+- **AMD GPUs (ROCm).** GPU stats via `amd-smi` / `rocm-smi`, shown in the same GPU cards as NVIDIA.
+- **Apple Silicon and a macOS agent.** A launchd-based agent with unified-memory/GPU stats, environment editing via `launchctl setenv`, and Ollama app restart.
+
+**Done when:** each of Linux, Windows (service + tray), WSL and macOS with NVIDIA, AMD or Apple GPUs shows full stats and can be managed.
+
+## M7: Routing gateway
+
+Similar in spirit to OmniRoute: the dashboard becomes the single entry point for the whole fleet.
+
+- **OpenAI-compatible API.** `/v1/chat/completions`, `/v1/completions`, `/v1/embeddings` and `/v1/models` on the dashboard, with streaming, forwarded to Ollama's OpenAI-compatible endpoints.
+- **Fleet model catalog.** `/v1/models` lists every model available anywhere in the fleet, with optional aliases (e.g. `fast` → `qwen3:8b`).
+- **Load balancing.** Send each request to a healthy instance that has the model, preferring ones where it's already loaded and with free VRAM. Retry on another instance if one fails.
+- **Rules and groups.** Group hosts (e.g. "gpu-big", "office"), and pin models or aliases to groups. Set priorities, fallbacks and per-key limits.
+- **Client API keys and usage.** Issue keys for apps that call the gateway, with per-key request/token counts and logs. Keys are tied to the M4 users.
+- **Token compression and caching.** Optional prompt compression (trim or summarize old turns of long chats, shrink bulky tool output), a response cache for repeated requests, and sticky routing so a conversation keeps hitting the same KV cache. Tokens saved show in the usage stats.
+
+**Done when:** an app pointed at `http://paddock:8080/v1` with a key can use any model in the fleet. Requests spread across hosts and fail over when one goes down, and compression measurably cuts tokens on long chats.
+
+## Later
+
+- **Other providers in the gateway.** Route to OpenAI-compatible services (OpenAI, Anthropic, OpenRouter, vLLM, llama.cpp server, LM Studio) next to Ollama, with fallback from local to cloud. This is a likely 2.0 if it changes how hosts are configured.
+- Ideas from issues and discussions land here first.

@@ -1,0 +1,46 @@
+# Build checks for every pull request. The rulesets on main and dev require
+# both jobs, so they run on every PR (no path filters): a required check that
+# never starts would block docs-only PRs forever.
+name: ci
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+
+  agents:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Agents parse
+        run: |
+          node --check agent/linux/paddock-agent.mjs
+          node --check agent/windows/paddock-agent.mjs
+
+      - name: Shell scripts parse
+        run: for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
