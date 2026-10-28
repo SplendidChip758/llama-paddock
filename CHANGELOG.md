@@ -1,3 +1,9 @@
+## [0.5.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.4.0...v0.5.0-dev.1) (2026-10-28)
+
+### Features
+
+* **dashboard:** persist metric history and jobs in SQLite ([182d025](https://github.com/SplendidChip758/llama-paddock/commit/182d0256eb8a0258adb8586e38b5edb2e4bc18df)), closes [#3](https://github.com/SplendidChip758/llama-paddock/issues/3)
+
 ## [0.4.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.3.0...v0.4.0) (2026-10-27)
 
 ### Features
