@@ -1,3 +1,9 @@
+## [0.5.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0-dev.3...v0.5.0-dev.4) (2026-10-28)
+
+### Bug Fixes
+
+* **agent-linux:** find nvidia-smi on WSL ([#56](https://github.com/SplendidChip758/llama-paddock/issues/56)) ([b4af67a](https://github.com/SplendidChip758/llama-paddock/commit/b4af67a6881fced01181064f0d9ae160d77c0aa2))
+
 ## [0.5.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0-dev.2...v0.5.0-dev.3) (2026-10-28)
 
 ### Bug Fixes
