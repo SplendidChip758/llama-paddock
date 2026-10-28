@@ -101,6 +101,7 @@ Either way it:
 - installs Node.js if it's missing or older than 18.15 (distro package, falling back to NodeSource 22.x),
 - installs the agent to `/opt/llama-paddock-agent` and enables `llama-paddock-agent.service`,
 - writes `/etc/llama-paddock-agent.env` (mode 600) with a generated token,
+- if Ollama only listens on localhost (no `OLLAMA_HOST`), asks whether other machines may reach it, and if so sets `OLLAMA_HOST=0.0.0.0` the same way the Environment tab does. Ollama's API has no login, so only say yes on a network you trust. On a Proxmox host the question is asked before installing into the container. Unattended runs and `update-llama-paddock-agent` never change it unless you set `PADDOCK_OLLAMA_REMOTE=1`,
 - prints the Ollama URL, agent URL and agent token to enter under **Add host** in the dashboard.
 
 Re-running it, or running `update-llama-paddock-agent` inside the container, updates the agent and **keeps the token**. To share one token across hosts, set `PADDOCK_AGENT_TOKEN=<token>` before the command. Running `bash install/agent.sh` from a clone of the repo uses the agent files in the clone.
