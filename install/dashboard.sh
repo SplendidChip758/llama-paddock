@@ -440,6 +440,7 @@ proxmox_install() {
     bash -c "curl -fsSL '$SELF_URL' | bash"
 
   local ip; ip=$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}')
+  pct set "$CT_ID" --description "$(ct_notes "$ip")" >/dev/null || msg_warn "could not set the container notes"
   echo
   msg_ok "${C_B}llama-paddock is running in CT ${CT_ID}: http://${ip:-<ct-ip>}:${PORT}${C_0}"
   local how=()
@@ -689,6 +690,7 @@ local_uninstall() {
 
   systemctl disable --now llama-paddock >/dev/null 2>&1 || true
   rm -f /etc/systemd/system/llama-paddock.service /usr/local/bin/update-llama-paddock /usr/local/bin/uninstall-llama-paddock
+  rm -f /etc/profile.d/00_llama-paddock.sh
   rm -rf "$APP_DIR" "${APP_DIR}.old"
   systemctl daemon-reload 2>/dev/null || true
   if [[ -n $purge ]]; then
@@ -701,6 +703,73 @@ local_uninstall() {
     echo "   To delete them too:  PADDOCK_PURGE=1 uninstall-llama-paddock  (or rm -rf both)"
   fi
   echo "   Node.js was left installed."
+}
+
+# Login banner for a container this installer created (not for installs into an existing
+# machine, which has its own). It reads everything at login, so it never goes stale.
+MOTD_FILE=/etc/profile.d/00_llama-paddock.sh
+write_motd() {
+  cat > "$MOTD_FILE" <<EOF
+# llama-paddock login banner (written by install/dashboard.sh). Delete this file to turn it off.
+case \$- in *i*) ;; *) return 0 ;; esac
+__lp_ver=\$(cat ${APP_DIR}/VERSION 2>/dev/null)
+__lp_port=\$(sed -n 's/^PORT=//p' ${CFG_DIR}/llama-paddock.env 2>/dev/null | tail -1)
+__lp_ip=\$(hostname -I 2>/dev/null | awk '{print \$1}')
+if systemctl is-active --quiet llama-paddock 2>/dev/null; then __lp_state='\033[32mrunning\033[0m'; else __lp_state='\033[31mnot running\033[0m'; fi
+case \$__lp_ver in *-*) __lp_ver="\$__lp_ver (prerelease)" ;; esac
+printf '\n\033[1mllama\033[33mpaddock\033[0m\033[1m dashboard\033[0m  %s\n' "\${__lp_ver:-}"
+printf '    🌐   GitHub:     https://github.com/${REPO}\n'
+printf '    🖥️    OS:         %s\n' "\$(. /etc/os-release 2>/dev/null; echo "\${PRETTY_NAME:-unknown}")"
+printf '    🏠   Hostname:   %s\n' "\$(hostname)"
+printf "    💡   Dashboard:  http://%s:%s  (\$__lp_state)\n" "\${__lp_ip:-<ip>}" "\${__lp_port:-8080}"
+printf '    🔄   Update:     update-llama-paddock\n\n'
+unset __lp_ver __lp_port __lp_ip __lp_state
+EOF
+  chmod 644 "$MOTD_FILE"
+  # Quiet the distribution's own login text (Ubuntu's update-motd scripts, Debian's /etc/motd)
+  [[ -d /etc/update-motd.d ]] && chmod -x /etc/update-motd.d/* 2>/dev/null || true
+  [[ -f /etc/motd ]] && : > /etc/motd
+  msg_ok "Login banner added"
+}
+
+# ct_notes IP — HTML for the container's Notes panel in the Proxmox UI (which loads Font Awesome)
+ct_notes() {
+  local ip=$1 open="" channel=""
+  # a DHCP address can change, so only link a static one
+  [[ $CT_IP != dhcp && -n $ip ]] && open="
+  <p style='margin: 16px 0;'>
+    <a href='http://${ip}:${PORT}' target='_blank' rel='noopener noreferrer'>
+      <img src='https://img.shields.io/badge/📈-Open%20the%20dashboard-c8a04a' alt='Open the dashboard' />
+    </a>
+  </p>"
+  is_prerelease && channel="
+  <p style='margin: 12px 0;'>
+    <img src='https://img.shields.io/badge/⚠️-Prerelease%20channel-8a6d2f' alt='Prerelease channel' />
+  </p>"
+  cat <<EOF
+<div align='center'>
+  <a href='https://github.com/${REPO}' target='_blank' rel='noopener noreferrer'>
+    <img src='https://raw.githubusercontent.com/${REPO}/main/docs/logo/logo-mark.svg' alt='llama-paddock' style='width:96px;height:96px;'/>
+  </a>
+
+  <h2 style='font-size: 24px; margin: 20px 0;'>llama-paddock dashboard</h2>
+${open}${channel}
+  <p style='margin: 12px 0;'>Update: <code>update-llama-paddock</code> in the container</p>
+
+  <span style='margin: 0 10px;'>
+    <i class="fa fa-github fa-fw" style="color: #f5f5f5;"></i>
+    <a href='https://github.com/${REPO}' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #c8a04a;'>GitHub</a>
+  </span>
+  <span style='margin: 0 10px;'>
+    <i class="fa fa-tag fa-fw" style="color: #f5f5f5;"></i>
+    <a href='https://github.com/${REPO}/releases' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #c8a04a;'>Releases</a>
+  </span>
+  <span style='margin: 0 10px;'>
+    <i class="fa fa-exclamation-circle fa-fw" style="color: #f5f5f5;"></i>
+    <a href='https://github.com/${REPO}/issues' target='_blank' rel='noopener noreferrer' style='text-decoration: none; color: #c8a04a;'>Issues</a>
+  </span>
+</div>
+EOF
 }
 
 # uninstall-llama-paddock: local_uninstall copied out of this script, so it works offline
@@ -749,6 +818,7 @@ local_install() {
   write_config
   PORT=$(sed -n 's/^PORT=//p' "$CFG_DIR/llama-paddock.env" | tail -1); PORT=${PORT:-8080}
   write_service
+  [[ -n ${PADDOCK_NESTED-} ]] && write_motd
 
   if [[ -n $has_systemd ]]; then
     systemctl daemon-reload

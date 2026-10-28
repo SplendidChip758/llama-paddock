@@ -170,6 +170,8 @@ Every setting can be preset in the environment (`CT_OS`, `CT_ID`, `CT_HOSTNAME`,
 
 It then downloads the latest template for the distribution you pick (latest **Ubuntu LTS** by default, or **Debian**), creates an unprivileged container, and installs the dashboard inside it.
 
+The container's **Notes** in the Proxmox UI get links to the dashboard (when it has a static IP), releases and issues. Logging in to the container shows a short banner with its version, OS, hostname, dashboard URL and status. Delete `/etc/profile.d/00_llama-paddock.sh` to turn the banner off.
+
 **Inside a container or VM** it:
 - installs Node.js 22 if needed,
 - downloads the prebuilt dashboard from the latest GitHub release, or builds from `main` if there's no release yet,
