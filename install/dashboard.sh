@@ -207,11 +207,18 @@ storage_items() {
     | awk 'NR > 1 && $3 == "active" { printf "%s\n%s · %.0f GiB free\n", $1, $2, $6 / 1048576 }'
 }
 
+# bridge_items — "name" and "ports eno1 · VLAN aware" on alternate lines. Not the bridge's IP:
+# that is the Proxmox host's own address, which says nothing about the network the CT joins.
 bridge_items() {
-  local b addr
+  local b ports desc
   for b in $(ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//'); do
-    addr=$(ip -4 -o addr show dev "$b" 2>/dev/null | awk '{print $4; exit}')
-    printf '%s\n%s\n' "$b" "${addr:-bridge}"
+    # physical ports, bonds and VLANs; not the tap/veth/firewall links of running guests
+    ports=$(ip -o link show master "$b" 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' \
+      | { grep -Ev '^(tap|veth|fwpr|fwln|fwbr)' || true; } | paste -sd, - | sed 's/,/, /g')
+    desc=${ports:+ports $ports}
+    desc=${desc:-no physical port}
+    ip -d link show "$b" 2>/dev/null | grep -q 'vlan_filtering 1' && desc+=" · VLAN aware"
+    printf '%s\n%s\n' "$b" "$desc"
   done
 }
 
