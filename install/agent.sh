@@ -222,7 +222,8 @@ local_install() {
   if ! systemctl list-unit-files ollama.service &>/dev/null || ! systemctl cat ollama.service &>/dev/null; then
     msg_warn "ollama.service not found — the agent will still report stats, but env editing/restart need Ollama installed as a systemd service"
   fi
-  command -v nvidia-smi >/dev/null || msg_warn "nvidia-smi not found — GPU stats will be unavailable"
+  # WSL's nvidia-smi isn't on sudo's PATH; the agent looks there itself
+  command -v nvidia-smi >/dev/null || [[ -x /usr/lib/wsl/lib/nvidia-smi ]] || msg_warn "nvidia-smi not found — GPU stats will be unavailable"
 
   TMP_DIR=$(mktemp -d)
   trap 'rm -rf "${TMP_DIR:-}"' EXIT
