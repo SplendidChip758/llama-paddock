@@ -237,7 +237,7 @@ configure_ollama_host() {
   local remote=${PADDOCK_OLLAMA_REMOTE-}
   if [[ -z $remote ]]; then
     if [[ -z ${PADDOCK_YES-} && -r /dev/tty ]]; then
-      confirm "$OLLAMA_REMOTE_Q" y && remote=1 || remote=0
+      confirm "$OLLAMA_REMOTE_Q" n && remote=1 || remote=0
     else
       remote=0
     fi
