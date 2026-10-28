@@ -43,16 +43,25 @@ Releases are fully automated: semantic-release reads every commit message to pic
 
 ## Issues and the roadmap project
 
-Planned work has an issue (label `roadmap`, a milestone) and an item on the **llama-paddock roadmap** project (user project #6 of `SplendidChip758`, Status `Todo` / `In Progress` / `Done`). Keep the issue, its branch and its PR connected:
+Planned work has an issue (label `roadmap`, a milestone) and an item on the **llama-paddock roadmap** project (user project #6 of `SplendidChip758`). Its Status moves through:
+
+| Status | Means |
+|---|---|
+| `Todo` | not started |
+| `In Progress` | being worked on, on a branch |
+| `In Review` | PR open, or merged to `dev` and being tested in a prerelease |
+| `Done` | shipped in a stable release (set automatically when the issue closes) |
+
+Keep the issue, its branch and its PR connected:
 
 1. **Start from the issue**, so the branch is linked and its PR shows under the issue's Development section:
    ```bash
    gh issue develop <n> --base dev --name <type>/<topic> --checkout
    ```
    Closing keywords in a PR only link it when the PR targets the default branch (`main`). Feature PRs target `dev`, so the linked branch is what connects them.
-2. **Set the project Status to `In Progress`** (`gh project item-edit`, project #6).
+2. **Set the project Status to `In Progress`** (`gh project item-edit`, project #6) when you start, and to **`In Review`** when you open the PR.
 3. **Put `Closes #<n>` in the commit body** and in the PR description. The commit carries it to `main`, and GitHub closes the issue when `dev` ships to `main`. The project then moves it to `Done` on its own.
-4. **After the PR merges to `dev`:** tick the finished items in the issue's scope checklist, note anything left over, and leave the issue open and `In Progress` until the stable release closes it.
+4. **After the PR merges to `dev`:** tick the finished items in the issue's scope checklist, note anything left over, and leave the issue open and `In Review` until the stable release closes it.
 
 Small fixes and docs don't need an issue.
 
