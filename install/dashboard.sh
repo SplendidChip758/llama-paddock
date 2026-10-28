@@ -33,7 +33,7 @@ APP_DIR=/opt/llama-paddock
 CFG_DIR=/etc/llama-paddock
 DATA_DIR=/var/lib/llama-paddock
 SVC_USER=llama-paddock
-NODE_MIN="20.9"
+NODE_MIN="22.13"
 
 # ---------------------------------------------------------------- ui helpers
 init_colors() {
@@ -550,7 +550,8 @@ write_config() {
     cat > "$CFG_DIR/config.yaml" <<EOF
 # llama-paddock config. Restart after editing: systemctl restart llama-paddock
 poll_interval: 3        # seconds between polls of every host
-history_points: 400     # samples kept in memory for sparklines
+history_points: 400     # recent samples shown in sparklines
+history_retention_days: 30  # metric history kept in /var/lib/llama-paddock
 
 # Add hosts in the dashboard (Add host). Hosts listed here also work, but are
 # read-only in the UI. Tokens can live in llama-paddock.env as \${VAR}.

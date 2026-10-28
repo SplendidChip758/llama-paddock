@@ -79,7 +79,7 @@ flowchart LR
 
 | Piece | Runs where | Does what |
 |---|---|---|
-| **Dashboard** (`dashboard/`) | Docker container | Polls every instance (background poller started from `instrumentation.ts`), keeps metric history in memory, serves the UI and a JSON API, runs pulls/creates as background jobs that survive a page refresh |
+| **Dashboard** (`dashboard/`) | Docker container | Polls every instance (background poller started from `instrumentation.ts`), stores metric history and job state in SQLite in the data directory, serves the UI and a JSON API, runs pulls/creates as background jobs that survive a page refresh and a restart |
 | **Linux agent** (`agent/linux/`) | Each Linux Ollama host, systemd service as root | Stats from `/proc` + `nvidia-smi`; edits `/etc/systemd/system/ollama.service.d/override.conf`, runs `daemon-reload` + `systemctl restart ollama`; tails `journalctl -u ollama` |
 | **Windows agent** (`agent/windows/`) | Each Windows PC, Scheduled Task at logon in your session | Stats from Node/`tasklist`/`netstat` + `nvidia-smi`; edits your **user** environment variables (what Ollama for Windows reads); restarts the Ollama tray app with the new values; tails `%LOCALAPPDATA%\Ollama\server.log` |
 
@@ -202,11 +202,11 @@ cp .env.example .env    # initial dashboard login
 docker compose up -d
 ```
 
-Sign in at `http://<docker-host>:8080`, choose a new password, then **Add host**. Hosts and the login are kept in the `paddock-data` volume (`/data`).
+Sign in at `http://<docker-host>:8080`, choose a new password, then **Add host**. Hosts, the login and metric history (`paddock.db`) are kept in the `paddock-data` volume (`/data`).
 
 For the latest prerelease from the `dev` branch, use the `:dev` tag. To build the image yourself instead, swap `image:` for `build: ./dashboard` in `docker-compose.yml`. In an unprivileged LXC, Docker needs `nesting=1,keyctl=1`.
 
-`config.yaml` is optional: mount it for `poll_interval` / `history_points`, or to define hosts declaratively (those are read-only in the UI). It expands `${VAR}` from the environment, so tokens can stay in `.env`.
+`config.yaml` is optional: mount it for `poll_interval`, `history_points` / `history_retention_days`, or to define hosts declaratively (those are read-only in the UI). It expands `${VAR}` from the environment, so tokens can stay in `.env`.
 
 ### Login
 
@@ -218,7 +218,7 @@ For the latest prerelease from the `dev` branch, use the `:dev` tag. To build th
 
 ### From source
 
-Requires Node 20.9 or newer:
+Requires Node 22.13 or newer (for the built-in `node:sqlite`):
 
 ```bash
 cd dashboard
@@ -292,7 +292,7 @@ Everything the UI does is plain JSON, so it can be scripted (n8n, Hermes, cron):
 | Method | Path | |
 |---|---|---|
 | GET | `/api/instances` | all instances with latest stats + ps |
-| GET | `/api/instances/{id}/history` | metric history |
+| GET | `/api/instances/{id}/history` | latest `history_points` polls; `?range=1h\|6h\|24h\|7d\|30d` for a downsampled range |
 | GET | `/api/instances/{id}/models` | `ollama list` |
 | POST | `/api/instances/{id}/models/show` | `{model}` → details, parsed params, native ctx |
 | POST | `/api/instances/{id}/models/pull` | `{model}` → job |
@@ -322,7 +322,6 @@ Development: `cd dashboard && npm install && PADDOCK_DATA_DIR=../data npm run de
 
 ## Limitations
 
-- Metric history and job state are in memory and reset when the dashboard restarts.
 - The Linux agent assumes Ollama runs under systemd, as with the official install script. If Ollama runs in Docker, set its environment in compose instead. Monitoring and model management still work.
 - The Windows agent targets the standard Ollama desktop install. If you run `ollama serve` as a Windows service (NSSM or similar), the agent can't manage that service's environment.
 - On Windows with consumer GPUs, `nvidia-smi` doesn't report per-process VRAM (a WDDM limitation), so the process table is empty there.

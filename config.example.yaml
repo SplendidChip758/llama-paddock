@@ -5,7 +5,9 @@
 # expanded from the container environment (.env), so tokens don't have to live here.
 
 poll_interval: 3        # seconds between polls of every instance
-history_points: 400     # samples kept in memory for sparklines (~20 min at 3s)
+history_points: 400     # recent samples shown in sparklines (~20 min at 3s)
+history_retention_days: 30  # metric history kept in the data dir: raw polls for 24h,
+                            # 1-min averages for 7 days, 15-min averages after that
 
 instances:
   - id: ollama-01
