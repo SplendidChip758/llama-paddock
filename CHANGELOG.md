@@ -1,3 +1,10 @@
+## [0.5.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0-dev.2...v0.5.0-dev.3) (2026-10-28)
+
+### Bug Fixes
+
+* **agent-windows:** start when agent.json has a UTF-8 BOM ([#55](https://github.com/SplendidChip758/llama-paddock/issues/55)) ([84fb0a3](https://github.com/SplendidChip758/llama-paddock/commit/84fb0a3a95091092ed58d9adb5457835b0990b4c))
+* **install:** align the login banner and skip Ubuntu's legal notice ([#53](https://github.com/SplendidChip758/llama-paddock/issues/53)) ([be20e9c](https://github.com/SplendidChip758/llama-paddock/commit/be20e9cc907d0176e5a5b5ad166c2321432bcfba))
+
 ## [0.5.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0-dev.1...v0.5.0-dev.2) (2026-10-28)
 
 ### Features
