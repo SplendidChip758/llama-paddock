@@ -115,7 +115,7 @@ proxmox_install() {
   local remote=${PADDOCK_OLLAMA_REMOTE-}
   if [[ -z $remote && -z ${PADDOCK_YES-} && -r /dev/tty ]] \
     && ! pct exec "$CT_ID" -- systemctl show ollama.service -p Environment --value 2>/dev/null | grep -q 'OLLAMA_HOST='; then
-    confirm "$OLLAMA_REMOTE_Q" y && remote=1 || remote=0
+    confirm "$OLLAMA_REMOTE_Q" n && remote=1 || remote=0
   fi
 
   pct exec "$CT_ID" -- env \
