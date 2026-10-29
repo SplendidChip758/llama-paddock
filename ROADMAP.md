@@ -8,11 +8,12 @@ Progress is tracked in [GitHub milestones](https://github.com/SplendidChip758/ll
 |---|---|---|---|
 | M1 | [Foundations](#m1-foundations) | Data that survives a restart, secured Ollama and agents, Grafana | 0.x |
 | M2 | [Model workbench](#m2-model-workbench) | Find, size, create and benchmark models | 0.x |
-| M3 | [Alerts](#m3-alerts) | Find out when something breaks | 0.x |
+| M3 | [Alerts & diagnostics](#m3-alerts--diagnostics) | Find out when something breaks, and why | 0.x |
 | M4 | [Access & displays](#m4-access--displays) | More people, more screens, your own colors | 0.x |
-| M5 | [Fleet management](#m5-fleet-management--10) | Manage many hosts as one | ends with **1.0** |
+| M5 | [Updates](#m5-updates--10) | Update agents, Ollama and the dashboard from the UI | ends with **1.0** |
 | M6 | [Platforms](#m6-platforms) | Run the agent everywhere Ollama runs | 1.x |
 | M7 | [Routing gateway](#m7-routing-gateway) | One OpenAI-compatible API for the whole fleet | 1.x |
+| M8 | [Fleet operations](#m8-fleet-operations) | Run many hosts as one | 1.x |
 | | [Later](#later) | Other providers | 1.x or 2.0 |
 
 ## Versioning
@@ -26,7 +27,7 @@ Versions are cut by semantic-release from commit messages, so a milestone usuall
   - agent versioning and self-update (M5)
 
   1.0 then promises that upgrading within 1.x never needs a manual step. [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) lists what has to be true before 1.0 is tagged.
-- **After 1.0**, new features are minor releases, however big they are. Platforms (M6) and the gateway (M7) are additions, so they ship as 1.x.
+- **After 1.0**, new features are minor releases, however big they are. Platforms (M6), the gateway (M7) and fleet operations (M8) are additions, so they ship as 1.x. They don't depend on each other, so their numbers aren't a strict order: work on them can overlap.
 - **The major version goes up (2.0, 3.0, …)** only when an upgrade needs you to act:
   - the dashboard can no longer talk to agents from the previous major, and they can't update themselves
   - a config key, env var or `/api` endpoint is removed or changes meaning
@@ -61,13 +62,16 @@ Everything about choosing and tuning a model for your hardware.
 
 **Done when:** you can find a model in the library, see whether it fits on a chosen GPU at your context length, create a custom model without a local copy, and benchmark it.
 
-## M3: Alerts
+## M3: Alerts & diagnostics
 
 - **Alert rules.** GPU temperature, VRAM usage, host/agent offline, Ollama crashed or restarting, disk nearly full, model partly on CPU. Rules have thresholds, a duration ("for 2 minutes"), and apply to the whole fleet or to single hosts.
 - **Notification channels.** Generic webhook, Discord, Slack and email (SMTP). Each rule can go to one or more channels, and each channel has a test button.
 - **Alert history.** A list of fired and resolved alerts in the UI, with a badge on affected hosts. Repeats are suppressed so a flapping host doesn't spam you.
+- **GPU check.** Spot the case where `nvidia-smi` sees the GPU but Ollama has fallen back to the CPU, for example after a suspend and resume or a driver update. Show the relevant log lines, the likely cause and a fix to run.
+- **Context and reload warnings.** Flag models that a client loaded with a smaller context than the host is set to, so long prompts get cut off without an error, and models that reload over and over because clients keep changing `num_ctx` or ignore `keep_alive`.
+- **Request log.** Requests per host from Ollama's own log: which clients call it, which endpoints, error rates and slow requests. No gateway needed. Prompts aren't recorded.
 
-**Done when:** a host going offline and an overheating GPU each send a Discord message and an email, and a matching "resolved" message follows.
+**Done when:** a host going offline and an overheating GPU each send a Discord message and an email, and a matching "resolved" message follows. A host that loses its GPU, or a client that cuts its context short, is flagged with the likely fix, and each host shows which clients call it.
 
 ## M4: Access & displays
 
@@ -78,18 +82,17 @@ Everything about choosing and tuning a model for your hardware.
 
 **Done when:** a viewer account can't change anything, a TV shows the fleet from a display link, the dashboard works on a phone home screen, and each user can pick or build their own color theme.
 
-## M5: Fleet management → 1.0
+## M5: Updates → 1.0
 
-- **Fleet-wide model actions.** Pull, delete or copy a model on several hosts at once, with progress for each host in the Jobs drawer.
-- **Model comparison.** A matrix of models across hosts showing which are missing or out of date, with one click to sync.
+Keeping the fleet current without SSH, and the changes 1.0 has to wait for.
+
 - **Agent repository.** The agents move to their own repo with their own releases, so an agent fix doesn't need a dashboard release. A protocol version in `/health` says which agents and dashboards work together.
 - **Agent updates.** Flag agents older than the latest agent release, and update one or all of them from the dashboard using the release assets and `SHA256SUMS`.
 - **Dashboard updates.** Check for a newer release on the install's channel (stable or prerelease) and show it with its release notes. On installer installs, one click updates the dashboard after backing up its data. Docker installs show the command to pull the new image.
-- **Remote agent install.** Install the agent from the dashboard over SSH (or `pct exec` on a Proxmox host). The token and host entry fill in automatically.
-- **Agent enrollment.** Give the agent installer the dashboard's address and a one-time enrollment code, and the host adds itself: no copying URLs and tokens. Codes are single use and expire, and the exchange is encrypted with the code, so nothing else on the network can enroll a host or read the agent's token.
+- **Ollama updates.** Show each host's Ollama version and flag hosts that are behind. Update one host or all of them, pin a host to its version, and roll back when an update breaks GPU use.
 - **Prepare 1.0.** Versioned agent protocol, automatic data migrations, documented `/api`, an upgrade test in CI, and the semantic-release change that cuts 1.0.0.
 
-**Done when:** you can roll a new model out to every host, and update every agent and the dashboard itself, without opening a terminal. Then 1.0 is tagged.
+**Done when:** every agent, every host's Ollama and the dashboard itself can be updated from the UI, and a bad Ollama update rolled back, without opening a terminal. Then 1.0 is tagged.
 
 ## M6: Platforms
 
@@ -113,6 +116,20 @@ Similar in spirit to OmniRoute: the dashboard becomes the single entry point for
 - **Token compression and caching.** Optional prompt compression (trim or summarize old turns of long chats, shrink bulky tool output), a response cache for repeated requests, and sticky routing so a conversation keeps hitting the same KV cache. Tokens saved show in the usage stats.
 
 **Done when:** an app pointed at `http://paddock:8080/v1` with a key can use any model in the fleet. Requests spread across hosts and fail over when one goes down, and compression measurably cuts tokens on long chats.
+
+## M8: Fleet operations
+
+Day-to-day work across many hosts: adding them, keeping them alike, and keeping their disks and power bills in check.
+
+- **Remote agent install.** Install the agent from the dashboard over SSH (or `pct exec` on a Proxmox host). The token and host entry fill in automatically.
+- **Agent enrollment.** Give the agent installer the dashboard's address and a one-time enrollment code, and the host adds itself: no copying URLs and tokens. Codes are single use and expire, and the exchange is encrypted with the code, so nothing else on the network can enroll a host or read the agent's token.
+- **Fleet-wide model actions.** Pull, delete or copy a model on several hosts at once, with progress for each host in the Jobs drawer.
+- **Model comparison.** A matrix of models across hosts showing which are missing or out of date, with one click to sync.
+- **Fleet-wide Ollama settings.** A matrix of Ollama's environment variables across hosts, with the differences highlighted. Save a set as a profile and apply it to several hosts at once, with each setting's VRAM cost where it can be estimated.
+- **Model disk cleanup.** Each model's size and when it was last loaded. List models unused for 30 days or more, with the space deleting them would really free, since models share blobs, and delete them in one go.
+- **Schedules and energy use.** Keep a model loaded, or preload and unload it on a schedule, such as warm on weekdays from 08:00 to 18:00. Show each host's GPU energy use per day and month, with an estimated cost.
+
+**Done when:** a new host joins the fleet without copying a token, a model and a set of Ollama settings can be rolled out to every host at once, and the dashboard shows which models waste disk and what the fleet's GPUs cost to run.
 
 ## Later
 
