@@ -6,7 +6,7 @@ Progress is tracked in [GitHub milestones](https://github.com/SplendidChip758/ll
 
 | | Milestone | Theme | Version |
 |---|---|---|---|
-| M1 | [Foundations](#m1-foundations) | Data that survives a restart, secured Ollama, Grafana | 0.x |
+| M1 | [Foundations](#m1-foundations) | Data that survives a restart, secured Ollama and agents, Grafana | 0.x |
 | M2 | [Model workbench](#m2-model-workbench) | Find, size, create and benchmark models | 0.x |
 | M3 | [Alerts](#m3-alerts) | Find out when something breaks | 0.x |
 | M4 | [Access & displays](#m4-access--displays) | More people, more screens, your own colors | 0.x |
@@ -41,10 +41,11 @@ Several later features need these: alerts and benchmarks need stored data, and t
 - **Persistent metric history.** Store metrics on disk (SQLite in the data directory) instead of in memory, with downsampling so weeks of data stay small, and a retention setting. Job state survives a restart too.
 - **Long-range charts.** Pick a time range (1h / 24h / 7d / 30d) on the Monitor tab, as full charts rather than only sparklines.
 - **Ollama API keys.** Connect to Ollama instances that sit behind an API key or bearer token (reverse proxy, hosted Ollama). The key is stored per host and set from **Add host** / **Edit host**.
+- **Agent TLS.** The dashboard talks to agents over HTTPS instead of plain HTTP, so the agent token can't be read off the network. Each agent makes its own certificate, and the dashboard pins its fingerprint rather than relying on a CA. Agents keep answering plain HTTP on the same port, so existing hosts keep working until they're switched.
 - **Prometheus `/metrics` endpoint.** Expose GPU, host and model metrics for Prometheus/Grafana. It is protected by a token, or can be opened for a scraper.
 - **Version display.** Show the dashboard's version in the header, and each agent's version on its host page and in the fleet overview, so you can tell which build (stable or prerelease) is running. Older agents that don't report one show as unknown.
 
-**Done when:** a dashboard restart keeps its history, you can view a week of GPU usage, a key-protected Ollama works, Grafana can scrape the fleet, and the UI shows which dashboard and agent versions are running.
+**Done when:** a dashboard restart keeps its history, you can view a week of GPU usage, a key-protected Ollama works, agent traffic is encrypted, Grafana can scrape the fleet, and the UI shows which dashboard and agent versions are running.
 
 ## M2: Model workbench
 
