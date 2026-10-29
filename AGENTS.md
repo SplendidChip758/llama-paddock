@@ -75,7 +75,7 @@ The website's roadmap page is built from these issues and the project: each mile
 - **Titles are shown as they are:** short and user-facing, no type prefix (`Long-range metric charts`, not `feat: long-range charts`).
 - **New planned work:** create the issue and add it to the project, then set its Status. Add a bullet to the milestone's section in ROADMAP.md if users would look for the feature.
   ```bash
-  gh issue create --label enhancement,roadmap --milestone "M5: Fleet management (→ 1.0)" --title "<title>" --body-file <file>
+  gh issue create --label enhancement,roadmap --milestone "M5: Updates (→ 1.0)" --title "<title>" --body-file <file>
   gh project item-add 6 --owner SplendidChip758 --url <issue URL>
   ```
 - **Setting Status by command** (these IDs don't change):
@@ -87,7 +87,7 @@ The website's roadmap page is built from these issues and the project: each mile
   # options: Todo f75ad846 · In Progress 47fc9ee4 · In Review 84dbe197 (Done is set by closing the issue)
   ```
 - **The site parses ROADMAP.md**, so keep its formats:
-  - the milestone table, one row per milestone in order: `| M5 | [Fleet management](#m5-fleet-management--10) | Theme | Version |`
+  - the milestone table, one row per milestone in order: `| M5 | [Updates](#m5-updates--10) | Theme | Version |`
   - one `## M5: Name` section per milestone (and `## Later`), with features as `- **Name.** text` and a `**Done when:** …` line
   - GitHub milestone titles start with the same code (`M5: …`), or are exactly `Later`. A new milestone needs all three: the GitHub milestone, the table row and the section.
 
