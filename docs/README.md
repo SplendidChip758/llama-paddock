@@ -1,6 +1,9 @@
 # Documentation
 
-This folder is the llama-paddock documentation. The project website builds its Docs section from it, and this page sets its sidebar: each `##` heading is a group, and each link a page, in this order.
+How to install, use and script llama-paddock.
+
+<!-- The website builds its Docs section from this folder, and this page sets
+its sidebar: each ## heading is a group, and each link a page, in this order. -->
 
 ## Getting started
 
