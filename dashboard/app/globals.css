@@ -43,6 +43,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .logo-word { font-size: 19px; letter-spacing: -.3px; font-weight: 450; line-height: 1; }
 .logo-word b { color: var(--accent); font-weight: 750; }
 .brand:hover .logo-mark { box-shadow: 0 0 0 1px var(--accent); }
+.ver { font: 11.5px var(--mono); color: var(--faint); margin-left: -8px; white-space: nowrap; }
+.ver.pre { color: var(--accent2); }
 .instnav { display: flex; gap: 6px; flex: 1; overflow-x: auto; }
 .instnav a {
   display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;

@@ -50,6 +50,7 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
             <span>{label}</span>
             <span className="mono">{st.ollama_url}</span>
             <span>Ollama {st.version ?? "–"}</span>
+            {st.has_agent && <span>agent {st.agent_version ?? "unknown"}</span>}
             {st.stats && <span>host {st.stats.system.hostname}{platform ? ` (${platform})` : ""}</span>}
             {svc && <span>service: {svc.active}{svc.sub ? `/${svc.sub}` : ""}</span>}
           </div>
