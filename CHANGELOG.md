@@ -1,3 +1,9 @@
+## [0.6.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.6.0-dev.1...v0.6.0-dev.2) (2026-10-29)
+
+### Features
+
+* **dashboard:** show the dashboard and agent versions ([#70](https://github.com/SplendidChip758/llama-paddock/issues/70)) ([fcb7ed7](https://github.com/SplendidChip758/llama-paddock/commit/fcb7ed76448ce0e0faa2e3fe3bad81984a19779e)), closes [#4](https://github.com/SplendidChip758/llama-paddock/issues/4) [#47](https://github.com/SplendidChip758/llama-paddock/issues/47)
+
 ## [0.6.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0...v0.6.0-dev.1) (2026-10-29)
 
 ### Features
