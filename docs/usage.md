@@ -35,6 +35,8 @@ The Environment tab shows every common `OLLAMA_*` variable with a description, p
 - **Linux:** only the `Environment=` lines in `override.conf` are rewritten; other directives (`LimitNOFILE=`, `User=`, …) are kept. A timestamped `.bak` is written first (last 10 kept), then `daemon-reload` and a restart.
 - **Windows:** the user variables are updated, then the Ollama app is stopped and relaunched with the new values.
 
+Only variables Ollama and its GPU runtimes read can be set from the dashboard: `OLLAMA_*`, `CUDA_VISIBLE_DEVICES`, `CUDA_DEVICE_ORDER`, `HIP_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL`, `HSA_OVERRIDE_GFX_VERSION`, `GGML_CUDA_ENABLE_UNIFIED_MEMORY` and the `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` variables. Other names, such as `LD_PRELOAD`, could load code into Ollama, so a dashboard login must not be enough to set them. To manage another variable from the dashboard, add it to `PADDOCK_AGENT_ENV_ALLOW` in the agent's settings on that host ([Linux](agent-linux.md), [Windows](agent-windows.md#settings-and-updates)). A variable that is already set but not on the list is shown read-only and left as it is when you save.
+
 ![Environment tab](images/environment.png)
 
 ![Environment tab on a Windows host](images/environment-windows.png)

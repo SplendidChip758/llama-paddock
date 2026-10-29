@@ -40,6 +40,7 @@ Only `ollama_url` is required; supply a stable, unique `id` using letters, digit
 | `PADDOCK_USERNAME` | `admin` | Initial account name |
 | `PADDOCK_PASSWORD` | generated when empty | Initial password |
 | `PADDOCK_AUTH` | login enabled | Set to `off` only when access is protected elsewhere |
+| `PADDOCK_TRUSTED_PROXIES` | `0` | Number of reverse proxies in front of the dashboard, so the login lockout can tell clients apart. See [Security](security.md#behind-a-reverse-proxy) |
 | `PORT` | `8080` in packaged installs | Dashboard listen port; the installer sets it through `PADDOCK_PORT` |
 | `HOSTNAME` | `0.0.0.0` in packaged installs | Standalone server bind address |
 
@@ -47,7 +48,8 @@ Only `ollama_url` is required; supply a stable, unique `id` using letters, digit
 
 - `PADDOCK_USERNAME` / `PADDOCK_PASSWORD` set the **initial** login. The first sign-in requires choosing a new password, which is stored hashed (scrypt) in `auth.json` in the data directory. After that the env values are ignored.
 - If `PADDOCK_PASSWORD` is empty, a random one is printed to the log on first start.
-- Change it later from the account menu (top right). Changing it signs out other sessions. Five wrong attempts lock that address out for 5 minutes.
+- Change it later from the account menu (top right). Changing it signs out other sessions.
+- Five wrong attempts lock that address out for 5 minutes, and 20 wrong attempts from all addresses together pause the login for everyone for 5 minutes. Behind a reverse proxy, set `PADDOCK_TRUSTED_PROXIES` so the per-address lockout sees the real client. See [Security](security.md).
 - **Forgot the password:** stop the dashboard, delete `auth.json` from the data directory (`/var/lib/llama-paddock`, or the Docker volume) and restart. The login is recreated from the env values.
 - `PADDOCK_AUTH=off` disables the login, e.g. when a reverse proxy with auth already sits in front of it. `/api/healthz` stays open for health checks.
 
