@@ -47,6 +47,8 @@ class InstanceState {
   agent_ok = false;
   agent_error: string | null = null;
   version: string | null = null;
+  agent_version: string | null = null;
+  agent_version_checked = 0;
   ps: PsModel[] = [];
   stats: AgentStats | null = null;
   updated: number | null = null;
@@ -59,7 +61,7 @@ class InstanceState {
       id: i.id, name: i.name, tags: i.tags, ollama_url: i.ollama_url, agent_url: i.agent_url, has_agent: !!i.agent_url,
       has_token: !!i.agent_token, source: i.source,
       ollama_ok: this.ollama_ok, ollama_error: this.ollama_error, agent_ok: this.agent_ok,
-      agent_error: this.agent_error, version: this.version, ps: this.ps, stats: this.stats, updated: this.updated,
+      agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.ps, stats: this.stats, updated: this.updated,
     };
   }
 }
@@ -257,6 +259,8 @@ export async function agent<T = any>(inst: Instance, method: string, path: strin
 }
 
 // ============================================================================ poller
+const AGENT_VERSION_RECHECK_MS = 10 * 60_000;
+
 async function pollOne(st: InstanceState): Promise<HistoryPoint> {
   const inst = st.inst;
   const [o, a] = await Promise.allSettled([
@@ -286,6 +290,12 @@ async function pollOne(st: InstanceState): Promise<HistoryPoint> {
       st.agent_ok = true;
       st.agent_error = null;
       st.stats = a.value;
+      if (a.value?.version) st.agent_version = a.value.version;
+      else if (Date.now() - st.agent_version_checked > AGENT_VERSION_RECHECK_MS) {
+        // agents before 0.6.0 only report their version on /health
+        st.agent_version_checked = Date.now();
+        st.agent_version = (await agent<{ version?: string }>(inst, "GET", "/health", undefined, 5000).catch(() => null))?.version ?? st.agent_version;
+      }
     }
   }
 

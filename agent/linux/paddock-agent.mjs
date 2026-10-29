@@ -357,7 +357,7 @@ const routes = {
   "GET /health": async () => ({ ok: true, version: VERSION, platform: "linux", hostname: os.hostname() }),
   "GET /stats": async () => {
     const [nvidia, service] = await Promise.all([nvidiaStats(), serviceStatus()]);
-    return { ts: Date.now() / 1000, platform: "linux", system: systemStats(), nvidia, service };
+    return { ts: Date.now() / 1000, version: VERSION, platform: "linux", system: systemStats(), nvidia, service };
   },
   "GET /env": async () => {
     const st = readEnvState();

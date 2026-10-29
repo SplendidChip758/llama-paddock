@@ -2,6 +2,10 @@
 
 **Monitor tab:** loaded models (Unload button), one card per GPU with sparklines, and host CPU/RAM/disk/network. The processor bar on each loaded model shows the GPU vs CPU split. Anything below 100% GPU means the model plus its KV cache didn't fit in VRAM.
 
+**History** (bottom of the Monitor tab): charts for the last 1h, 6h, 24h, 7d or 30d. GPU utilization, memory, temperature and power (one line per GPU), CPU, RAM, network, and the VRAM held by loaded models. Hover a chart for exact values. The longer ranges show 1-minute or 15-minute averages, and lines break where the host wasn't reachable.
+
+**Versions:** the dashboard's version is next to the logo (highlighted for a prerelease). Each host shows its Ollama and agent version on its page and its overview card.
+
 ![Monitor tab](../images/monitor.png)
 
 **Models tab:** pull by name (`qwen3:8b`, `gemma3:12b`, …). Progress shows in the Jobs drawer, and the list refreshes when a pull finishes.

@@ -78,6 +78,7 @@ function InstCard({ st }: { st: InstanceSnapshot }) {
       <dl className="kv">
         <dt>Ollama</dt>
         <dd>{st.version ?? "–"}</dd>
+        {st.has_agent && (<><dt>Agent</dt><dd>{st.agent_version ?? "unknown"}</dd></>)}
         <dt>Endpoint</dt>
         <dd>{st.ollama_url.replace(/^https?:\/\//, "")}</dd>
         {platform && (<><dt>Platform</dt><dd>{platform}</dd></>)}

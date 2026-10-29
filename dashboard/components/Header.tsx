@@ -8,7 +8,8 @@ import { statusOf } from "./ui";
 import { Logo } from "./Logo";
 import { api } from "@/lib/format";
 
-export function Header() {
+export function Header({ version }: { version: string }) {
+  const pre = version.includes("-");
   const { instances, jobs, setJobsOpen, me } = usePaddock();
   const path = usePathname();
   const m = path.match(/^\/i\/([^/]+)(?:\/([^/]+))?/);
@@ -22,6 +23,7 @@ export function Header() {
         <Link className="brand" href="/" aria-label="llama-paddock home">
           <Logo />
         </Link>
+        <span className={`ver ${pre ? "pre" : ""}`} title={`llama-paddock dashboard ${version}${pre ? " (prerelease)" : ""}`}>v{version}</span>
         <nav className="instnav">
           <Link href="/" className={path === "/" ? "active" : ""}>Overview</Link>
           {instances.map((st) => {
