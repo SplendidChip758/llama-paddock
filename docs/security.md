@@ -38,6 +38,18 @@ location / {
 
 Then set `PADDOCK_TRUSTED_PROXIES` to the number of proxies between the client and the dashboard (`1` for one proxy, `2` for a CDN in front of it). The dashboard takes that entry from the right of `X-Forwarded-For`, so whatever a client puts in front of it is ignored. The proxy's own address never appears in the header, which is why the setting is a count rather than a list of addresses. With one proxy the default already picks the right entry; set it anyway so a second hop later doesn't silently break the lockout.
 
+The proxy must also pass the browser's `Host` header through (the `Host $host` line above; Caddy and Traefik do it by default), or forward it as `X-Forwarded-Host`, so the dashboard can tell its own pages from other origins (next section).
+
+## Cross-site requests
+
+The session cookie is `SameSite=Lax`, which keeps other websites from using it. Browsers don't count the port as part of a site, though, so a page on another port of the dashboard's host, or on a sibling subdomain, is the *same site* and gets the cookie. To stop such a page from restarting Ollama or pulling a model on your behalf, the dashboard refuses any API request other than `GET` that a browser marks as coming from another origin: `Sec-Fetch-Site` other than `same-origin`, or an `Origin` that doesn't match the request's host. The answer is 403. Scripts and `curl` send neither header and aren't affected.
+
+Request bodies must be `application/json` (415 otherwise), so a cross-origin request from a browser also needs a CORS preflight, which the dashboard doesn't answer.
+
+## Response headers
+
+Every response carries `Content-Security-Policy: frame-ancestors 'none'; base-uri 'self'; object-src 'none'`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff` and `Referrer-Policy: same-origin`. The dashboard can't be put in a frame, which rules out clickjacking from a same-site page. Embedding is planned for the wall display ([#11](https://github.com/SplendidChip758/llama-paddock/issues/11)), for that page only.
+
 ## Agents
 
 - Every agent request except `/health` needs the host's `PADDOCK_AGENT_TOKEN`. The token is stored in the dashboard's data directory and sent with every request, so keep that directory private and the agent's port reachable from the dashboard host only ([Linux](agent-linux.md), [Windows](agent-windows.md)).

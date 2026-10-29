@@ -155,7 +155,7 @@ const globalFails = () => (g.__paddockLoginFailsGlobal ??= []);
  * PADDOCK_TRUSTED_PROXIES: how many reverse proxies sit in front of the dashboard, each appending the
  * address it talked to onto X-Forwarded-For. 0 (the default) means clients connect directly.
  */
-const trustedProxies = () => Math.max(0, Math.floor(Number(process.env.PADDOCK_TRUSTED_PROXIES) || 0));
+export const trustedProxies = () => Math.max(0, Math.floor(Number(process.env.PADDOCK_TRUSTED_PROXIES) || 0));
 
 /**
  * The address the lockout is keyed on.

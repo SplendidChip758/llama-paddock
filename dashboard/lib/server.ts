@@ -470,6 +470,9 @@ export function cancelJob(id: string) {
 }
 
 export async function readBody<T = Record<string, unknown>>(req: Request): Promise<T> {
+  // A JSON content type forces browsers to preflight cross-origin requests, which the dashboard
+  // doesn't answer: a second line behind the same-origin check in proxy.ts.
+  if (!/^application\/json\b/i.test(req.headers.get("content-type") ?? "")) throw new HttpError(415, "body must be application/json");
   try {
     return (await req.json()) as T;
   } catch {
