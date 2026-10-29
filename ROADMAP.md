@@ -16,6 +16,8 @@ Progress is tracked in [GitHub milestones](https://github.com/SplendidChip758/ll
 | M8 | [Fleet operations](#m8-fleet-operations) | Run many hosts as one | 1.x |
 | | [Later](#later) | Other providers | 1.x or 2.0 |
 
+This is the milestone scope, not a list of features already available. Some items may already be implemented on `dev` or in a release; use the linked issues and milestones for status, and the [user guides](docs/README.md) for current behavior.
+
 ## Versioning
 
 Versions are cut by semantic-release from commit messages, so a milestone usually ships across several releases. A version number isn't a milestone reward. It tells users what an upgrade will cost them.

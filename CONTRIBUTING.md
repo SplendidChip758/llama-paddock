@@ -2,9 +2,49 @@
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in [SECURITY.md](SECURITY.md), not in a public issue.
 
+## Local development
+
+Use Node.js 22.13 or newer. From a clone of the repository:
+
+```bash
+cd dashboard
+npm ci
+PADDOCK_DATA_DIR="$PWD/../data" npm run dev
+```
+
+Open `http://localhost:8080`. The initial login is printed in the terminal unless you set `PADDOCK_PASSWORD`. Add a real or fake Ollama host when checking behavior. For deployment instructions, see the [documentation](docs/README.md); for source layout, see [Architecture](docs/architecture.md).
+
+There is no automated test suite. Before pushing, run the same checks as CI from the repository root:
+
+```bash
+(cd dashboard && npm ci && npm run typecheck && npm run build)
+node --check agent/linux/paddock-agent.mjs
+node --check agent/windows/paddock-agent.mjs
+for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
+```
+
+For behavior changes, also exercise the built dashboard against a real or fake Ollama/agent and describe what you ran in the PR. Keep the Linux and Windows agent APIs aligned. Update the relevant documentation and README entry points when adding settings, endpoints or behavior.
+
+Read [AGENTS.md](AGENTS.md) and the area-specific rules it links before changing code. Never commit runtime data, tokens, passwords or private host details.
+
+## Start a change
+
+Branch from `dev`, using `<type>/<short-topic>` (for example `docs/setup-guide`). Small fixes and docs changes do not need an issue.
+
+For planned roadmap work, start from its issue so GitHub links the branch and PR:
+
+```bash
+# Replace 123 with the roadmap issue number.
+gh issue develop 123 --base dev --name feat/short-topic --checkout
+```
+
+On the **llama-paddock roadmap** project (user project #6 of `SplendidChip758`), move the item to **In Progress** when work starts and **In Review** when the PR opens. Put `Closes #<number>` in both the commit body and PR description. Because feature PRs target `dev`, the linked branch connects the work to the issue; the closing keyword reaches `main` with the release.
+
+After merging to `dev`, tick completed scope items in the issue and note anything left over. Keep the issue open and **In Review** until it reaches `main`; closing the issue moves it to **Done** automatically. Do not set Done manually.
+
 ## Commit messages
 
-Releases are fully automated: [semantic-release](https://github.com/semantic-release/semantic-release) reads the commit messages on `main` to decide the next version and write `CHANGELOG.md`. Every commit (or PR title, when squash-merging) must follow [Conventional Commits](https://www.conventionalcommits.org):
+Releases are fully automated: [semantic-release](https://github.com/semantic-release/semantic-release) reads the commit messages on `main` and `dev` to decide the next version and write `CHANGELOG.md`. Every commit (or PR title, when squash-merging) must follow [Conventional Commits](https://www.conventionalcommits.org):
 
 ```
 <type>(<optional scope>): <short summary>
@@ -41,7 +81,9 @@ Optional, but helps the changelog. Use the area you touched:
 
 ### Breaking changes
 
-Add `!` after the type/scope, and/or a `BREAKING CHANGE:` footer explaining what users must do:
+**Only mark a change as breaking after the maintainer agrees.** Never edit `CHANGELOG.md` or version fields by hand; the release workflow owns them.
+
+For an agreed breaking change, add `!` after the type/scope, and/or a `BREAKING CHANGE:` footer explaining what users must do:
 
 ```
 feat(agent)!: require PADDOCK_AGENT_TOKEN on every request
@@ -111,12 +153,13 @@ Dependabot opens its PRs against `dev`, like everyone else.
 ## Pull requests
 
 - Feature and fix PRs are squash-merged, so the **PR title** becomes the commit message on `main`. The `pr-title` check fails if it isn't a valid Conventional Commit.
-- The `ci` workflow typechecks and builds the dashboard and checks that the agents and shell scripts parse. On PRs into `main` it also checks every commit message. Run `cd dashboard && npm run typecheck && npm run build` before pushing to catch failures early.
+- Fill in the [PR template](.github/pull_request_template.md) and follow the [title and description rules](.github/instructions/pull-request.instructions.md).
+- The `ci` workflow runs the [checks above](#local-development). On PRs into `main` it also checks every commit message.
 - **What goes in one PR:** the squashed PR gets a single changelog line, so batch small changes when only one of them needs that line (a fix plus the README tweak that goes with it, a few docs edits). Split them when each deserves its own line or a different version bump (a `feat` and an unrelated `fix`), or when one is big or risky enough that you'd want to revert it on its own.
 
 ## How a release happens
 
-Every push to `main` or `dev` runs `.github/workflows/release.yml`. If any commit since the last tag is a `feat`, `fix`, `perf`, `revert` or breaking change, semantic-release:
+Pushes to `main` or `dev` that change dashboard/agent code or release configuration run `.github/workflows/release.yml`; it can also be started manually. Docs-only changes do not trigger it. Installer scripts are served directly from their branch, so merging an installer change makes it live immediately without a release. If any commit since the last tag is a `feat`, `fix`, `perf`, `revert` or breaking change, semantic-release:
 
 1. works out the next version from those commits,
 2. stamps it into `dashboard/package.json`, `dashboard/package-lock.json` and both agents, and updates `CHANGELOG.md`,
@@ -129,3 +172,5 @@ Then the `docker-build` jobs build the image on native amd64 and arm64 runners, 
 On `dev` the same steps produce a prerelease instead: version `X.Y.Z-dev.N`, a GitHub release marked as a prerelease, and images `:X.Y.Z-dev.N` and `:dev`. `:latest` and `:X.Y` are left alone.
 
 If nothing releasable landed (only `docs`, `chore`, `ci` and so on), the workflow exits without releasing.
+
+Release assets include `llama-paddock-dashboard-vX.Y.Z.tar.gz`, both agent scripts and `SHA256SUMS`. Runtime dependency and base-image updates from Dependabot use `fix(deps): …` so they ship in patch releases.
