@@ -4,12 +4,13 @@ The dashboard exposes the JSON endpoints used by its UI. Paths below are relativ
 
 ## Authentication
 
-Dashboard requests use a session cookie, not the agent bearer token. Send JSON bodies with `Content-Type: application/json`.
+Dashboard requests use a session cookie, not the agent bearer token. Send JSON bodies with `Content-Type: application/json`; other content types are refused with 415.
 
 1. `POST /api/auth/login` with `{"username":"admin","password":"…"}`. Save the returned `paddock_session` cookie and send it on subsequent requests.
 2. If the response has `must_change: true`, call `POST /api/auth/password` with `{"password":"…"}` and save the replacement cookie. Other application endpoints return 403 until this is done. The new password must differ from the old one and contain at least eight characters.
 3. Sessions last seven days. Changing the password invalidates other sessions.
 4. Failed logins return 401. After five failures from one address, or 20 from all addresses together, the login returns 429 for five minutes. See [Security](security.md).
+5. From a browser, requests other than `GET` must come from the dashboard's own origin, or they get 403. `curl` and scripts send no `Origin` or `Sec-Fetch-Site` header and are unaffected. See [Cross-site requests](security.md#cross-site-requests).
 
 | Method | Path | Body / result |
 |---|---|---|
