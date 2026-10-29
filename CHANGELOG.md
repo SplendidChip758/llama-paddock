@@ -1,3 +1,9 @@
+## [0.6.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.6.0-dev.2...v0.6.0-dev.3) (2026-10-29)
+
+### Bug Fixes
+
+* harden the login lockout and restrict the agent environment editor ([#80](https://github.com/SplendidChip758/llama-paddock/issues/80)) ([177ac81](https://github.com/SplendidChip758/llama-paddock/commit/177ac81cbf596246d11fcb5846bbb70bc74b18ce))
+
 ## [0.6.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.6.0-dev.1...v0.6.0-dev.2) (2026-10-29)
 
 ### Features

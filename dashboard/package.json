@@ -1,6 +1,6 @@
 {
   "name": "llama-paddock",
-  "version": "0.6.0-dev.2",
+  "version": "0.6.0-dev.3",
   "private": true,
   "engines": {
     "node": ">=22.13"
