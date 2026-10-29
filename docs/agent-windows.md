@@ -23,7 +23,7 @@ The installer:
 
 **Ollama on Windows only listens on `localhost` by default.** Once the agent is up, set `OLLAMA_HOST` to `0.0.0.0:11434` in the dashboard's Environment tab. The agent restarts Ollama with it. Also allow TCP 11434 from the dashboard host through Windows Firewall; the agent installer opens only its own port, 11435.
 
-The Windows agent only ever shows or changes Ollama-related variables (`OLLAMA_*`, `CUDA_*`, `HIP_*`, `GGML_*`, …) plus any custom ones you add through the dashboard. It refuses to touch `Path`, `TEMP` and other system variables.
+The Windows agent only ever shows Ollama-related variables (`OLLAMA_*`, `CUDA_*`, `HIP_*`, `GGML_*`, …) plus any custom ones you add through the dashboard, and only lets the dashboard change the ones on its [allowlist](usage.md#environment). It refuses to touch `Path`, `TEMP` and other system variables.
 
 ## Settings and updates
 
@@ -36,6 +36,7 @@ Settings live in `%LOCALAPPDATA%\llama-paddock-agent\agent.json`. Environment va
 | `PADDOCK_AGENT_PORT` | `11435` | Listen port |
 | `PADDOCK_OLLAMA_APP` | `%LOCALAPPDATA%\Programs\Ollama\ollama app.exe` | Ollama desktop executable |
 | `PADDOCK_DISK_PATHS` | empty | Extra drives or folders to report, comma-separated |
+| `PADDOCK_AGENT_ENV_ALLOW` | empty | Extra variables the dashboard may set, comma-separated; a trailing `*` allows a prefix (`HSA_*,MY_VAR`). See [Environment](usage.md#environment) |
 
 To update, copy the newer Windows agent files to the PC and re-run `install.ps1` from the same account. It keeps the existing `agent.json` and restarts the task. `-Token` and `-Port` initialize new configurations; they do not overwrite an existing file. If you change the port in `agent.json`, also pass the matching `-Port` when re-running the installer so its firewall rule uses that port.
 

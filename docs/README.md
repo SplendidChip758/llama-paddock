@@ -17,6 +17,7 @@ page is an entry, in this order. Keep that format. -->
 - [Using the dashboard](usage.md): Monitor and History, Models, Environment, Logs and jobs
 - [Configuration and login](configuration.md): `config.yaml`, environment variables, login and the data directory
 - [Operations](operations.md): updates, backups, prereleases, uninstalling and troubleshooting
+- [Security](security.md): what a login can do, exposing the dashboard safely and reverse proxies
 
 ## Reference
 

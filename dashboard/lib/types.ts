@@ -164,4 +164,6 @@ export interface EnvState {
   raw: string;
   effective: Record<string, string>;
   external: Record<string, string>;
+  /** Names the agent lets the dashboard set (a trailing * allows a prefix). Agents before 0.6.0 accept any name. */
+  allowed?: string[];
 }

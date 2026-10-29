@@ -37,6 +37,7 @@ ufw allow from 192.168.30.100 to any port 11435 proto tcp
 | `PADDOCK_OLLAMA_UNIT` | `ollama.service` | Unit to manage |
 | `PADDOCK_OVERRIDE_PATH` | `/etc/systemd/system/ollama.service.d/override.conf` | Drop-in to edit (the file `systemctl edit ollama` writes) |
 | `PADDOCK_DISK_PATHS` | empty | Extra mount points to report; `OLLAMA_MODELS` is added automatically |
+| `PADDOCK_AGENT_ENV_ALLOW` | empty | Extra variables the dashboard may set, comma separated; a trailing `*` allows a prefix (`HSA_*,MY_VAR`). See [Environment](usage.md#environment) |
 
 After changing the agent settings, run `systemctl restart llama-paddock-agent`.
 
