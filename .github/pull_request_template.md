@@ -37,7 +37,7 @@ What you ran and on what, e.g. "npm run typecheck && npm run build",
 - [ ] Targets `dev` (or `main` for an urgent hotfix)
 - [ ] `cd dashboard && npm run typecheck && npm run build` passes, if the dashboard changed
 - [ ] Agent changes keep the Linux and Windows agents' API in step
-- [ ] README / CONTRIBUTING updated for new settings, env vars or behaviour
+- [ ] Docs (`docs/`) / CONTRIBUTING updated for new settings, env vars or behaviour
 - [ ] No tokens, passwords or personal hostnames/IPs in code, logs or screenshots
 
 ## Breaking changes

@@ -12,7 +12,7 @@ Each agent is one file, `paddock-agent.mjs`: plain Node ESM with **zero npm depe
 - Routes live in the `routes` table as `"METHOD /path"` handlers. Every route except `GET /health` needs `Authorization: Bearer <PADDOCK_AGENT_TOKEN>`. Keep that.
 - Run external commands with an argument array, never through a shell. Use the `run()` helper (`execFile` with a timeout) for commands whose output you wait on, and `spawn(…, { detached: true })` only for starting long-running processes such as Ollama.
 - Validate everything from the request before it reaches a file or a command, e.g. env var names against `KEY_RE`.
-- Configuration comes from `PADDOCK_*` env vars, documented in the header comment. Add new ones there and in the README.
+- Configuration comes from `PADDOCK_*` env vars, documented in the header comment. Add new ones there and in `docs/install/agent-linux.md` or `agent-windows.md`.
 - `PADDOCK_DRY_RUN=1` must never call `systemctl`/`journalctl` (Linux) or restart Ollama (Windows). Keep that working for new actions.
 - Don't edit `VERSION`: the release workflow stamps it.
 - The dashboard has to keep working with older agents. Add fields and routes instead of changing existing ones, and have the dashboard handle a missing field.
