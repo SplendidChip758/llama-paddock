@@ -85,6 +85,7 @@ Everything about choosing and tuning a model for your hardware.
 - **Agent updates.** Flag agents older than the latest agent release, and update one or all of them from the dashboard using the release assets and `SHA256SUMS`.
 - **Dashboard updates.** Check for a newer release on the install's channel (stable or prerelease) and show it with its release notes. On installer installs, one click updates the dashboard after backing up its data. Docker installs show the command to pull the new image.
 - **Remote agent install.** Install the agent from the dashboard over SSH (or `pct exec` on a Proxmox host). The token and host entry fill in automatically.
+- **Agent enrollment.** Give the agent installer the dashboard's address and a one-time enrollment code, and the host adds itself: no copying URLs and tokens. Codes are single use and expire, and the exchange is encrypted with the code, so nothing else on the network can enroll a host or read the agent's token.
 - **Prepare 1.0.** Versioned agent protocol, automatic data migrations, documented `/api`, an upgrade test in CI, and the semantic-release change that cuts 1.0.0.
 
 **Done when:** you can roll a new model out to every host, and update every agent and the dashboard itself, without opening a terminal. Then 1.0 is tagged.
