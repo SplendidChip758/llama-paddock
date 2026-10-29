@@ -81,7 +81,8 @@ Everything about choosing and tuning a model for your hardware.
 
 - **Fleet-wide model actions.** Pull, delete or copy a model on several hosts at once, with progress for each host in the Jobs drawer.
 - **Model comparison.** A matrix of models across hosts showing which are missing or out of date, with one click to sync.
-- **Agent updates.** Flag agents older than the dashboard, and update one or all of them from the dashboard using the release assets and `SHA256SUMS`.
+- **Agent repository.** The agents move to their own repo with their own releases, so an agent fix doesn't need a dashboard release. A protocol version in `/health` says which agents and dashboards work together.
+- **Agent updates.** Flag agents older than the latest agent release, and update one or all of them from the dashboard using the release assets and `SHA256SUMS`.
 - **Dashboard updates.** Check for a newer release on the install's channel (stable or prerelease) and show it with its release notes. On installer installs, one click updates the dashboard after backing up its data. Docker installs show the command to pull the new image.
 - **Remote agent install.** Install the agent from the dashboard over SSH (or `pct exec` on a Proxmox host). The token and host entry fill in automatically.
 - **Prepare 1.0.** Versioned agent protocol, automatic data migrations, documented `/api`, an upgrade test in CI, and the semantic-release change that cuts 1.0.0.
