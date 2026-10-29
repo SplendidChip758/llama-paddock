@@ -14,47 +14,115 @@
   <br>
   <a href="https://ollama.com"><img alt="Ollama" src="https://img.shields.io/badge/Ollama-compatible-1b1814?style=flat-square&logo=ollama&logoColor=white"></a>
   <a href="https://nextjs.org"><img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-1b1814?style=flat-square&logo=nextdotjs&logoColor=white"></a>
-  <a href="docs/install/agent-linux.md"><img alt="Node.js" src="https://img.shields.io/badge/agent-Node.js%20%E2%89%A518.15-1b1814?style=flat-square&logo=nodedotjs&logoColor=white"></a>
-  <a href="docs/introduction.md#architecture"><img alt="Platforms" src="https://img.shields.io/badge/hosts-Linux%20%7C%20Windows-1b1814?style=flat-square"></a>
-  <a href="docs/install/docker.md"><img alt="Docker" src="https://img.shields.io/badge/dashboard-Docker-1b1814?style=flat-square&logo=docker&logoColor=white"></a>
+  <a href="docs/agent-linux.md"><img alt="Node.js" src="https://img.shields.io/badge/agent-Node.js%20%E2%89%A518.15-1b1814?style=flat-square&logo=nodedotjs&logoColor=white"></a>
+  <a href="docs/architecture.md"><img alt="Platforms" src="https://img.shields.io/badge/hosts-Linux%20%7C%20Windows-1b1814?style=flat-square"></a>
+  <a href="docs/installation.md#docker"><img alt="Docker" src="https://img.shields.io/badge/dashboard-Docker-1b1814?style=flat-square&logo=docker&logoColor=white"></a>
 </p>
 
 <p align="center">
-  <a href="#quick-install">Install</a> ·
-  <a href="docs/usage/using-it.md">Features</a> ·
-  <a href="docs/README.md">Docs</a> ·
-  <a href="docs/reference/api.md">API</a> ·
+  <a href="https://llama-paddock.com">Website</a> ·
+  <a href="#quick-start">Install</a> ·
+  <a href="#features">Features</a> ·
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="ROADMAP.md">Roadmap</a> ·
   <a href="https://github.com/SplendidChip758/llama-paddock/issues">Issues</a>
 </p>
 
-A self-hosted dashboard for monitoring and managing a fleet of Ollama instances on Linux and Windows.
+A self-hosted dashboard for monitoring and managing a fleet of Ollama hosts on Linux and Windows.
 
-**Monitor:** `ollama ps` (loaded models, context, VRAM/CPU split, unload timer), `nvidia-smi` (utilization, VRAM, temperature, power, clocks, PCIe, per-process VRAM), and host stats (CPU per core, RAM, disks incl. `OLLAMA_MODELS`, network, Ollama memory and runner count), with sparkline history.
-
-**Manage:** pull models with live progress; list, load, unload, copy and delete models; edit models (context window, sampling parameters, stop sequences, system prompt); view and edit Ollama's environment variables and restart Ollama; tail Ollama's logs.
+- **Monitor your fleet:** loaded models, GPU/CPU split, NVIDIA GPU stats, host CPU/RAM/disk/network, and charts of up to 30 days of history.
+- **Manage models:** pull with live progress, load, unload, copy, delete, and edit parameters or system prompts.
+- **Manage hosts:** edit Ollama's environment, restart it, and tail logs through a lightweight agent.
 
 ![Fleet overview](docs/images/overview.png)
 
-## Quick install
+The dashboard connects directly to Ollama for model management. Add the optional agent on each host for GPU/host stats and service controls. See [how it works](docs/architecture.md).
 
-Run these on a **Proxmox VE host**, or inside an existing LXC/VM:
+## Quick start
+
+### Proxmox or Debian/Ubuntu
+
+Run as root on a **Proxmox VE host** to create a dedicated dashboard LXC, or inside an existing **Debian/Ubuntu LXC or VM** to install there:
 
 ```bash
-# Dashboard: creates its own LXC when run on the Proxmox host
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/dashboard.sh)"
+```
 
-# Agent: run on the Proxmox host and pick your Ollama LXC, or run inside it
+Open the printed URL, sign in with the generated password, choose a new password, then **Add host** with your Ollama URL.
+
+For GPU and host stats, environment editing, restarts and logs, install the agent on each Ollama host. On Linux, run this on the Proxmox host (it asks which container) or inside the Ollama LXC/VM:
+
+```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/agent.sh)"
 ```
 
-Windows hosts: see [the Windows agent](docs/install/agent-windows.md). Docker, building from source and prereleases: see [Install the dashboard](docs/install/dashboard.md).
+It prints the agent URL and token to enter under **Add host**. Details: [Linux agent](docs/agent-linux.md) · [Windows agent](docs/agent-windows.md).
+
+### Docker
+
+```bash
+git clone https://github.com/SplendidChip758/llama-paddock.git
+cd llama-paddock
+cp .env.example .env
+```
+
+Edit `.env` to set your initial login, then run:
+
+```bash
+docker compose up -d
+```
+
+Open `http://<docker-host>:8080`, change the initial password, and **Add host**. The named data volume keeps hosts, login, history and job state across upgrades.
+
+### Requirements
+
+- **Ollama hosts:** Linux with Ollama as a systemd service (the official install script sets that up), or Windows with the Ollama desktop app. Hosts without the agent still get model management.
+- **GPU stats:** NVIDIA, through `nvidia-smi`. AMD and Apple GPUs are [planned](ROADMAP.md#m6-platforms).
+- **Dashboard:** Docker (amd64 or arm64), or Debian/Ubuntu, where the installer sets up Node.js 22.
+
+Keep Ollama and the agents on a trusted network. The dashboard login does not protect direct access to their ports. See the [installation guide](docs/installation.md) for networking, requirements and source builds.
+
+## Features
+
+### See what each host is doing
+
+The Monitor tab brings loaded models, NVIDIA GPU stats and host resources together. Check GPU utilization, VRAM, temperature and power alongside CPU, RAM, disk and network usage. Recent sparklines show how usage is changing, and each loaded model shows its context window, GPU/CPU split and unload timer.
+
+![Monitor tab with loaded models, GPU metrics and host resources](docs/images/monitor.png)
+
+### Look back over days and weeks
+
+Below the live view, the History charts cover the last hour up to 30 days: GPU utilization, memory, temperature and power for each GPU, CPU, RAM, network, and the VRAM held by loaded models. History is stored on disk and survives restarts, and each host shows which Ollama and agent versions it runs.
+
+### Pull and tune models
+
+Pull models by name with live progress in the Jobs drawer, then load, unload, copy or delete them from the Models tab. The model editor lets you adjust context length, sampling parameters, stop sequences and the system prompt. Save a variation under a new name to keep the original model available.
+
+![Model editor with context presets, parameters and system prompt](docs/images/model-editor.png)
+
+### Manage Ollama settings
+
+View and edit Ollama's environment variables with descriptions of common settings. The agent applies changes and restarts Ollama on Linux or Windows, while variables inherited from elsewhere remain visible. Use the Logs tab to inspect Ollama's output with highlighted errors and warnings.
+
+![Environment tab with Ollama settings and restart controls](docs/images/environment.png)
+
+See the [usage guide](docs/usage.md) for the full walkthrough, more screenshots and platform-specific details.
 
 ## Documentation
 
-The full documentation is in [`docs/`](docs/README.md):
+| I want to… | Guide |
+|---|---|
+| Install the dashboard or agents | [Dashboard](docs/installation.md) · [Linux agent](docs/agent-linux.md) · [Windows agent](docs/agent-windows.md) |
+| Configure hosts, history or login | [Configuration](docs/configuration.md) |
+| Monitor hosts and manage models | [Using the dashboard](docs/usage.md) |
+| Update, back up, try prereleases or fix a problem | [Operations](docs/operations.md) |
+| Automate tasks | [API reference](docs/api.md) |
+| Understand the components | [Architecture](docs/architecture.md) |
 
-- **Getting started:** [Introduction and architecture](docs/introduction.md) · [Quick install](docs/quick-install.md)
-- **Install:** [Dashboard](docs/install/dashboard.md) · [Agent on Linux](docs/install/agent-linux.md) · [Agent on Windows](docs/install/agent-windows.md) · [Docker](docs/install/docker.md) · [From source](docs/install/from-source.md) · [Prereleases](docs/install/prereleases.md)
-- **Using it:** [Monitor and manage](docs/usage/using-it.md) · [Login](docs/usage/login.md)
-- **Reference:** [API](docs/reference/api.md) · [Limitations](docs/reference/limitations.md)
-- **Project:** [Releases](docs/project/releases.md) · [Project layout](docs/project/layout.md) · [Roadmap](ROADMAP.md) · [Contributing](CONTRIBUTING.md)
+## Project
+
+llama-paddock is pre-1.0: upgrades are automatic, but settings and APIs can still change between 0.x releases ([versioning](ROADMAP.md#versioning)). See the [roadmap](ROADMAP.md) for planned work and [releases](https://github.com/SplendidChip758/llama-paddock/releases) for shipped changes. `:latest` follows stable releases; `:dev` follows prereleases. Read the [prerelease notes](docs/operations.md#prereleases) before switching.
+
+Contributions are welcome—start with [Contributing](CONTRIBUTING.md). Report bugs and suggest features in [Issues](https://github.com/SplendidChip758/llama-paddock/issues); report vulnerabilities privately using the [security policy](SECURITY.md).
+
+Licensed under [AGPL-3.0](LICENSE).

@@ -23,7 +23,7 @@ Next.js 16 (App Router) + React 19 + TypeScript, built with `output: "standalone
 - No new dependencies without a good reason, and no native modules: they break the multi-arch image and the tarball. Prefer Node built-ins.
 - Schema changes: append a new entry to `MIGRATIONS` in `lib/db.ts`. Never edit one that has shipped. Existing databases upgrade on start.
 - Keep `/api` backwards compatible. Add optional parameters and fields instead of changing what existing ones mean, since users script against it.
-- New settings go in `loadSettings()` with a default, `config.example.yaml`, the config written by `install/dashboard.sh`, and the docs (`docs/install/`). New endpoints go in the API table in `docs/reference/api.md`.
+- New settings go in `loadSettings()` with a default, `config.example.yaml`, the config written by `install/dashboard.sh`, and `docs/configuration.md`. New endpoints go in the API tables in `docs/api.md`.
 - Match the surrounding style: section headers like `// ===== poller`, short comments that explain why.
 
 ## Checks
