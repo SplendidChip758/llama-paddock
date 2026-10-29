@@ -1,3 +1,14 @@
+## [0.6.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0...v0.6.0-dev.1) (2026-10-29)
+
+### Features
+
+* **dashboard:** add long-range history charts to the Monitor tab ([#63](https://github.com/SplendidChip758/llama-paddock/issues/63)) ([37a20b7](https://github.com/SplendidChip758/llama-paddock/commit/37a20b777a8cea81566624dad3145483c7da0e83)), closes [#4](https://github.com/SplendidChip758/llama-paddock/issues/4) [#4](https://github.com/SplendidChip758/llama-paddock/issues/4)
+
+### Bug Fixes
+
+* **install:** quiet the distro's login text only in a new CT ([#61](https://github.com/SplendidChip758/llama-paddock/issues/61)) ([14fef21](https://github.com/SplendidChip758/llama-paddock/commit/14fef2196f2d243e5e786872c56c53eda09c113a))
+* **install:** refresh the login banner on updates ([#58](https://github.com/SplendidChip758/llama-paddock/issues/58)) ([e944987](https://github.com/SplendidChip758/llama-paddock/commit/e944987e1b8f3484cbd16cfba63c269026b05f63))
+
 ## [0.5.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.4.0...v0.5.0) (2026-10-29)
 
 ### Features
