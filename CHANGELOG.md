@@ -1,3 +1,9 @@
+## [0.6.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.6.0-dev.3...v0.6.0-dev.4) (2026-10-29)
+
+### Bug Fixes
+
+* **dashboard:** refuse cross-origin API requests and send security headers ([#81](https://github.com/SplendidChip758/llama-paddock/issues/81)) ([d4607c4](https://github.com/SplendidChip758/llama-paddock/commit/d4607c4e340e541991be8c95d42ada8bcb9d7364))
+
 ## [0.6.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.6.0-dev.2...v0.6.0-dev.3) (2026-10-29)
 
 ### Bug Fixes
