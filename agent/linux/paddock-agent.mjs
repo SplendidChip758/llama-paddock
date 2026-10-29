@@ -29,7 +29,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 
-const VERSION = "0.4.0";
+const VERSION = "0.5.0-dev.4";
 const TOKEN = process.env.PADDOCK_AGENT_TOKEN || "";
 const UNIT = process.env.PADDOCK_OLLAMA_UNIT || "ollama.service";
 const OVERRIDE_PATH =
@@ -178,8 +178,11 @@ const GPU_KEYS = [
 ];
 const TEXT_KEYS = new Set(["uuid", "name", "driver", "pstate"]);
 
+// WSL puts nvidia-smi in /usr/lib/wsl/lib, which is on login shells' PATH but not on a systemd service's
+const NVIDIA_SMI = fs.existsSync("/usr/lib/wsl/lib/nvidia-smi") ? "/usr/lib/wsl/lib/nvidia-smi" : "nvidia-smi";
+
 async function nvidiaStats() {
-  const q = await run("nvidia-smi", [`--query-gpu=${GPU_FIELDS.join(",")}`, "--format=csv,noheader,nounits"]);
+  const q = await run(NVIDIA_SMI, [`--query-gpu=${GPU_FIELDS.join(",")}`, "--format=csv,noheader,nounits"]);
   if (q.code !== 0) {
     const missing = /ENOENT/.test(q.stderr);
     return { available: false, error: missing ? "nvidia-smi not found" : (q.stderr || q.stdout).trim(), gpus: [], processes: [] };
@@ -189,7 +192,7 @@ async function nvidiaStats() {
     return Object.fromEntries(GPU_KEYS.map((k, i) => [k, TEXT_KEYS.has(k) ? parts[i] : num(parts[i])]));
   }).filter((g) => g.uuid);
 
-  const p = await run("nvidia-smi", ["--query-compute-apps=gpu_uuid,pid,process_name,used_memory", "--format=csv,noheader,nounits"]);
+  const p = await run(NVIDIA_SMI, ["--query-compute-apps=gpu_uuid,pid,process_name,used_memory", "--format=csv,noheader,nounits"]);
   const processes = p.code !== 0 ? [] : p.stdout.trim().split("\n").filter(Boolean).map((line) => {
     const [gpu_uuid, pid, name, mem] = line.split(",").map((s) => s.trim());
     return { gpu_uuid, pid: num(pid), name, mem_mib: num(mem) };

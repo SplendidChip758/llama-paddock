@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import {
   loadSettings, makeId, normalizeTags, normalizeUrl, saveUiInstances, type Instance, type InstanceInput, type Settings,
 } from "./config";
+import { deleteHistory, deleteJobs, loadJobs, maintainHistory, recordSamples, saveJob } from "./db";
 import type { AgentStats, HistoryPoint, InstanceSnapshot, JobInfo, PsModel } from "./types";
 
 // ============================================================================ errors
@@ -49,14 +50,8 @@ class InstanceState {
   ps: PsModel[] = [];
   stats: AgentStats | null = null;
   updated: number | null = null;
-  history: HistoryPoint[] = [];
 
-  constructor(public inst: Instance, private maxHistory: number) {}
-
-  push(point: HistoryPoint) {
-    this.history.push(point);
-    if (this.history.length > this.maxHistory) this.history.splice(0, this.history.length - this.maxHistory);
-  }
+  constructor(public inst: Instance) {}
 
   snapshot(): InstanceSnapshot {
     const i = this.inst;
@@ -71,6 +66,10 @@ class InstanceState {
 
 interface Job extends JobInfo {
   abort: AbortController;
+  /** The Ollama request, kept so an interrupted pull can be resumed after a restart. */
+  path: string;
+  body: unknown;
+  savedAt: number;
 }
 
 interface Paddock {
@@ -88,10 +87,11 @@ export function paddock(): Paddock {
     const settings = loadSettings();
     g.__paddock = {
       settings,
-      instances: new Map(settings.instances.map((i) => [i.id, new InstanceState(i, settings.history_points)])),
+      instances: new Map(settings.instances.map((i) => [i.id, new InstanceState(i)])),
       jobs: new Map(),
       pollerStarted: false,
     };
+    restoreJobs(g.__paddock);
   }
   const p = g.__paddock;
   if (!p.pollerStarted) {
@@ -148,7 +148,9 @@ export function addInstance(body: InstanceInput): Instance {
   const p = paddock();
   const fields = hostFields(body);
   const inst: Instance = { id: makeId(fields.name, new Set(p.instances.keys())), ...fields, source: "ui" };
-  p.instances.set(inst.id, new InstanceState(inst, p.settings.history_points));
+  p.instances.set(inst.id, new InstanceState(inst));
+  // ids can be reused after a host is removed
+  deleteHistory(inst.id);
   persistHosts(p);
   return inst;
 }
@@ -160,8 +162,10 @@ export function updateInstance(id: string, body: InstanceInput): Instance {
   const inst: Instance = { ...prev, ...hostFields(body, prev) };
   // New endpoints mean the old status and history no longer apply.
   const moved = inst.ollama_url !== prev.ollama_url || inst.agent_url !== prev.agent_url || inst.agent_token !== prev.agent_token;
-  if (moved) p.instances.set(id, new InstanceState(inst, p.settings.history_points));
-  else st.inst = inst;
+  if (moved) {
+    p.instances.set(id, new InstanceState(inst));
+    deleteHistory(id);
+  } else st.inst = inst;
   persistHosts(p);
   return inst;
 }
@@ -171,6 +175,7 @@ export function removeInstance(id: string) {
   editable(id);
   p.instances.delete(id);
   persistHosts(p);
+  deleteHistory(id);
 }
 
 export interface CheckResult {
@@ -252,7 +257,7 @@ export async function agent<T = any>(inst: Instance, method: string, path: strin
 }
 
 // ============================================================================ poller
-async function pollOne(st: InstanceState) {
+async function pollOne(st: InstanceState): Promise<HistoryPoint> {
   const inst = st.inst;
   const [o, a] = await Promise.allSettled([
     Promise.all([
@@ -291,13 +296,31 @@ async function pollOne(st: InstanceState) {
     point.mem = st.stats.system.mem.pct;
     point.gpus = st.stats.nvidia.gpus.map((x) => ({ u: x.util_pct, m: x.mem_used_mib, mt: x.mem_total_mib, t: x.temp_c, p: x.power_w }));
   }
-  st.push(point);
+  return point;
 }
 
+const MAINTAIN_EVERY_MS = 60_000;
+
 async function pollLoop(p: Paddock) {
+  let maintained = 0;
   for (;;) {
     const started = Date.now();
-    await Promise.allSettled([...p.instances.values()].map(pollOne));
+    const polled = [...p.instances.values()];
+    const results = await Promise.allSettled(polled.map(pollOne));
+    // skip hosts that were removed or re-pointed while the poll was in flight
+    const rows: [string, HistoryPoint][] = [];
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled" && p.instances.get(polled[i].inst.id) === polled[i]) rows.push([polled[i].inst.id, r.value]);
+    });
+    try {
+      recordSamples(rows);
+      if (started - maintained >= MAINTAIN_EVERY_MS) {
+        maintained = started;
+        maintainHistory(p.settings.history_retention_days);
+      }
+    } catch (e) {
+      console.error("[llama-paddock] saving metric history failed:", e);
+    }
     const wait = Math.max(500, p.settings.poll_interval * 1000 - (Date.now() - started));
     await new Promise((r) => setTimeout(r, wait));
   }
@@ -305,8 +328,46 @@ async function pollLoop(p: Paddock) {
 
 // ============================================================================ jobs (pull / create)
 export function jobInfo(j: Job): JobInfo {
-  const { abort: _abort, ...info } = j;
+  const { abort: _abort, path: _path, body: _body, savedAt: _savedAt, ...info } = j;
   return info;
+}
+
+const SAVE_PROGRESS_EVERY_MS = 2000;
+
+function persistJob(job: Job) {
+  job.savedAt = Date.now();
+  try {
+    saveJob({ info: jobInfo(job), path: job.path, body: job.body });
+  } catch (e) {
+    console.error(`[llama-paddock] saving job ${job.id} failed:`, e);
+  }
+}
+
+/** Bring back the jobs from before a restart. Pulls that were running resume (Ollama keeps the partial download); other running jobs are marked interrupted. */
+function restoreJobs(p: Paddock) {
+  let stored;
+  try {
+    stored = loadJobs();
+  } catch (e) {
+    console.error("[llama-paddock] loading saved jobs failed:", e);
+    return;
+  }
+  for (const { info, path, body } of stored) {
+    const job: Job = { ...info, path, body, savedAt: 0, abort: new AbortController() };
+    p.jobs.set(job.id, job);
+    if (job.state !== "running") continue;
+    const inst = p.instances.get(job.instance)?.inst;
+    if (job.kind === "pull" && inst) {
+      job.status = "resuming after restart";
+      persistJob(job);
+      void runJob(job, `${inst.ollama_url}${path}`);
+    } else {
+      job.state = "error";
+      job.error = inst ? "interrupted: the dashboard restarted" : "interrupted: the dashboard restarted and the host is gone";
+      job.finished = Date.now() / 1000;
+      persistJob(job);
+    }
+  }
 }
 
 export function listJobs(): JobInfo[] {
@@ -318,19 +379,20 @@ export function startJob(kind: Job["kind"], inst: Instance, model: string, path:
   const job: Job = {
     id: crypto.randomBytes(6).toString("hex"), kind, instance: inst.id, model, detail,
     status: "queued", state: "running", completed: 0, total: 0, error: null,
-    started: Date.now() / 1000, finished: null, abort: new AbortController(),
+    started: Date.now() / 1000, finished: null, abort: new AbortController(), path, body, savedAt: 0,
   };
   p.jobs.set(job.id, job);
-  void runJob(job, `${inst.ollama_url}${path}`, body);
+  persistJob(job);
+  void runJob(job, `${inst.ollama_url}${path}`);
   return jobInfo(job);
 }
 
-async function runJob(job: Job, url: string, body: unknown) {
+async function runJob(job: Job, url: string) {
   try {
     const r = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify(job.body),
       signal: job.abort.signal,
     });
     if (!r.ok || !r.body) throw new Error(await upstreamError(r));
@@ -349,11 +411,13 @@ async function runJob(job: Job, url: string, body: unknown) {
         if (!line) continue;
         const msg = JSON.parse(line);
         if (msg.error) throw new Error(msg.error);
+        const statusChanged = !!msg.status && msg.status !== job.status;
         if (msg.status) job.status = msg.status;
         if (msg.total) {
           job.total = msg.total;
           job.completed = msg.completed ?? 0;
         }
+        if (statusChanged || Date.now() - job.savedAt >= SAVE_PROGRESS_EVERY_MS) persistJob(job);
       }
     }
     job.state = "done";
@@ -368,10 +432,17 @@ async function runJob(job: Job, url: string, body: unknown) {
     }
   } finally {
     job.finished = Date.now() / 1000;
+    persistJob(job);
     // keep the list bounded
     const jobs = paddock().jobs;
     const finished = [...jobs.values()].filter((j) => j.finished).sort((a, b) => a.finished! - b.finished!);
-    for (const old of finished.slice(0, -50)) jobs.delete(old.id);
+    const old = finished.slice(0, -50);
+    for (const j of old) jobs.delete(j.id);
+    try {
+      deleteJobs(old.map((j) => j.id));
+    } catch (e) {
+      console.error("[llama-paddock] pruning saved jobs failed:", e);
+    }
   }
 }
 
@@ -380,7 +451,10 @@ export function cancelJob(id: string) {
   const job = jobs.get(id);
   if (!job) throw new HttpError(404, "no such job");
   if (job.state === "running") job.abort.abort();
-  else jobs.delete(id);
+  else {
+    jobs.delete(id);
+    deleteJobs([id]);
+  }
 }
 
 export async function readBody<T = Record<string, unknown>>(req: Request): Promise<T> {

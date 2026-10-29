@@ -19,6 +19,7 @@ export interface Instance {
 export interface Settings {
   poll_interval: number;
   history_points: number;
+  history_retention_days: number;
   instances: Instance[];
 }
 
@@ -51,6 +52,12 @@ function parseInstance(item: Record<string, any>, fallbackId: string, source: In
   };
 }
 
+function positive(v: unknown, key: string): number {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`${key} must be a positive number`);
+  return n;
+}
+
 export function loadSettings(): Settings {
   const path = process.env.PADDOCK_CONFIG || "/config/config.yaml";
   // config.yaml is optional now that hosts can be added in the UI
@@ -76,6 +83,7 @@ export function loadSettings(): Settings {
   return {
     poll_interval: Number(raw.poll_interval ?? 3),
     history_points: Number(raw.history_points ?? 400),
+    history_retention_days: positive(raw.history_retention_days ?? 30, "history_retention_days"),
     instances: [...fromConfig, ...fromUi],
   };
 }

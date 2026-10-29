@@ -10,7 +10,8 @@
 # PADDOCK_UNINSTALL=1 removes it again (on a Proxmox host: destroys the dashboard CT).
 #
 # Options (environment variables):
-#   PADDOCK_VERSION   latest (default) | v1.2.3 | source  — "source" builds PADDOCK_BRANCH
+#   PADDOCK_VERSION   latest (default) | dev | v1.2.3 | source  — "dev" is the newest release
+#                     including prereleases (see dashboard-dev.sh); "source" builds PADDOCK_BRANCH
 #   PADDOCK_BRANCH    git branch for source builds and helper files (default: main)
 #   PADDOCK_REPO      GitHub repo (default: SplendidChip758/llama-paddock)
 #   PADDOCK_PORT      port to listen on (default: 8080)
@@ -33,7 +34,7 @@ APP_DIR=/opt/llama-paddock
 CFG_DIR=/etc/llama-paddock
 DATA_DIR=/var/lib/llama-paddock
 SVC_USER=llama-paddock
-NODE_MIN="20.9"
+NODE_MIN="22.13"
 
 # ---------------------------------------------------------------- ui helpers
 init_colors() {
@@ -166,6 +167,36 @@ guess_gateway() {
   echo "$(( gw >> 24 & 255 )).$(( gw >> 16 & 255 )).$(( gw >> 8 & 255 )).$(( gw & 255 ))"
 }
 
+# A prerelease channel or tag (dev, v1.2.0-dev.3)
+is_prerelease() { [[ $VERSION == dev || $VERSION == v*-* ]]; }
+# What update-llama-paddock installs by default: stay on the channel this was installed from
+CHANNEL=latest
+[[ $VERSION == dev ]] && CHANNEL=dev
+
+prerelease_notice() {
+  local text="You are installing a PRERELEASE of llama-paddock (${VERSION}, from the ${BRANCH} branch).
+
+Prereleases are built from every change merged to ${BRANCH}, before it is released as stable. They are for testing:
+- features may be unfinished, change or be removed again,
+- there may be bugs, including ones that lose metric history or saved settings,
+- the data format may change, so going back to a stable release can mean waiting for the next one.
+
+update-llama-paddock keeps this install on prereleases. To go back to stable, re-run the normal installer.
+Please report problems at github.com/${REPO}/issues."
+  if [[ -n ${PADDOCK_YES-} ]] || ! interactive; then
+    msg_warn "Installing a prerelease (${VERSION}): for testing, may be unstable."
+    return
+  fi
+  if [[ -n $TUI ]]; then
+    wt --title " Prerelease " --defaultno --yes-button "Install" --no-button "Cancel" --yesno "$text" 22 78 || cancelled
+  else
+    echo -e "${C_WARN}${C_B}"
+    echo "$text" | sed 's/^/   /'
+    echo -e "${C_0}"
+    confirm "Install the prerelease anyway?" n || die "cancelled, nothing was changed"
+  fi
+}
+
 version_ge() { [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" == "$2" ]]; }
 
 # ================================================================= Proxmox host
@@ -176,11 +207,18 @@ storage_items() {
     | awk 'NR > 1 && $3 == "active" { printf "%s\n%s · %.0f GiB free\n", $1, $2, $6 / 1048576 }'
 }
 
+# bridge_items — "name" and "ports eno1 · VLAN aware" on alternate lines. Not the bridge's IP:
+# that is the Proxmox host's own address, which says nothing about the network the CT joins.
 bridge_items() {
-  local b addr
+  local b ports desc
   for b in $(ip -o link show type bridge 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//'); do
-    addr=$(ip -4 -o addr show dev "$b" 2>/dev/null | awk '{print $4; exit}')
-    printf '%s\n%s\n' "$b" "${addr:-bridge}"
+    # physical ports, bonds and VLANs; not the tap/veth/firewall links of running guests
+    ports=$(ip -o link show master "$b" 2>/dev/null | awk -F': ' '{print $2}' | sed 's/@.*//' \
+      | { grep -Ev '^(tap|veth|fwpr|fwln|fwbr)' || true; } | paste -sd, - | sed 's/,/, /g')
+    desc=${ports:+ports $ports}
+    desc=${desc:-no physical port}
+    ip -d link show "$b" 2>/dev/null | grep -q 'vlan_filtering 1' && desc+=" · VLAN aware"
+    printf '%s\n%s\n' "$b" "$desc"
   done
 }
 
@@ -365,6 +403,7 @@ proxmox_install() {
     --hostname "$CT_HOSTNAME" --cores "$CT_CORES" --memory "$CT_RAM" --swap 512 \
     --rootfs "${CT_STORAGE}:${CT_DISK}" --net0 "$net" \
     --unprivileged 1 --features nesting=1 --onboot 1 --ostype "$CT_OS" \
+    --cmode console \
     --tags "llama-paddock" --description "llama-paddock dashboard — https://github.com/${REPO}" \
     "${extra[@]}" >/dev/null
   pct start "$CT_ID"
@@ -402,6 +441,7 @@ proxmox_install() {
     bash -c "curl -fsSL '$SELF_URL' | bash"
 
   local ip; ip=$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}')
+  pct set "$CT_ID" --description "$(ct_notes "$ip")" >/dev/null || msg_warn "could not set the container notes"
   echo
   msg_ok "${C_B}llama-paddock is running in CT ${CT_ID}: http://${ip:-<ct-ip>}:${PORT}${C_0}"
   local how=()
@@ -482,10 +522,15 @@ ensure_deps() {
 resolve_release() {
   RELEASE_TAG=""; ASSET_URL=""
   local api="https://api.github.com/repos/${REPO}/releases"
-  [[ $VERSION == latest ]] && api+="/latest" || api+="/tags/${VERSION}"
+  case $VERSION in
+    latest) api+="/latest" ;;
+    dev) api+="?per_page=30" ;;  # newest first, prereleases included
+    *) api+="/tags/${VERSION}" ;;
+  esac
   local json; json=$(curl -fsSL -H "Accept: application/vnd.github+json" "$api" 2>/dev/null) || return 0
   read -r RELEASE_TAG ASSET_URL < <(node -e '
-    const r = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    let r = JSON.parse(require("fs").readFileSync(0, "utf8"));
+    if (Array.isArray(r)) r = r.find((x) => !x.draft) || {};
     const a = (r.assets || []).find((x) => /^llama-paddock-dashboard-.*\.tar\.gz$/.test(x.name));
     console.log(r.tag_name || "", a ? a.browser_download_url : "");
   ' <<<"$json") || true
@@ -521,7 +566,7 @@ fetch_app() {
         msg_ok "Release $RELEASE_TAG downloaded"
         return
       fi
-      [[ $VERSION == latest ]] || die "release $VERSION not found or has no dashboard asset"
+      [[ $VERSION == latest || $VERSION == dev ]] || die "release $VERSION not found or has no dashboard asset"
       msg_warn "No published release yet — building from the ${BRANCH} branch instead"
     fi
     msg_info "Downloading source (${BRANCH})"
@@ -550,7 +595,8 @@ write_config() {
     cat > "$CFG_DIR/config.yaml" <<EOF
 # llama-paddock config. Restart after editing: systemctl restart llama-paddock
 poll_interval: 3        # seconds between polls of every host
-history_points: 400     # samples kept in memory for sparklines
+history_points: 400     # recent samples shown in sparklines
+history_retention_days: 30  # metric history kept in /var/lib/llama-paddock
 
 # Add hosts in the dashboard (Add host). Hosts listed here also work, but are
 # read-only in the UI. Tokens can live in llama-paddock.env as \${VAR}.
@@ -621,8 +667,8 @@ EOF
 
   cat > /usr/local/bin/update-llama-paddock <<EOF
 #!/usr/bin/env bash
-# Update llama-paddock to the latest release (pass a tag like v1.2.0 to pin one)
-export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-latest}"
+# Update llama-paddock to the newest ${CHANNEL} release (pass a tag like v1.2.0 to pin one)
+export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
 exec bash -c "\$(curl -fsSL ${SELF_URL})"
 EOF
   chmod 755 /usr/local/bin/update-llama-paddock
@@ -645,6 +691,7 @@ local_uninstall() {
 
   systemctl disable --now llama-paddock >/dev/null 2>&1 || true
   rm -f /etc/systemd/system/llama-paddock.service /usr/local/bin/update-llama-paddock /usr/local/bin/uninstall-llama-paddock
+  rm -f /etc/profile.d/00_llama-paddock.sh
   rm -rf "$APP_DIR" "${APP_DIR}.old"
   systemctl daemon-reload 2>/dev/null || true
   if [[ -n $purge ]]; then
@@ -657,6 +704,61 @@ local_uninstall() {
     echo "   To delete them too:  PADDOCK_PURGE=1 uninstall-llama-paddock  (or rm -rf both)"
   fi
   echo "   Node.js was left installed."
+}
+
+# Login banner for a container this installer created (not for installs into an existing
+# machine, which has its own). It reads everything at login, so it never goes stale.
+MOTD_FILE=/etc/profile.d/00_llama-paddock.sh
+write_motd() {
+  cat > "$MOTD_FILE" <<EOF
+# llama-paddock login banner (written by install/dashboard.sh). Delete this file to turn it off.
+case \$- in *i*) ;; *) return 0 ;; esac
+__lp_ver=\$(cat ${APP_DIR}/VERSION 2>/dev/null)
+__lp_port=\$(sed -n 's/^PORT=//p' ${CFG_DIR}/llama-paddock.env 2>/dev/null | tail -1)
+__lp_ip=\$(hostname -I 2>/dev/null | awk '{print \$1}')
+if systemctl is-active --quiet llama-paddock 2>/dev/null; then __lp_state='\033[32mrunning\033[0m'; else __lp_state='\033[31mnot running\033[0m'; fi
+case \$__lp_ver in *-*) __lp_ver="\$__lp_ver (prerelease)" ;; esac
+printf '\n\033[1mllama\033[33mpaddock\033[0m\033[1m dashboard\033[0m  %s\n' "\${__lp_ver:-}"
+printf '    🌐   GitHub:     https://github.com/${REPO}\n'
+printf '    💻   OS:         %s\n' "\$(. /etc/os-release 2>/dev/null; echo "\${PRETTY_NAME:-unknown}")"
+printf '    🏠   Hostname:   %s\n' "\$(hostname)"
+printf "    💡   Dashboard:  http://%s:%s  (\$__lp_state)\n" "\${__lp_ip:-<ip>}" "\${__lp_port:-8080}"
+printf '    🔄   Update:     update-llama-paddock\n\n'
+unset __lp_ver __lp_port __lp_ip __lp_state
+EOF
+  chmod 644 "$MOTD_FILE"
+  # Quiet the distribution's own login text: Ubuntu's update-motd scripts, Debian's /etc/motd, and
+  # Ubuntu's /etc/legal notice, which pam_motd shows on a user's first login unless this marker exists
+  [[ -d /etc/update-motd.d ]] && chmod -x /etc/update-motd.d/* 2>/dev/null || true
+  [[ -f /etc/motd ]] && : > /etc/motd
+  mkdir -p /root/.cache && touch /root/.cache/motd.legal-displayed
+  msg_ok "Login banner added"
+}
+
+# ct_notes IP — HTML for the container's Notes panel in the Proxmox UI. Proxmox drops every
+# attribute outside an allowlist (no style=), so sizes use width/height; it loads Font Awesome.
+ct_notes() {
+  local ip=$1 open="" channel=""
+  # a DHCP address can change, so only link a static one
+  [[ $CT_IP != dhcp && -n $ip ]] && open="
+  <p><a href='http://${ip}:${PORT}'><img src='https://img.shields.io/badge/📈-Open%20the%20dashboard-c8a04a' alt='Open the dashboard'/></a></p>"
+  is_prerelease && channel="
+  <p><img src='https://img.shields.io/badge/⚠️-Prerelease%20channel-8a6d2f' alt='Prerelease channel'/></p>"
+  cat <<EOF
+<div align='center'>
+  <a href='https://github.com/${REPO}'><img src='https://raw.githubusercontent.com/${REPO}/main/docs/logo/logo-mark.svg' alt='llama-paddock' width='80' height='80'/></a>
+
+  <h2>llama-paddock dashboard</h2>
+${open}${channel}
+  <p>Update: <code>update-llama-paddock</code> in the container</p>
+
+  <p>
+    <i class='fa fa-github fa-fw'></i> <a href='https://github.com/${REPO}'>GitHub</a> &nbsp;
+    <i class='fa fa-tag fa-fw'></i> <a href='https://github.com/${REPO}/releases'>Releases</a> &nbsp;
+    <i class='fa fa-exclamation-circle fa-fw'></i> <a href='https://github.com/${REPO}/issues'>Issues</a>
+  </p>
+</div>
+EOF
 }
 
 # uninstall-llama-paddock: local_uninstall copied out of this script, so it works offline
@@ -705,6 +807,7 @@ local_install() {
   write_config
   PORT=$(sed -n 's/^PORT=//p' "$CFG_DIR/llama-paddock.env" | tail -1); PORT=${PORT:-8080}
   write_service
+  [[ -n ${PADDOCK_NESTED-} ]] && write_motd
 
   if [[ -n $has_systemd ]]; then
     systemctl daemon-reload
@@ -735,6 +838,8 @@ local_install() {
 
 # ================================================================= main
 [[ -n ${PADDOCK_NESTED-} ]] || header   # set when re-run inside the new CT from proxmox_install
+# once, before anything is changed (the copy re-run inside a new CT skips it)
+if [[ -z ${PADDOCK_NESTED-} && -z ${PADDOCK_UNINSTALL-} ]] && is_prerelease; then prerelease_notice; fi
 if command -v pveversion >/dev/null 2>&1 && [[ -z ${PADDOCK_LOCAL-} ]]; then
   if [[ -n ${PADDOCK_UNINSTALL-} ]]; then proxmox_uninstall; else proxmox_install; fi
 else

@@ -36,10 +36,23 @@ import crypto from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "0.4.0";
+const VERSION = "0.5.0-dev.4";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const fileCfg = (() => {
-  try { return JSON.parse(fs.readFileSync(path.join(HERE, "agent.json"), "utf8")); } catch { return {}; }
+  const file = path.join(HERE, "agent.json");
+  let text;
+  try {
+    text = fs.readFileSync(file, "utf8");
+  } catch {
+    return {};
+  }
+  try {
+    // older installers wrote a UTF-8 BOM, which JSON.parse rejects
+    return JSON.parse(text.replace(/^\uFEFF/, ""));
+  } catch (e) {
+    console.error(`${file} is not valid JSON: ${e.message}`);
+    process.exit(1);
+  }
 })();
 const cfg = (k, d = "") => process.env[k] ?? fileCfg[k] ?? d;
 

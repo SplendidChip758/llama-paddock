@@ -15,6 +15,8 @@
 #   PADDOCK_BRANCH       branch used when there is no release yet (default: main)
 #   PADDOCK_AGENT_TOKEN  reuse an existing token instead of generating one
 #   PADDOCK_AGENT_PORT   default 11435
+#   PADDOCK_OLLAMA_REMOTE  1 = let other machines reach Ollama (sets OLLAMA_HOST=0.0.0.0), 0 = leave it;
+#                        asked when interactive, unattended runs leave it alone unless set
 #   PADDOCK_CTID         Proxmox: container to install into (skips the prompt)
 #   PADDOCK_LOCAL=1      install here even on a Proxmox host
 #   PADDOCK_YES=1        non-interactive
@@ -59,6 +61,8 @@ quiet() {
   rm -f "$log"
   return $rc
 }
+
+OLLAMA_REMOTE_Q="Ollama only accepts connections from this machine. Let the dashboard and other machines on the network reach it (sets OLLAMA_HOST=0.0.0.0; Ollama's API has no login)?"
 
 version_ge() { [[ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -1)" == "$2" ]]; }
 
@@ -106,9 +110,17 @@ proxmox_install() {
 
   pct exec "$CT_ID" -- bash -c "command -v curl >/dev/null || (apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates >/dev/null)" \
     || die "could not install curl inside CT $CT_ID"
+
+  # the copy inside the CT runs unattended, so ask here (only if Ollama there isn't set up for it yet)
+  local remote=${PADDOCK_OLLAMA_REMOTE-}
+  if [[ -z $remote && -z ${PADDOCK_YES-} && -r /dev/tty ]] \
+    && ! pct exec "$CT_ID" -- systemctl show ollama.service -p Environment --value 2>/dev/null | grep -q 'OLLAMA_HOST='; then
+    confirm "$OLLAMA_REMOTE_Q" n && remote=1 || remote=0
+  fi
+
   pct exec "$CT_ID" -- env \
     PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_NESTED=1 PADDOCK_REPO="$REPO" PADDOCK_BRANCH="$BRANCH" PADDOCK_VERSION="$VERSION" \
-    PADDOCK_AGENT_PORT="$AGENT_PORT" PADDOCK_AGENT_TOKEN="${PADDOCK_AGENT_TOKEN-}" \
+    PADDOCK_AGENT_PORT="$AGENT_PORT" PADDOCK_AGENT_TOKEN="${PADDOCK_AGENT_TOKEN-}" PADDOCK_OLLAMA_REMOTE="$remote" \
     bash -c "curl -fsSL '$SELF_URL' | bash"
 
   local ip; ip=$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}')
@@ -213,6 +225,41 @@ write_uninstaller() {
   chmod 755 /usr/local/bin/uninstall-llama-paddock-agent
 }
 
+# Let the dashboard reach Ollama: set OLLAMA_HOST through the agent's own /env API, so the override
+# is written exactly as the Environment tab writes it (format, backups, restart).
+configure_ollama_host() {
+  systemctl cat ollama.service &>/dev/null || return 0
+  local current; current=$(systemctl show ollama.service -p Environment --value 2>/dev/null | tr ' ' '\n' | sed -n 's/^OLLAMA_HOST=//p' | tail -1) || true
+  if [[ -n $current ]]; then
+    msg_ok "Ollama listens on ${current} (OLLAMA_HOST)"
+    return 0
+  fi
+  local remote=${PADDOCK_OLLAMA_REMOTE-}
+  if [[ -z $remote ]]; then
+    if [[ -z ${PADDOCK_YES-} && -r /dev/tty ]]; then
+      confirm "$OLLAMA_REMOTE_Q" n && remote=1 || remote=0
+    else
+      remote=0
+    fi
+  fi
+  if [[ $remote != 1 ]]; then
+    msg_warn "Ollama only listens on localhost, so the dashboard can't reach it. Set OLLAMA_HOST=0.0.0.0 in the dashboard's Environment tab when you want it to"
+    return 0
+  fi
+
+  local port token api vars
+  port=$(sed -n 's/^PADDOCK_AGENT_PORT=//p' "$ENV_FILE"); token=$(sed -n 's/^PADDOCK_AGENT_TOKEN=//p' "$ENV_FILE")
+  api="http://127.0.0.1:${port}/env"
+  vars=$(curl -fsS -H "Authorization: Bearer $token" "$api" \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const vars={...JSON.parse(s).managed,OLLAMA_HOST:"0.0.0.0"};console.log(JSON.stringify({vars,restart:true}))})') \
+    || { msg_warn "could not read Ollama's settings from the agent; set OLLAMA_HOST=0.0.0.0 in the dashboard's Environment tab"; return 0; }
+  if curl -fsS -X PUT -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$vars" "$api" >/dev/null; then
+    msg_ok "Ollama restarted with OLLAMA_HOST=0.0.0.0, reachable on port 11434"
+  else
+    msg_warn "could not set OLLAMA_HOST; set it to 0.0.0.0 in the dashboard's Environment tab"
+  fi
+}
+
 local_install() {
   [[ $EUID -eq 0 ]] || die "run as root"
   [[ -d /run/systemd/system ]] || die "systemd is required (this agent manages ollama.service)"
@@ -222,7 +269,8 @@ local_install() {
   if ! systemctl list-unit-files ollama.service &>/dev/null || ! systemctl cat ollama.service &>/dev/null; then
     msg_warn "ollama.service not found — the agent will still report stats, but env editing/restart need Ollama installed as a systemd service"
   fi
-  command -v nvidia-smi >/dev/null || msg_warn "nvidia-smi not found — GPU stats will be unavailable"
+  # WSL's nvidia-smi isn't on sudo's PATH; the agent looks there itself
+  command -v nvidia-smi >/dev/null || [[ -x /usr/lib/wsl/lib/nvidia-smi ]] || msg_warn "nvidia-smi not found — GPU stats will be unavailable"
 
   TMP_DIR=$(mktemp -d)
   trap 'rm -rf "${TMP_DIR:-}"' EXIT
@@ -272,6 +320,7 @@ EOF
     sleep 1
   done
   [[ -n $ok ]] && msg_ok "Agent is running" || msg_warn "Agent not answering yet — check: journalctl -u llama-paddock-agent"
+  [[ -n $ok ]] && configure_ollama_host
 
   local ip; ip=$(hostname -I 2>/dev/null | awk '{print $1}')
   echo

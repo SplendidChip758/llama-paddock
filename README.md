@@ -7,15 +7,16 @@
 
 <p align="center">
   <a href="https://github.com/SplendidChip758/llama-paddock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/SplendidChip758/llama-paddock?style=flat-square&color=c8a04a&label=release"></a>
+  <a href="https://github.com/SplendidChip758/llama-paddock/releases"><img alt="Latest prerelease" src="https://img.shields.io/github/v/release/SplendidChip758/llama-paddock?include_prereleases&sort=semver&filter=*-dev*&style=flat-square&color=8a6d2f&label=prerelease"></a>
   <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-c8a04a?style=flat-square"></a>
   <a href="https://github.com/SplendidChip758/llama-paddock/commits"><img alt="Last commit" src="https://img.shields.io/github/last-commit/SplendidChip758/llama-paddock?style=flat-square"></a>
   <a href="https://github.com/SplendidChip758/llama-paddock/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/SplendidChip758/llama-paddock?style=flat-square"></a>
   <br>
-  <img alt="Ollama" src="https://img.shields.io/badge/Ollama-compatible-1b1814?style=flat-square&logo=ollama&logoColor=white">
-  <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-1b1814?style=flat-square&logo=nextdotjs&logoColor=white">
-  <img alt="Node.js" src="https://img.shields.io/badge/agent-Node.js%20%E2%89%A518.15-1b1814?style=flat-square&logo=nodedotjs&logoColor=white">
-  <img alt="Platforms" src="https://img.shields.io/badge/hosts-Linux%20%7C%20Windows-1b1814?style=flat-square">
-  <img alt="Docker" src="https://img.shields.io/badge/dashboard-Docker-1b1814?style=flat-square&logo=docker&logoColor=white">
+  <a href="https://ollama.com"><img alt="Ollama" src="https://img.shields.io/badge/Ollama-compatible-1b1814?style=flat-square&logo=ollama&logoColor=white"></a>
+  <a href="https://nextjs.org"><img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-1b1814?style=flat-square&logo=nextdotjs&logoColor=white"></a>
+  <a href="#1a-install-the-agent-on-linux-hosts"><img alt="Node.js" src="https://img.shields.io/badge/agent-Node.js%20%E2%89%A518.15-1b1814?style=flat-square&logo=nodedotjs&logoColor=white"></a>
+  <a href="#architecture"><img alt="Platforms" src="https://img.shields.io/badge/hosts-Linux%20%7C%20Windows-1b1814?style=flat-square"></a>
+  <a href="#docker"><img alt="Docker" src="https://img.shields.io/badge/dashboard-Docker-1b1814?style=flat-square&logo=docker&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -79,7 +80,7 @@ flowchart LR
 
 | Piece | Runs where | Does what |
 |---|---|---|
-| **Dashboard** (`dashboard/`) | Docker container | Polls every instance (background poller started from `instrumentation.ts`), keeps metric history in memory, serves the UI and a JSON API, runs pulls/creates as background jobs that survive a page refresh |
+| **Dashboard** (`dashboard/`) | Docker container | Polls every instance (background poller started from `instrumentation.ts`), stores metric history and job state in SQLite in the data directory, serves the UI and a JSON API, runs pulls/creates as background jobs that survive a page refresh and a restart |
 | **Linux agent** (`agent/linux/`) | Each Linux Ollama host, systemd service as root | Stats from `/proc` + `nvidia-smi`; edits `/etc/systemd/system/ollama.service.d/override.conf`, runs `daemon-reload` + `systemctl restart ollama`; tails `journalctl -u ollama` |
 | **Windows agent** (`agent/windows/`) | Each Windows PC, Scheduled Task at logon in your session | Stats from Node/`tasklist`/`netstat` + `nvidia-smi`; edits your **user** environment variables (what Ollama for Windows reads); restarts the Ollama tray app with the new values; tails `%LOCALAPPDATA%\Ollama\server.log` |
 
@@ -100,6 +101,7 @@ Either way it:
 - installs Node.js if it's missing or older than 18.15 (distro package, falling back to NodeSource 22.x),
 - installs the agent to `/opt/llama-paddock-agent` and enables `llama-paddock-agent.service`,
 - writes `/etc/llama-paddock-agent.env` (mode 600) with a generated token,
+- if Ollama only listens on localhost (no `OLLAMA_HOST`), asks whether other machines may reach it, and if so sets `OLLAMA_HOST=0.0.0.0` the same way the Environment tab does. Ollama's API has no login, so only say yes on a network you trust. On a Proxmox host the question is asked before installing into the container. Unattended runs and `update-llama-paddock-agent` never change it unless you set `PADDOCK_OLLAMA_REMOTE=1`,
 - prints the Ollama URL, agent URL and agent token to enter under **Add host** in the dashboard.
 
 Re-running it, or running `update-llama-paddock-agent` inside the container, updates the agent and **keeps the token**. To share one token across hosts, set `PADDOCK_AGENT_TOKEN=<token>` before the command. Running `bash install/agent.sh` from a clone of the repo uses the agent files in the clone.
@@ -169,6 +171,10 @@ Every setting can be preset in the environment (`CT_OS`, `CT_ID`, `CT_HOSTNAME`,
 
 It then downloads the latest template for the distribution you pick (latest **Ubuntu LTS** by default, or **Debian**), creates an unprivileged container, and installs the dashboard inside it.
 
+The container's **Notes** in the Proxmox UI get links to the dashboard (when it has a static IP), releases and issues. Logging in to the container shows a short banner with its version, OS, hostname, dashboard URL and status. Delete `/etc/profile.d/00_llama-paddock.sh` to turn the banner off.
+
+The container's console mode is `/dev/console`. In the default `tty` mode, newer distributions (util-linux 2.40.3+) show escape codes like `^[[1;1R` in the console's login prompt. For a container created by an older installer, run `pct set <ctid> --cmode console` on the host.
+
 **Inside a container or VM** it:
 - installs Node.js 22 if needed,
 - downloads the prebuilt dashboard from the latest GitHub release, or builds from `main` if there's no release yet,
@@ -179,6 +185,19 @@ It then downloads the latest template for the distribution you pick (latest **Ub
 Open the URL, sign in with the printed password, and choose your own password (required on first sign-in). Then use **Add host** to add your Ollama servers. Hosts added in the UI and the login are stored in `/var/lib/llama-paddock`.
 
 Update with `update-llama-paddock` inside the container, or `pct exec <ctid> -- update-llama-paddock` from the host. Your config is kept.
+
+### Prereleases
+
+> [!WARNING]
+> Prereleases are for testing. They are built from every change merged to `dev`, before it is released as stable, so features may be unfinished and there may be bugs, including ones that lose metric history or settings. The data format can change between prereleases, so going back to stable may mean waiting for the next stable release.
+
+To try the newest prerelease (`vX.Y.Z-dev.N`), use the prerelease installer. It works like the one-liner above, with the same options, but shows this disclaimer and asks before installing:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/dev/install/dashboard-dev.sh)"
+```
+
+`update-llama-paddock` then stays on prereleases. To go back to stable, re-run the normal one-liner. With Docker, use the `:dev` image tag instead.
 
 **Uninstall:**
 - **Inside the container or VM:** `uninstall-llama-paddock` removes the service and `/opt/llama-paddock`. It asks whether to also delete the config, saved hosts and login (`/etc/llama-paddock`, `/var/lib/llama-paddock`); keep them and a reinstall picks them up again. Unattended: `PADDOCK_YES=1`, plus `PADDOCK_PURGE=1` to delete the data too.
@@ -202,11 +221,11 @@ cp .env.example .env    # initial dashboard login
 docker compose up -d
 ```
 
-Sign in at `http://<docker-host>:8080`, choose a new password, then **Add host**. Hosts and the login are kept in the `paddock-data` volume (`/data`).
+Sign in at `http://<docker-host>:8080`, choose a new password, then **Add host**. Hosts, the login and metric history (`paddock.db`) are kept in the `paddock-data` volume (`/data`).
 
 For the latest prerelease from the `dev` branch, use the `:dev` tag. To build the image yourself instead, swap `image:` for `build: ./dashboard` in `docker-compose.yml`. In an unprivileged LXC, Docker needs `nesting=1,keyctl=1`.
 
-`config.yaml` is optional: mount it for `poll_interval` / `history_points`, or to define hosts declaratively (those are read-only in the UI). It expands `${VAR}` from the environment, so tokens can stay in `.env`.
+`config.yaml` is optional: mount it for `poll_interval`, `history_points` / `history_retention_days`, or to define hosts declaratively (those are read-only in the UI). It expands `${VAR}` from the environment, so tokens can stay in `.env`.
 
 ### Login
 
@@ -218,7 +237,7 @@ For the latest prerelease from the `dev` branch, use the `:dev` tag. To build th
 
 ### From source
 
-Requires Node 20.9 or newer:
+Requires Node 22.13 or newer (for the built-in `node:sqlite`):
 
 ```bash
 cd dashboard
@@ -292,7 +311,7 @@ Everything the UI does is plain JSON, so it can be scripted (n8n, Hermes, cron):
 | Method | Path | |
 |---|---|---|
 | GET | `/api/instances` | all instances with latest stats + ps |
-| GET | `/api/instances/{id}/history` | metric history |
+| GET | `/api/instances/{id}/history` | latest `history_points` polls; `?range=1h\|6h\|24h\|7d\|30d` for a downsampled range |
 | GET | `/api/instances/{id}/models` | `ollama list` |
 | POST | `/api/instances/{id}/models/show` | `{model}` → details, parsed params, native ctx |
 | POST | `/api/instances/{id}/models/pull` | `{model}` → job |
@@ -322,7 +341,6 @@ Development: `cd dashboard && npm install && PADDOCK_DATA_DIR=../data npm run de
 
 ## Limitations
 
-- Metric history and job state are in memory and reset when the dashboard restarts.
 - The Linux agent assumes Ollama runs under systemd, as with the official install script. If Ollama runs in Docker, set its environment in compose instead. Monitoring and model management still work.
 - The Windows agent targets the standard Ollama desktop install. If you run `ollama serve` as a Windows service (NSSM or similar), the agent can't manage that service's environment.
 - On Windows with consumer GPUs, `nvidia-smi` doesn't report per-process VRAM (a WDDM limitation), so the process table is empty there.

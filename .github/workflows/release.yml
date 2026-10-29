@@ -9,6 +9,10 @@
 #   main → vX.Y.Z           stable release, images :X.Y.Z, :X.Y and :latest
 #   dev  → vX.Y.Z-dev.N     GitHub prerelease, images :X.Y.Z-dev.N and :dev
 #
+# After a stable release, the backmerge job merges main back into dev, so the
+# release commit and tag are on dev and the next prerelease counts up from the
+# new version.
+#
 # Each architecture is built on a native runner (arm64 under QEMU took ~35 min
 # and crashed npm), pushed by digest, then merged into one multi-arch tag.
 #
@@ -70,6 +74,45 @@ jobs:
           -p @semantic-release/exec@7
           -p conventional-changelog-conventionalcommits@9
           semantic-release
+
+  # dev only accepts squash merges, which would drop the tag from dev's history,
+  # so the merge is pushed directly with the deploy key (the rulesets' bypass).
+  # On a conflict, it opens a PR from a backmerge/ branch to resolve it in.
+  backmerge:
+    needs: release
+    if: github.ref_name == 'main' && needs.release.outputs.prerelease == 'false' && needs.release.outputs.version != ''
+    runs-on: ubuntu-latest
+    env:
+      TAG: v${{ needs.release.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: dev
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+
+      - run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git merge --no-ff -m "chore: merge main into dev after $TAG" "$TAG"; then
+            git push origin dev
+            exit 0
+          fi
+          git merge --abort
+          branch="backmerge/$TAG"
+          git push origin "$TAG^{commit}:refs/heads/$branch"
+          gh pr create --base dev --head "$branch" --title "chore: merge main into dev after $TAG" --body "$(cat <<EOF
+          Merging \`main\` back into \`dev\` after $TAG conflicted, so it couldn't be pushed automatically.
+
+          1. Resolve the conflicts in this PR (**Resolve conflicts**, or locally on \`$branch\`). That also starts the CI checks, which don't run on PRs opened by a workflow.
+          2. This PR needs a **merge commit**, but \`dev\` only allows squash merges. Allow merge commits on the \`dev\` ruleset (Settings → Rules → dev → Allowed merge methods), merge with **Create a merge commit**, then switch it back to squash only.
+
+          Don't squash it: the release tag would be missing from \`dev\`, and the next prerelease would reuse the version.
+          EOF
+          )"
+          echo "::error::Merging main into dev conflicted; resolve it in the backmerge PR."
+          exit 1
 
   docker-build:
     needs: release

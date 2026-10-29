@@ -1,3 +1,34 @@
+## [0.5.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0-dev.3...v0.5.0-dev.4) (2026-10-28)
+
+### Bug Fixes
+
+* **agent-linux:** find nvidia-smi on WSL ([#56](https://github.com/SplendidChip758/llama-paddock/issues/56)) ([b4af67a](https://github.com/SplendidChip758/llama-paddock/commit/b4af67a6881fced01181064f0d9ae160d77c0aa2))
+
+## [0.5.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0-dev.2...v0.5.0-dev.3) (2026-10-28)
+
+### Bug Fixes
+
+* **agent-windows:** start when agent.json has a UTF-8 BOM ([#55](https://github.com/SplendidChip758/llama-paddock/issues/55)) ([84fb0a3](https://github.com/SplendidChip758/llama-paddock/commit/84fb0a3a95091092ed58d9adb5457835b0990b4c))
+* **install:** align the login banner and skip Ubuntu's legal notice ([#53](https://github.com/SplendidChip758/llama-paddock/issues/53)) ([be20e9c](https://github.com/SplendidChip758/llama-paddock/commit/be20e9cc907d0176e5a5b5ad166c2321432bcfba))
+
+## [0.5.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0-dev.1...v0.5.0-dev.2) (2026-10-28)
+
+### Features
+
+* **install:** add a login banner and Proxmox notes to the dashboard CT ([2d6451d](https://github.com/SplendidChip758/llama-paddock/commit/2d6451d37be8658d841d46586ddc7c2595509064))
+* **install:** add a prerelease installer with a disclaimer ([9bf2cde](https://github.com/SplendidChip758/llama-paddock/commit/9bf2cde0c5e802739c5dc177998353349eee7a3d))
+
+### Bug Fixes
+
+* **install:** describe bridges by their ports, not the host's IP ([21f7e9a](https://github.com/SplendidChip758/llama-paddock/commit/21f7e9ae0b5bf4d59f44e887b61fd71aa29651ca))
+* **install:** size the CT notes logo and use the console login mode ([f64df57](https://github.com/SplendidChip758/llama-paddock/commit/f64df578df03fc55dfd5a7af0b9bfa89e8b7df76))
+
+## [0.5.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.4.0...v0.5.0-dev.1) (2026-10-28)
+
+### Features
+
+* **dashboard:** persist metric history and jobs in SQLite ([182d025](https://github.com/SplendidChip758/llama-paddock/commit/182d0256eb8a0258adb8586e38b5edb2e4bc18df)), closes [#3](https://github.com/SplendidChip758/llama-paddock/issues/3)
+
 ## [0.4.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.3.0...v0.4.0) (2026-10-27)
 
 ### Features

@@ -1,0 +1,9 @@
+{
+  // Copilot's "Generate commit message" and PR description buttons don't read AGENTS.md; point them at the repo's rules.
+  "github.copilot.chat.commitMessageGeneration.instructions": [
+    { "file": ".github/instructions/commit-message.instructions.md" }
+  ],
+  "github.copilot.chat.pullRequestDescriptionGeneration.instructions": [
+    { "file": ".github/instructions/pull-request.instructions.md" }
+  ]
+}
