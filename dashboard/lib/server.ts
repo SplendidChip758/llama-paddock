@@ -293,6 +293,8 @@ async function pollOne(st: InstanceState): Promise<HistoryPoint> {
   const point: HistoryPoint = { t: st.updated, vram: st.ps.reduce((s, m) => s + (m.size_vram || 0), 0), loaded: st.ps.length };
   if (st.agent_ok && st.stats) {
     point.cpu = st.stats.system.cpu_pct;
+    if (st.stats.system.net.rx_bps != null) point.rx = st.stats.system.net.rx_bps;
+    if (st.stats.system.net.tx_bps != null) point.tx = st.stats.system.net.tx_bps;
     point.mem = st.stats.system.mem.pct;
     point.gpus = st.stats.nvidia.gpus.map((x) => ({ u: x.util_pct, m: x.mem_used_mib, mt: x.mem_total_mib, t: x.temp_c, p: x.power_w }));
   }

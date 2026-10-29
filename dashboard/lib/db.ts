@@ -34,6 +34,11 @@ const MIGRATIONS: string[] = [
   -- jobs: info is the JobInfo JSON; path + body are the Ollama request, so a pull can be resumed.
   CREATE TABLE jobs (id TEXT PRIMARY KEY, info TEXT NOT NULL, path TEXT NOT NULL, body TEXT NOT NULL);
   `,
+  `
+  -- network throughput in bytes/s, for the long-range charts; null before this version and without an agent
+  ALTER TABLE samples ADD COLUMN rx REAL;
+  ALTER TABLE samples ADD COLUMN tx REAL;
+  `,
 ];
 
 function migrate(db: DatabaseSync) {
@@ -132,17 +137,17 @@ export type HistoryRange = keyof typeof RANGES;
 export function recordSamples(rows: [instance: string, point: HistoryPoint][]) {
   if (!rows.length) return;
   tx((d) => {
-    const host = d.prepare("INSERT OR REPLACE INTO samples VALUES (?, 0, ?, ?, ?, ?, ?)");
-    const gpu = d.prepare("INSERT OR REPLACE INTO gpu_samples VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?)");
+    const host = d.prepare("INSERT OR REPLACE INTO samples (instance, res, t, cpu, mem, vram, loaded, rx, tx) VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?)");
+    const gpu = d.prepare("INSERT OR REPLACE INTO gpu_samples (instance, res, t, gpu, util, mem, mem_total, temp, power) VALUES (?, 0, ?, ?, ?, ?, ?, ?, ?)");
     for (const [instance, p] of rows) {
       const t = Math.round(p.t);
-      host.run(instance, t, p.cpu ?? null, p.mem ?? null, p.vram, p.loaded);
+      host.run(instance, t, p.cpu ?? null, p.mem ?? null, p.vram, p.loaded, p.rx ?? null, p.tx ?? null);
       p.gpus?.forEach((x, i) => gpu.run(instance, t, i, x.u, x.m, x.mt, x.t, x.p));
     }
   });
 }
 
-interface SampleRow { t: number; cpu: number | null; mem: number | null; vram: number; loaded: number }
+interface SampleRow { t: number; cpu: number | null; mem: number | null; vram: number; loaded: number; rx: number | null; tx: number | null }
 interface GpuRow { t: number; gpu: number; util: number | null; mem: number | null; mem_total: number | null; temp: number | null; power: number | null }
 
 /** Join host rows with their GPU rows into the HistoryPoint shape the UI already uses. */
@@ -157,6 +162,8 @@ function toPoints(rows: SampleRow[], gpuRows: GpuRow[]): HistoryPoint[] {
     const p: HistoryPoint = { t: r.t, vram: Math.round(r.vram), loaded: r.loaded };
     if (r.cpu !== null) p.cpu = r.cpu;
     if (r.mem !== null) p.mem = r.mem;
+    if (r.rx !== null) p.rx = r.rx;
+    if (r.tx !== null) p.tx = r.tx;
     const g = gpus.get(r.t);
     if (g) p.gpus = Array.from(g, (x) => x ?? { u: null, m: null, mt: null, t: null, p: null });
     return p;
@@ -165,7 +172,7 @@ function toPoints(rows: SampleRow[], gpuRows: GpuRow[]): HistoryPoint[] {
 
 function readSince(instance: string, res: number, since: number): HistoryPoint[] {
   const d = db();
-  const rows = d.prepare("SELECT t, cpu, mem, vram, loaded FROM samples WHERE instance = ? AND res = ? AND t >= ? ORDER BY t")
+  const rows = d.prepare("SELECT t, cpu, mem, vram, loaded, rx, tx FROM samples WHERE instance = ? AND res = ? AND t >= ? ORDER BY t")
     .all(instance, res, since) as unknown as SampleRow[];
   if (!rows.length) return [];
   const gpuRows = d.prepare("SELECT t, gpu, util, mem, mem_total, temp, power FROM gpu_samples WHERE instance = ? AND res = ? AND t >= ?")
@@ -205,12 +212,12 @@ function rollup(d: DatabaseSync, src: number, dst: number, now: number) {
   // dst is inlined: node:sqlite binds JS numbers as REAL, and t / 60.0 wouldn't truncate to a bucket.
   const args: SQLInputValue[] = [src, from, to];
   d.prepare(`
-    INSERT OR REPLACE INTO samples
-    SELECT instance, ${dst}, (t / ${dst}) * ${dst} AS b, avg(cpu), avg(mem), avg(vram), avg(loaded)
+    INSERT OR REPLACE INTO samples (instance, res, t, cpu, mem, vram, loaded, rx, tx)
+    SELECT instance, ${dst}, (t / ${dst}) * ${dst} AS b, avg(cpu), avg(mem), avg(vram), avg(loaded), avg(rx), avg(tx)
     FROM samples WHERE res = ? AND t >= ? AND t < ? GROUP BY instance, b
   `).run(...args);
   d.prepare(`
-    INSERT OR REPLACE INTO gpu_samples
+    INSERT OR REPLACE INTO gpu_samples (instance, res, t, gpu, util, mem, mem_total, temp, power)
     SELECT instance, ${dst}, (t / ${dst}) * ${dst} AS b, gpu, avg(util), avg(mem), max(mem_total), avg(temp), avg(power)
     FROM gpu_samples WHERE res = ? AND t >= ? AND t < ? GROUP BY instance, b, gpu
   `).run(...args);

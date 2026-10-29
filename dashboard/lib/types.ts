@@ -113,6 +113,9 @@ export interface HistoryPoint {
   t: number;
   cpu?: number;
   mem?: number;
+  /** network throughput, bytes/s */
+  rx?: number;
+  tx?: number;
   gpus?: { u: number | null; m: number | null; mt: number | null; t: number | null; p: number | null }[];
   vram: number;
   loaded: number;
