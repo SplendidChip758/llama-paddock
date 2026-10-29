@@ -732,7 +732,7 @@ EOF
   [[ -d /etc/update-motd.d ]] && chmod -x /etc/update-motd.d/* 2>/dev/null || true
   [[ -f /etc/motd ]] && : > /etc/motd
   mkdir -p /root/.cache && touch /root/.cache/motd.legal-displayed
-  msg_ok "Login banner added"
+  msg_ok "Login banner written"
 }
 
 # ct_notes IP — HTML for the container's Notes panel in the Proxmox UI. Proxmox drops every
@@ -807,7 +807,9 @@ local_install() {
   write_config
   PORT=$(sed -n 's/^PORT=//p' "$CFG_DIR/llama-paddock.env" | tail -1); PORT=${PORT:-8080}
   write_service
-  [[ -n ${PADDOCK_NESTED-} ]] && write_motd
+  # a new CT from proxmox_install, or one that already has our banner: refresh it, so updates
+  # bring banner changes along
+  if [[ -n ${PADDOCK_NESTED-} || -f $MOTD_FILE ]]; then write_motd; fi
 
   if [[ -n $has_systemd ]]; then
     systemctl daemon-reload
