@@ -1,3 +1,9 @@
+## [0.7.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.1...v0.7.0-dev.2) (2026-10-30)
+
+### Features
+
+* **dashboard:** add a Prometheus /metrics endpoint ([#94](https://github.com/SplendidChip758/llama-paddock/issues/94)) ([2cfe8a6](https://github.com/SplendidChip758/llama-paddock/commit/2cfe8a6d05f7c29cb6ca3e8cf6331009562daf17)), closes [#6](https://github.com/SplendidChip758/llama-paddock/issues/6)
+
 ## [0.7.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.6.0...v0.7.0-dev.1) (2026-10-30)
 
 ### Features
