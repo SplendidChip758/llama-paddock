@@ -130,7 +130,7 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
           <input type="password" autoComplete="new-password" value={apiKey} disabled={clearKey}
             onChange={(e) => setApiKey(e.target.value)}
             placeholder={host?.has_ollama_proxy_key ? "unchanged (leave blank to keep)" : "blank unless a proxy in front of Ollama checks a key"} />
-          <div className="hint">Ollama has no keys of its own. Use this when a proxy in front of it checks one; it's sent as <code>Authorization: Bearer</code>. <a href="https://github.com/SplendidChip758/llama-paddock/blob/main/docs/security.md#protect-ollama-with-a-proxy-key" target="_blank" rel="noreferrer">Setup examples</a></div>
+          <div className="hint">Ollama has no keys of its own. Use this when a proxy in front of it checks one; it's sent as <code>Authorization: Bearer</code>. <a href="https://github.com/SplendidChip758/llama-paddock/blob/main/docs/proxy.md#ollama-behind-a-proxy" target="_blank" rel="noreferrer">Setup examples</a></div>
         </label>
         {host?.has_ollama_proxy_key && (
           <label className="row hint" style={{ gap: 6, margin: "-6px 0 14px" }}>

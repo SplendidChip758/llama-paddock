@@ -45,7 +45,7 @@ instances:
 
   # Ollama behind a proxy that checks a key (Ollama has no keys of its own):
   # sent as Authorization: Bearer on every Ollama call. Setup examples:
-  # docs/security.md#protect-ollama-with-a-proxy-key
+  # docs/proxy.md#ollama-behind-a-proxy
   # - id: secured
   #   name: secured
   #   ollama_url: https://ollama.example.lan

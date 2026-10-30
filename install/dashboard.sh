@@ -629,7 +629,7 @@ NEXT_TELEMETRY_DISABLED=1
 PADDOCK_USERNAME=admin
 PADDOCK_PASSWORD=${ADMIN_PASSWORD}
 # PADDOCK_AUTH=off disables the login, e.g. behind an auth proxy.
-# PADDOCK_TRUSTED_PROXIES=1 when a reverse proxy sits in front (see docs/security.md).
+# PADDOCK_TRUSTED_PROXIES=1 when a reverse proxy sits in front (see docs/proxy.md).
 EOF
     msg_ok "Wrote $CFG_DIR/llama-paddock.env"
   fi
