@@ -29,7 +29,7 @@ instances:
     tags: [linux, gpu]
 ```
 
-Only `ollama_url` is required; supply a stable, unique `id` using letters, digits, `_`, `.` or `-`. `name` defaults to the ID. Omit `agent_url` and `agent_token` for a host without an agent. Ollama has no keys of its own. If a proxy in front of it checks one, add `ollama_proxy_key: ${OLLAMA01_PROXY_KEY}`: the dashboard sends it as `Authorization: Bearer <key>` on every Ollama call. See [Protect Ollama with a proxy key](security.md#protect-ollama-with-a-proxy-key) for proxy setups. Config-defined hosts take precedence over UI hosts with the same ID.
+Only `ollama_url` is required; supply a stable, unique `id` using letters, digits, `_`, `.` or `-`. `name` defaults to the ID. Omit `agent_url` and `agent_token` for a host without an agent. Ollama has no keys of its own. If a proxy in front of it checks one, add `ollama_proxy_key: ${OLLAMA01_PROXY_KEY}`: the dashboard sends it as `Authorization: Bearer <key>` on every Ollama call. See [Ollama behind a proxy](proxy.md#ollama-behind-a-proxy) for proxy setups. Config-defined hosts take precedence over UI hosts with the same ID.
 
 `${VAR}` and `${VAR:-default}` expand from the dashboard process environment; the default is used when the variable is unset. Docker Compose passes values through `.env` using `env_file`. For a systemd install, put them in `/etc/llama-paddock/llama-paddock.env`. A source launch does not automatically read the repository's `.env`.
 
@@ -43,7 +43,7 @@ Only `ollama_url` is required; supply a stable, unique `id` using letters, digit
 | `PADDOCK_PASSWORD` | generated when empty | Initial password |
 | `PADDOCK_AUTH` | login enabled | Set to `off` only when access is protected elsewhere |
 | `PADDOCK_METRICS_TOKEN` | unset | Scrape token for [`/metrics`](prometheus.md), used when `metrics_token` isn't set in `config.yaml` |
-| `PADDOCK_TRUSTED_PROXIES` | `0` | Number of reverse proxies in front of the dashboard, so the login lockout can tell clients apart. See [Security](security.md#behind-a-reverse-proxy) |
+| `PADDOCK_TRUSTED_PROXIES` | `0` | Number of reverse proxies in front of the dashboard, so the login lockout can tell clients apart. See [Reverse proxies](proxy.md#the-dashboard-behind-a-proxy) |
 | `PORT` | `8080` in packaged installs | Dashboard listen port; the installer sets it through `PADDOCK_PORT` |
 | `HOSTNAME` | `0.0.0.0` in packaged installs | Standalone server bind address |
 
