@@ -10,6 +10,8 @@ export interface Instance {
   id: string;
   name: string;
   ollama_url: string;
+  /** Sent as a Bearer token on every Ollama call, for instances behind an auth proxy. */
+  ollama_api_key: string | null;
   agent_url: string | null;
   agent_token: string | null;
   tags: string[];
@@ -45,6 +47,7 @@ function parseInstance(item: Record<string, any>, fallbackId: string, source: In
     id,
     name: String(item.name ?? id),
     ollama_url: trimSlash(String(item.ollama_url)),
+    ollama_api_key: item.ollama_api_key ? String(item.ollama_api_key) : null,
     agent_url: item.agent_url ? trimSlash(String(item.agent_url)) : null,
     agent_token: item.agent_token ? String(item.agent_token) : null,
     tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
@@ -96,6 +99,9 @@ export function saveUiInstances(instances: Instance[]) {
 export interface InstanceInput {
   name?: unknown;
   ollama_url?: unknown;
+  /** Blank/absent keeps the stored key; `clear_ollama_api_key: true` removes it. */
+  ollama_api_key?: unknown;
+  clear_ollama_api_key?: unknown;
   agent_url?: unknown;
   /** Blank/absent keeps the stored token. */
   agent_token?: unknown;

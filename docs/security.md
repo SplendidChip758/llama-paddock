@@ -58,7 +58,7 @@ Every response carries `Content-Security-Policy: frame-ancestors 'none'; base-ur
 
 ## Ollama's own port
 
-Ollama's API has no authentication. Anyone who can reach port 11434 can pull, delete and run models without the dashboard. That's how Ollama is designed, and the dashboard can't change it: bind Ollama to the LAN and firewall it like the agent. Support for Ollama behind an authenticating proxy is planned ([#5](https://github.com/SplendidChip758/llama-paddock/issues/5)).
+Ollama's API has no authentication. Anyone who can reach port 11434 can pull, delete and run models without the dashboard. That's how Ollama is designed, and the dashboard can't change it: bind Ollama to the LAN and firewall it like the agent, or put it behind a proxy that checks an API key. Give the host an `ollama_api_key` ([configuration](configuration.md#declarative-hosts), or **Ollama API key** in Add host) and the dashboard sends it as `Authorization: Bearer <key>` on every Ollama call. The key is stored like agent tokens, in `hosts.json` (mode 600) or `config.yaml`, and never sent to the browser. Without TLS on the proxy it crosses the network in clear text, the same as agent tokens.
 
 ## Reporting a problem
 
