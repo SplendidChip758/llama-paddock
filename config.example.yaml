@@ -9,6 +9,10 @@ history_points: 400     # recent samples shown in sparklines (~20 min at 3s)
 history_retention_days: 30  # metric history kept in the data dir: raw polls for 24h,
                             # 1-min averages for 7 days, 15-min averages after that
 
+# Prometheus /metrics (docs/prometheus.md) is off unless one of these is set.
+# metrics_token: ${PADDOCK_METRICS_TOKEN}  # scrapers send Authorization: Bearer <token>
+# metrics_open: true                       # no token; only on a network you trust
+
 instances:
   - id: ollama-01
     name: ollama-01 · Node-01 P100

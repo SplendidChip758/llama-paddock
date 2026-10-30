@@ -14,6 +14,10 @@ The dashboard is designed for a trusted LAN or a reverse proxy, not the open int
 - **Use TLS from anywhere else.** Put a reverse proxy with TLS in front (Caddy, nginx, Traefik), then set `PADDOCK_TRUSTED_PROXIES` as described below. The session cookie is marked `Secure` when the proxy sends `X-Forwarded-Proto: https`.
 - **Or let the proxy do the login.** With an authenticating proxy (Authelia, Authentik, Cloudflare Access, …) in front, `PADDOCK_AUTH=off` turns the dashboard's own login off. Only do that when nothing can reach the dashboard's port without going through the proxy.
 
+## Prometheus metrics
+
+`/metrics` doesn't use the login, because Prometheus can't sign in. It's off unless you set a scrape token (`metrics_token` or `PADDOCK_METRICS_TOKEN`), which it compares in constant time, or set `metrics_open: true`. The token only reads metrics; it can't sign in or call the API. The metrics hold no secrets, but they name your hosts, models, GPUs and versions, so only leave the endpoint open on a network you trust. See [Prometheus and Grafana](prometheus.md).
+
 ## Login lockout
 
 Failed logins are limited in two ways, and both answer 429 with the time to wait:

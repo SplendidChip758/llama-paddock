@@ -11,6 +11,8 @@ Copy [`config.example.yaml`](../config.example.yaml) to `config.yaml`. With Dock
 | `poll_interval` | `3` | Seconds between polls of each instance |
 | `history_points` | `400` | Recent samples returned for sparklines (about 20 minutes at 3 seconds) |
 | `history_retention_days` | `30` | Days of metric history to retain; must be positive |
+| `metrics_token` | unset | Bearer token for the Prometheus [`/metrics`](prometheus.md) endpoint; falls back to `PADDOCK_METRICS_TOKEN`. Without a token or `metrics_open`, `/metrics` is off |
+| `metrics_open` | `false` | `true` serves `/metrics` without a token; ignored when a token is set |
 | `instances` | `[]` | Declarative hosts; read-only in the UI |
 
 Raw polls are kept for up to 24 hours, one-minute averages for up to 7 days, and 15-minute averages up to the retention limit. Reducing retention also shortens the finer tiers. See the [history API](api.md#history) for the resolution returned by each range.
@@ -40,6 +42,7 @@ Only `ollama_url` is required; supply a stable, unique `id` using letters, digit
 | `PADDOCK_USERNAME` | `admin` | Initial account name |
 | `PADDOCK_PASSWORD` | generated when empty | Initial password |
 | `PADDOCK_AUTH` | login enabled | Set to `off` only when access is protected elsewhere |
+| `PADDOCK_METRICS_TOKEN` | unset | Scrape token for [`/metrics`](prometheus.md), used when `metrics_token` isn't set in `config.yaml` |
 | `PADDOCK_TRUSTED_PROXIES` | `0` | Number of reverse proxies in front of the dashboard, so the login lockout can tell clients apart. See [Security](security.md#behind-a-reverse-proxy) |
 | `PORT` | `8080` in packaged installs | Dashboard listen port; the installer sets it through `PADDOCK_PORT` |
 | `HOSTNAME` | `0.0.0.0` in packaged installs | Standalone server bind address |
