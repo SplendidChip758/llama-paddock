@@ -121,7 +121,7 @@ See the [usage guide](docs/usage.md) for the full walkthrough, more screenshots 
 
 ## Project
 
-llama-paddock is pre-1.0: upgrades are automatic, but settings and APIs can still change between 0.x releases ([versioning](ROADMAP.md#versioning)). See the [roadmap](ROADMAP.md) for planned work and [releases](https://github.com/SplendidChip758/llama-paddock/releases) for shipped changes. `:latest` follows stable releases; `:dev` follows prereleases. Read the [prerelease notes](docs/operations.md#prereleases) before switching.
+llama-paddock is pre-1.0: settings and APIs can still change between 0.x releases ([versioning](ROADMAP.md#versioning)). Releases are published automatically; installed deployments update only when you run the [update steps](docs/operations.md#updates). See the [roadmap](ROADMAP.md) for planned work and [releases](https://github.com/SplendidChip758/llama-paddock/releases) for shipped changes. `:latest` follows stable releases; `:dev` follows prereleases. Read the [prerelease notes](docs/operations.md#prereleases) before switching.
 
 Contributions are welcome—start with [Contributing](CONTRIBUTING.md). Report bugs and suggest features in [Issues](https://github.com/SplendidChip758/llama-paddock/issues); report vulnerabilities privately using the [security policy](SECURITY.md).
 
