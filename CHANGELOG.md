@@ -1,3 +1,9 @@
+## [0.7.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.3...v0.7.0-dev.4) (2026-10-30)
+
+### Bug Fixes
+
+* **dashboard:** repair help links and clarify administration docs ([#99](https://github.com/SplendidChip758/llama-paddock/issues/99)) ([13912e8](https://github.com/SplendidChip758/llama-paddock/commit/13912e8d2333a99a2f437e27a9ce11f4da580ef6))
+
 ## [0.7.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.2...v0.7.0-dev.3) (2026-10-30)
 
 ### Bug Fixes
