@@ -126,7 +126,28 @@ export interface HistoryPoint {
   loaded: number;
 }
 
-export type JobState = "running" | "done" | "error" | "cancelled";
+/**
+ * A change the poller observed. Polls are periodic, so `t` is when a change was first seen, not
+ * when it happened: a model loaded and unloaded between two polls leaves no event at all.
+ */
+export interface HostEvent {
+  instance: string;
+  t: number;
+  /** ollama / agent: reachability changed (up). load / unload: a model appeared in or left /api/ps. */
+  kind: "ollama" | "agent" | "load" | "unload";
+  /** the first observation after a time in which this was unknown (a dashboard restart, a gap in polling, or Ollama
+   *  unreachable for model events), so it began at or before t */
+  first: boolean;
+  up?: boolean;
+  /** why ollama or agent is down */
+  error?: string;
+  model?: string;
+  digest?: string;
+  context_length?: number;
+  size_vram?: number;
+}
+
+export type JobState ="running" | "done" | "error" | "cancelled";
 
 export interface JobInfo {
   id: string;

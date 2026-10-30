@@ -10,7 +10,7 @@ Copy [`config.example.yaml`](../config.example.yaml) to `config.yaml`. With Dock
 |---|---|---|
 | `poll_interval` | `3` | Seconds between polls of each instance |
 | `history_points` | `400` | Recent samples returned for sparklines (about 20 minutes at 3 seconds) |
-| `history_retention_days` | `30` | Days of metric history to retain; must be positive |
+| `history_retention_days` | `30` | Days of metric history and host events to retain; must be positive |
 | `metrics_token` | unset | Bearer token for the Prometheus [`/metrics`](prometheus.md) endpoint; falls back to `PADDOCK_METRICS_TOKEN`. Without a token or `metrics_open`, `/metrics` is off |
 | `metrics_open` | `false` | `true` serves `/metrics` without a token; ignored when a token is set |
 | `instances` | `[]` | Declarative hosts; read-only in the UI |
@@ -64,6 +64,6 @@ Only `ollama_url` is required; supply a stable, unique `id` using letters, digit
 | Docker Compose | `paddock-data` volume, mounted at `/data` |
 | Source | The path set by `PADDOCK_DATA_DIR` |
 
-`hosts.json` stores hosts added in the UI, including agent tokens and proxy keys. `auth.json` stores the login hash and session signing secret. `paddock.db` stores metric history and jobs; SQLite may also create `paddock.db-wal` and `paddock.db-shm`.
+`hosts.json` stores hosts added in the UI, including agent tokens and proxy keys. `auth.json` stores the login hash and session signing secret. `paddock.db` stores metric history, host availability and model load events, and jobs; SQLite may also create `paddock.db-wal` and `paddock.db-shm`.
 
 Keep these files private (mode 600 on Linux) and retain the directory across upgrades. See [Backups](operations.md#backups) for copying SQLite data safely. Agent configuration is separate: [Linux](agent-linux.md) and [Windows](agent-windows.md#settings-and-updates).

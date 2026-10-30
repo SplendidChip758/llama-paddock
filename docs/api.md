@@ -29,14 +29,15 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 |---|---|---|
 | GET | `/api/instances` | `{poll_interval, instances}` with latest status, stats, loaded models, the Ollama `version` and the `agent_version` (`null` if unknown) |
 | GET | `/api/instances/{id}/history` | Recent samples or a requested range; see [History](#history) |
+| GET | `/api/instances/{id}/events` | Availability and model load events over a range; see [Events](#events) |
 | POST | `/api/instances` | Host fields below → `{id}` (201) |
 | PUT | `/api/instances/{id}` | Host fields below → `{id}` |
-| DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history |
+| DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history and events |
 | POST | `/api/test-connection` | Host fields plus optional existing `id` → separate `ollama` and `agent` results |
 
 Host fields are `name`, `ollama_url`, `ollama_proxy_key`, `agent_url`, `agent_token` and `tags`. `ollama_url` is required. `tags` accepts an array or comma-separated string. Use the ID returned by creation or listed in `/api/instances` in later requests.
 
-Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Likewise a blank or omitted `ollama_proxy_key` keeps the stored key; send `clear_ollama_proxy_key: true` to remove it. The 0.7.0 prereleases called it `ollama_api_key`, which is still accepted. Neither secret is ever returned: `/api/instances` reports `has_token` and `has_ollama_proxy_key` instead. Changing either endpoint or the token clears that host's metric history; changing only the proxy key keeps it. Config-defined hosts cannot be updated or removed through the API (409); edit the YAML instead.
+Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Likewise a blank or omitted `ollama_proxy_key` keeps the stored key; send `clear_ollama_proxy_key: true` to remove it. The 0.7.0 prereleases called it `ollama_api_key`, which is still accepted. Neither secret is ever returned: `/api/instances` reports `has_token` and `has_ollama_proxy_key` instead. Changing either endpoint or the token clears that host's metric history and events; changing only the proxy key keeps them. Config-defined hosts cannot be updated or removed through the API (409); edit the YAML instead.
 
 ## History
 
@@ -53,6 +54,37 @@ Add `?range=…` for `{range, resolution, points}` over a longer interval:
 | `30d` | `900` |
 
 Available points depend on how long the dashboard has collected data and the [retention setting](configuration.md#dashboard-settings). An unsupported range returns 400.
+
+## Events
+
+`GET /api/instances/{id}/events?range=…` returns what the poller saw change on a host: Ollama and the agent becoming reachable or unreachable, and models appearing in or leaving Ollama's `/api/ps`. The ranges are the same as for [History](#history); the default is `24h`.
+
+```json
+{
+  "range": "24h", "from": 1793240000.1, "to": 1793326400.1,
+  "coverage": 0.98,
+  "observed": [{ "start": 1793240000.1, "end": 1793300000.4 }, { "start": 1793302000.2, "end": 1793326400.1 }],
+  "ollama": { "up": 84000, "down": 600, "unknown": 0 },
+  "agent": { "up": 84600, "down": 0, "unknown": 0 },
+  "initial": { "ollama": true, "agent": true, "models": [] },
+  "events": [
+    { "instance": "gpu-box", "t": 1793250000.3, "kind": "load", "first": false, "model": "qwen3:8b", "digest": "…", "context_length": 8192, "size_vram": 6100000000 },
+    { "instance": "gpu-box", "t": 1793260000.7, "kind": "ollama", "first": false, "up": false, "error": "ollama unreachable: ECONNREFUSED: …" }
+  ]
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `observed` | Spans in which the dashboard was polling the host, clipped to the range. Time outside them, such as while the dashboard was stopped or polling paused for more than `3 × poll_interval + 30` seconds, is unknown: neither up nor down |
+| `coverage` | Share of the range covered by `observed` |
+| `ollama`, `agent` | Seconds of observed time in which each was reachable (`up`), unreachable (`down`) or not yet seen (`unknown`). `agent` is `null` for a host without an agent |
+| `initial` | The state at `from`, or `null` when `from` falls outside an observed span |
+| `events` | Changes in time order. `kind` is `ollama` or `agent` (with `up`, and `error` when down) or `load` or `unload` (with `model`, `digest`, `context_length` and `size_vram`) |
+
+Events are observations, not exact usage. `t` is the poll in which a change was first seen, so it happened since the previous poll, and a model that was loaded and unloaded between two polls leaves no event. `first: true` marks the first observation after a time in which the state was unknown: after a dashboard restart or a gap in polling, and for models once Ollama is reachable again. That state began at or before `t`. While Ollama is unreachable, its loaded models are unknown, so there are no unload events for them. A model whose digest or context changes is recorded as an unload and a load, because Ollama loaded it again.
+
+Events follow `history_retention_days`. When an observed span is older than the retention, the state at the cutoff is kept as `first` events, so a long span still starts with a known state.
 
 ## Models and jobs
 

@@ -4,7 +4,7 @@ import "server-only";
 import fs from "node:fs";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { dataDir, dataFile } from "./store";
-import type { HistoryPoint, JobInfo } from "./types";
+import type { HistoryPoint, HostEvent, JobInfo } from "./types";
 
 const DB_FILE = "paddock.db";
 
@@ -38,6 +38,19 @@ const MIGRATIONS: string[] = [
   -- network throughput in bytes/s, for the long-range charts; null before this version and without an agent
   ALTER TABLE samples ADD COLUMN rx REAL;
   ALTER TABLE samples ADD COLUMN tx REAL;
+  `,
+  `
+  -- observed: spans of time in which the dashboard was polling a host. Time outside them is unknown.
+  CREATE TABLE observed (id INTEGER PRIMARY KEY, instance TEXT NOT NULL, start REAL NOT NULL, end REAL NOT NULL);
+  CREATE INDEX observed_instance_end ON observed (instance, end);
+
+  -- events: what the poller saw change. kind: ollama | agent (up = reachable) | load | unload (model, digest).
+  -- first = 1: the state at the start of an observed span, so the change happened at or before t.
+  CREATE TABLE events (
+    id INTEGER PRIMARY KEY, instance TEXT NOT NULL, t REAL NOT NULL, kind TEXT NOT NULL, first INTEGER NOT NULL,
+    up INTEGER, error TEXT, model TEXT, digest TEXT, context_length INTEGER, size_vram INTEGER
+  );
+  CREATE INDEX events_instance_t ON events (instance, t);
   `,
 ];
 
@@ -196,6 +209,8 @@ export function deleteHistory(instance: string) {
   tx((d) => {
     d.prepare("DELETE FROM samples WHERE instance = ?").run(instance);
     d.prepare("DELETE FROM gpu_samples WHERE instance = ?").run(instance);
+    d.prepare("DELETE FROM observed WHERE instance = ?").run(instance);
+    d.prepare("DELETE FROM events WHERE instance = ?").run(instance);
   });
 }
 
@@ -233,7 +248,175 @@ export function maintainHistory(retentionDays: number, now = Date.now() / 1000) 
       d.prepare("DELETE FROM samples WHERE res = ? AND t < ?").run(res, cutoff);
       d.prepare("DELETE FROM gpu_samples WHERE res = ? AND t < ?").run(res, cutoff);
     }
+    trimEvents(d, Math.floor(now - retentionDays * DAY));
   });
+}
+
+// ============================================================================ availability and model events
+export interface ObservedSpan {
+  id: number;
+  instance: string;
+  start: number;
+  end: number;
+}
+
+/** One poll's observations: open or extend each host's observed span, and append what changed. */
+export function recordObservations(spans: ObservedSpan[], events: HostEvent[]) {
+  if (!spans.length && !events.length) return;
+  tx((d) => {
+    const extend = d.prepare("UPDATE observed SET end = ? WHERE id = ?");
+    const open = d.prepare("INSERT INTO observed (instance, start, end) VALUES (?, ?, ?)");
+    for (const s of spans) {
+      // id 0: a new span, which gets its id here
+      if (s.id) extend.run(s.end, s.id);
+      else s.id = Number(open.run(s.instance, s.start, s.end).lastInsertRowid);
+    }
+    insertEvents(d, events);
+  });
+}
+
+function insertEvents(d: DatabaseSync, events: HostEvent[]) {
+  const add = d.prepare(`INSERT INTO events (instance, t, kind, first, up, error, model, digest, context_length, size_vram)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  for (const e of events) {
+    add.run(e.instance, e.t, e.kind, e.first ? 1 : 0, e.up === undefined ? null : e.up ? 1 : 0, e.error ?? null,
+      e.model ?? null, e.digest ?? null, e.context_length ?? null, e.size_vram ?? null);
+  }
+}
+
+interface EventRow {
+  instance: string; t: number; kind: string; first: number; up: number | null; error: string | null;
+  model: string | null; digest: string | null; context_length: number | null; size_vram: number | null;
+}
+
+function toEvent(r: EventRow): HostEvent {
+  const e: HostEvent = { instance: r.instance, t: r.t, kind: r.kind as HostEvent["kind"], first: !!r.first };
+  if (r.up !== null) e.up = !!r.up;
+  if (r.error !== null) e.error = r.error;
+  if (r.model !== null) e.model = r.model;
+  if (r.digest !== null) e.digest = r.digest;
+  if (r.context_length !== null) e.context_length = r.context_length;
+  if (r.size_vram !== null) e.size_vram = r.size_vram;
+  return e;
+}
+
+/** What a host looked like at some point in an observed span: null = not known yet in that span. */
+export interface HostState {
+  ollama: boolean | null;
+  agent: boolean | null;
+  /** loaded models by name; empty while Ollama is unreachable, since then nothing is known about them */
+  models: Map<string, HostEvent>;
+}
+
+export const emptyState = (): HostState => ({ ollama: null, agent: null, models: new Map() });
+
+/** Apply one event to a state, in time order. */
+export function applyEvent(s: HostState, e: HostEvent) {
+  if (e.kind === "ollama") {
+    s.ollama = !!e.up;
+    if (!e.up) s.models.clear();
+  } else if (e.kind === "agent") s.agent = !!e.up;
+  else if (e.kind === "load") s.models.set(e.model!, e);
+  else s.models.delete(e.model!);
+}
+
+/** The state as events at `t`, marked first: what a span that starts at `t` begins with. */
+function stateEvents(instance: string, s: HostState, t: number): HostEvent[] {
+  const out: HostEvent[] = [];
+  if (s.ollama !== null) out.push({ instance, t, kind: "ollama", first: true, up: s.ollama });
+  if (s.agent !== null) out.push({ instance, t, kind: "agent", first: true, up: s.agent });
+  for (const m of s.models.values()) out.push({ ...m, t, first: true });
+  return out;
+}
+
+/**
+ * Drop events and spans that ended before the retention cutoff. A span that is still going keeps
+ * its start state: the events before the cutoff are folded into first-events at the cutoff.
+ */
+function trimEvents(d: DatabaseSync, cutoff: number) {
+  const straddling = d.prepare("SELECT id, instance, start, end FROM observed WHERE start < ? AND end >= ?")
+    .all(cutoff, cutoff) as unknown as ObservedSpan[];
+  const read = d.prepare("SELECT * FROM events WHERE instance = ? AND t >= ? AND t < ? ORDER BY t, id");
+  const carried: HostEvent[] = [];
+  for (const s of straddling) {
+    const state = emptyState();
+    for (const r of read.all(s.instance, s.start, cutoff) as unknown as EventRow[]) applyEvent(state, toEvent(r));
+    carried.push(...stateEvents(s.instance, state, cutoff));
+    d.prepare("UPDATE observed SET start = ? WHERE id = ?").run(cutoff, s.id);
+  }
+  d.prepare("DELETE FROM observed WHERE end < ?").run(cutoff);
+  d.prepare("DELETE FROM events WHERE t < ?").run(cutoff);
+  insertEvents(d, carried);
+}
+
+export interface EventHistory {
+  range: HistoryRange;
+  from: number;
+  to: number;
+  /** share of [from, to] in which the dashboard was polling the host */
+  coverage: number;
+  observed: { start: number; end: number }[];
+  /** seconds of observed time in each state; unknown = observed, but the state hadn't been seen yet */
+  ollama: { up: number; down: number; unknown: number };
+  agent: { up: number; down: number; unknown: number } | null;
+  /** the state at `from`, or null when `from` wasn't observed */
+  initial: { ollama: boolean | null; agent: boolean | null; models: HostEvent[] } | null;
+  events: HostEvent[];
+}
+
+/** Observed spans, uptime and events of one host over a chart range. */
+export function eventHistory(instance: string, range: HistoryRange, hasAgent: boolean, now = Date.now() / 1000): EventHistory {
+  const d = db();
+  const to = now;
+  const from = now - RANGES[range].seconds;
+  const spans = d.prepare("SELECT id, instance, start, end FROM observed WHERE instance = ? AND end >= ? AND start <= ? ORDER BY start")
+    .all(instance, from, to) as unknown as ObservedSpan[];
+  // read from the start of the first overlapping span, so the state at `from` is known
+  const readFrom = Math.min(from, spans[0]?.start ?? from);
+  const rows = d.prepare("SELECT * FROM events WHERE instance = ? AND t >= ? AND t <= ? ORDER BY t, id")
+    .all(instance, readFrom, to) as unknown as EventRow[];
+  const all = rows.map(toEvent);
+
+  const ollama = { up: 0, down: 0, unknown: 0 };
+  const agent = { up: 0, down: 0, unknown: 0 };
+  const tally = (acc: typeof ollama, v: boolean | null, secs: number) => {
+    if (secs > 0) acc[v === null ? "unknown" : v ? "up" : "down"] += secs;
+  };
+  let initial: EventHistory["initial"] = null;
+  let observedSecs = 0;
+  let i = 0;
+  for (const s of spans) {
+    const state = emptyState();
+    while (i < all.length && all[i].t < s.start) i++;
+    // fold everything in the span before `from` into its state at `from`
+    while (i < all.length && all[i].t <= s.end && all[i].t < from) applyEvent(state, all[i++]);
+    let at = Math.max(s.start, from);
+    const end = Math.min(s.end, to);
+    if (s.start <= from && from <= s.end) {
+      initial = { ollama: state.ollama, agent: hasAgent ? state.agent : null, models: [...state.models.values()] };
+    }
+    observedSecs += Math.max(0, end - at);
+    for (; i < all.length && all[i].t <= s.end; i++) {
+      const e = all[i];
+      tally(ollama, state.ollama, e.t - at);
+      tally(agent, state.agent, e.t - at);
+      at = Math.max(at, e.t);
+      applyEvent(state, e);
+    }
+    tally(ollama, state.ollama, end - at);
+    tally(agent, state.agent, end - at);
+  }
+  const round = (x: { up: number; down: number; unknown: number }) =>
+    ({ up: Math.round(x.up), down: Math.round(x.down), unknown: Math.round(x.unknown) });
+  return {
+    range, from, to,
+    coverage: Math.min(1, observedSecs / (to - from)),
+    observed: spans.map((s) => ({ start: Math.max(s.start, from), end: Math.min(s.end, to) })),
+    ollama: round(ollama),
+    agent: hasAgent ? round(agent) : null,
+    initial,
+    events: all.filter((e) => e.t >= from),
+  };
 }
 
 // ============================================================================ jobs

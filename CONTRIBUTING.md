@@ -68,7 +68,7 @@ A pull that is cut off keeps its partial download in the simulator, and the next
 
 ### Scenario tests
 
-`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
+`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, availability and model load events (including the gap a restart leaves), and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
 
 ```bash
 cd dashboard
