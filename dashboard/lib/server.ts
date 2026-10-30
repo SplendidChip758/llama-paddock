@@ -3,8 +3,10 @@ import crypto from "node:crypto";
 import {
   loadSettings, makeId, normalizeTags, normalizeUrl, saveUiInstances, type Instance, type InstanceInput, type Settings,
 } from "./config";
-import { deleteHistory, deleteJobs, loadJobs, maintainHistory, recordSamples, saveJob } from "./db";
-import type { AgentStats, HistoryPoint, InstanceSnapshot, JobInfo, PsModel } from "./types";
+import {
+  deleteHistory, deleteJobs, loadJobs, maintainHistory, recordObservations, recordSamples, saveJob, type ObservedSpan,
+} from "./db";
+import type { AgentStats, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, PsModel } from "./types";
 
 // ============================================================================ errors
 export class HttpError extends Error {
@@ -52,6 +54,8 @@ class InstanceState {
   ps: PsModel[] = [];
   stats: AgentStats | null = null;
   updated: number | null = null;
+  /** what has been recorded in the events table for this host; see observe() */
+  observed: Observation | null = null;
 
   constructor(public inst: Instance) {}
 
@@ -64,6 +68,15 @@ class InstanceState {
       agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.ps, stats: this.stats, updated: this.updated,
     };
   }
+}
+
+interface Observation {
+  span: ObservedSpan;
+  /** null: not seen yet in this span (agent: or the host has no agent) */
+  ollama: boolean | null;
+  agent: boolean | null;
+  /** loaded models by name; null while Ollama is unreachable, since nothing is known about them then */
+  models: Map<string, PsModel> | null;
 }
 
 interface Job extends JobInfo {
@@ -171,8 +184,12 @@ export function updateInstance(id: string, body: InstanceInput): Instance {
   if (moved) {
     p.instances.set(id, new InstanceState(inst));
     deleteHistory(id);
-  } else if (inst.ollama_proxy_key !== prev.ollama_proxy_key) p.instances.set(id, new InstanceState(inst));
-  else st.inst = inst;
+  } else if (inst.ollama_proxy_key !== prev.ollama_proxy_key) {
+    const next = new InstanceState(inst);
+    // same server, so its observed span and events carry on
+    next.observed = st.observed;
+    p.instances.set(id, next);
+  } else st.inst = inst;
   persistHosts(p);
   return inst;
 }
@@ -332,6 +349,51 @@ async function pollOne(st: InstanceState): Promise<HistoryPoint> {
   return point;
 }
 
+/**
+ * Compare this poll with what was last recorded, and return the span to extend and the events to
+ * append. A dashboard restart or a pause in polling longer than `gapAfter` seconds starts a new
+ * span, whose first events record the state as found: whatever happened in between is unknown.
+ */
+function observe(st: InstanceState, gapAfter: number): { span: ObservedSpan; events: HostEvent[] } {
+  const instance = st.inst.id;
+  const t = st.updated!;
+  let o = st.observed;
+  if (!o || t - o.span.end > gapAfter) o = st.observed = { span: { id: 0, instance, start: t, end: t }, ollama: null, agent: null, models: null };
+  else o.span.end = t;
+
+  const events: HostEvent[] = [];
+  if (o.ollama !== st.ollama_ok) {
+    events.push({ instance, t, kind: "ollama", first: o.ollama === null, up: st.ollama_ok, ...(st.ollama_ok ? {} : { error: st.ollama_error ?? "" }) });
+    o.ollama = st.ollama_ok;
+  }
+  if (st.inst.agent_url && o.agent !== st.agent_ok) {
+    events.push({ instance, t, kind: "agent", first: o.agent === null, up: st.agent_ok, ...(st.agent_ok ? {} : { error: st.agent_error ?? "" }) });
+    o.agent = st.agent_ok;
+  }
+  if (!st.ollama_ok) o.models = null;
+  else {
+    const model = (kind: "load" | "unload", m: PsModel, first: boolean): HostEvent => ({
+      instance, t, kind, first, model: m.name, digest: m.digest,
+      ...(m.context_length ? { context_length: m.context_length } : {}), size_vram: m.size_vram,
+    });
+    // a new digest or context means Ollama loaded the model again, so it counts as an unload and a load
+    const same = (a: PsModel, b: PsModel) => a.digest === b.digest && a.context_length === b.context_length;
+    const now = new Map(st.ps.map((m) => [m.name, m]));
+    const prev = o.models;
+    for (const [name, m] of prev ?? []) {
+      const n = now.get(name);
+      if (!n || !same(n, m)) events.push(model("unload", m, false));
+    }
+    for (const [name, m] of now) {
+      const p = prev?.get(name);
+      // prev null: the models weren't known before this poll, so a load may have happened earlier
+      if (!p || !same(p, m)) events.push(model("load", m, prev === null));
+    }
+    o.models = now;
+  }
+  return { span: o.span, events };
+}
+
 const MAINTAIN_EVERY_MS = 60_000;
 
 async function pollLoop(p: Paddock) {
@@ -342,9 +404,23 @@ async function pollLoop(p: Paddock) {
     const results = await Promise.allSettled(polled.map(pollOne));
     // skip hosts that were removed or re-pointed while the poll was in flight
     const rows: [string, HistoryPoint][] = [];
+    const observed: InstanceState[] = [];
     results.forEach((r, i) => {
-      if (r.status === "fulfilled" && p.instances.get(polled[i].inst.id) === polled[i]) rows.push([polled[i].inst.id, r.value]);
+      if (r.status === "fulfilled" && p.instances.get(polled[i].inst.id) === polled[i]) {
+        rows.push([polled[i].inst.id, r.value]);
+        observed.push(polled[i]);
+      }
     });
+    // a poll that is late by a few intervals (plus slack for hosts that time out) is a gap in observation
+    const gapAfter = 3 * p.settings.poll_interval + 30;
+    const changes = observed.map((st) => observe(st, gapAfter));
+    try {
+      recordObservations(changes.map((c) => c.span), changes.flatMap((c) => c.events));
+    } catch (e) {
+      console.error("[llama-paddock] saving host events failed:", e);
+      // these changes weren't stored, so start over: the next poll opens new spans with the state as found
+      for (const st of observed) st.observed = null;
+    }
     try {
       recordSamples(rows);
       if (started - maintained >= MAINTAIN_EVERY_MS) {
