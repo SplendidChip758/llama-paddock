@@ -59,7 +59,7 @@ class InstanceState {
     const i = this.inst;
     return {
       id: i.id, name: i.name, tags: i.tags, ollama_url: i.ollama_url, agent_url: i.agent_url, has_agent: !!i.agent_url,
-      has_token: !!i.agent_token, source: i.source,
+      has_token: !!i.agent_token, has_ollama_key: !!i.ollama_api_key, source: i.source,
       ollama_ok: this.ollama_ok, ollama_error: this.ollama_error, agent_ok: this.agent_ok,
       agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.ps, stats: this.stats, updated: this.updated,
     };
@@ -126,9 +126,12 @@ function hostFields(body: InstanceInput, existing?: Instance) {
   if (!ollama_url) throw new HttpError(400, "Ollama URL is required");
   const name = String(body.name ?? "").trim().slice(0, 80) || new URL(ollama_url).hostname;
   const token = String(body.agent_token ?? "").trim();
+  const key = String(body.ollama_api_key ?? "").trim();
   return {
     name,
     ollama_url,
+    // blank keeps the stored key, so the browser never needs to see it
+    ollama_api_key: body.clear_ollama_api_key === true ? null : key || existing?.ollama_api_key || null,
     agent_url,
     // blank keeps the stored token; no agent means no token
     agent_token: agent_url ? token || existing?.agent_token || null : null,
@@ -162,12 +165,14 @@ export function updateInstance(id: string, body: InstanceInput): Instance {
   const st = editable(id);
   const prev = st.inst;
   const inst: Instance = { ...prev, ...hostFields(body, prev) };
-  // New endpoints mean the old status and history no longer apply.
+  // New endpoints mean the old status and history no longer apply. A new Ollama key alone doesn't:
+  // it's the same server, so only the status is reset (the next poll fills it in again).
   const moved = inst.ollama_url !== prev.ollama_url || inst.agent_url !== prev.agent_url || inst.agent_token !== prev.agent_token;
   if (moved) {
     p.instances.set(id, new InstanceState(inst));
     deleteHistory(id);
-  } else st.inst = inst;
+  } else if (inst.ollama_api_key !== prev.ollama_api_key) p.instances.set(id, new InstanceState(inst));
+  else st.inst = inst;
   persistHosts(p);
   return inst;
 }
@@ -185,7 +190,7 @@ export interface CheckResult {
   detail: string;
 }
 
-/** Try the URLs/token from the host form without saving. A blank token falls back to the stored one for `id`. */
+/** Try the URLs/token/key from the host form without saving. A blank token or key falls back to the stored one for `id`. */
 export async function testConnection(body: InstanceInput & { id?: unknown }) {
   const existing = typeof body.id === "string" ? paddock().instances.get(body.id)?.inst : undefined;
   const f = hostFields(body, existing);
@@ -212,6 +217,17 @@ export async function testConnection(body: InstanceInput & { id?: unknown }) {
 const agentHeaders = (inst: Instance): Record<string, string> =>
   inst.agent_token ? { Authorization: `Bearer ${inst.agent_token}` } : {};
 
+const ollamaHeaders = (inst: Instance, json: boolean): Record<string, string> => ({
+  ...(inst.ollama_api_key ? { Authorization: `Bearer ${inst.ollama_api_key}` } : {}),
+  ...(json ? { "Content-Type": "application/json" } : {}),
+});
+
+/** A readable message when Ollama (or the proxy in front of it) turns the request away. */
+function ollamaAuthError(inst: Instance, status: number): string | null {
+  if (status !== 401 && status !== 403) return null;
+  return inst.ollama_api_key ? `Ollama rejected the API key (${status})` : `Ollama needs an API key (${status})`;
+}
+
 async function upstreamError(r: Response): Promise<string> {
   const text = await r.text();
   try {
@@ -227,7 +243,7 @@ export async function ollama<T = any>(inst: Instance, method: string, path: stri
   try {
     r = await fetch(`${inst.ollama_url}${path}`, {
       method,
-      headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+      headers: ollamaHeaders(inst, body !== undefined),
       body: body === undefined ? undefined : JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
       cache: "no-store",
@@ -235,6 +251,9 @@ export async function ollama<T = any>(inst: Instance, method: string, path: stri
   } catch (e) {
     throw new HttpError(502, `ollama unreachable: ${errText(e)}`);
   }
+  // 502, not the upstream 401/403: the browser treats a 401 as its own session expiring
+  const denied = ollamaAuthError(inst, r.status);
+  if (denied) throw new HttpError(502, denied);
   if (!r.ok) throw new HttpError(r.status, await upstreamError(r));
   const text = await r.text();
   return (text ? JSON.parse(text) : {}) as T;
@@ -254,7 +273,8 @@ export async function agent<T = any>(inst: Instance, method: string, path: strin
   } catch (e) {
     throw new HttpError(502, `agent unreachable: ${errText(e)}`);
   }
-  if (!r.ok) throw new HttpError(r.status, `agent: ${await upstreamError(r)}`);
+  // a wrong agent token must not look like the dashboard session expiring (see ollama())
+  if (!r.ok) throw new HttpError(r.status === 401 ? 502 : r.status, `agent: ${await upstreamError(r)}`);
   return (await r.json()) as T;
 }
 
@@ -372,7 +392,7 @@ function restoreJobs(p: Paddock) {
     if (job.kind === "pull" && inst) {
       job.status = "resuming after restart";
       persistJob(job);
-      void runJob(job, `${inst.ollama_url}${path}`);
+      void runJob(job, inst);
     } else {
       job.state = "error";
       job.error = inst ? "interrupted: the dashboard restarted" : "interrupted: the dashboard restarted and the host is gone";
@@ -395,19 +415,19 @@ export function startJob(kind: Job["kind"], inst: Instance, model: string, path:
   };
   p.jobs.set(job.id, job);
   persistJob(job);
-  void runJob(job, `${inst.ollama_url}${path}`);
+  void runJob(job, inst);
   return jobInfo(job);
 }
 
-async function runJob(job: Job, url: string) {
+async function runJob(job: Job, inst: Instance) {
   try {
-    const r = await fetch(url, {
+    const r = await fetch(`${inst.ollama_url}${job.path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: ollamaHeaders(inst, true),
       body: JSON.stringify(job.body),
       signal: job.abort.signal,
     });
-    if (!r.ok || !r.body) throw new Error(await upstreamError(r));
+    if (!r.ok || !r.body) throw new Error(ollamaAuthError(inst, r.status) ?? (await upstreamError(r)));
 
     // Ollama streams newline-delimited JSON status objects.
     const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();

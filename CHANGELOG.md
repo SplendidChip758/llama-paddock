@@ -1,3 +1,9 @@
+## [0.7.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.6.0...v0.7.0-dev.1) (2026-10-30)
+
+### Features
+
+* **dashboard:** support Ollama instances that need an API key ([#93](https://github.com/SplendidChip758/llama-paddock/issues/93)) ([72daf5a](https://github.com/SplendidChip758/llama-paddock/commit/72daf5adc0caa6cb62df2cf416cdb2fc9aa4dc95)), closes [#5](https://github.com/SplendidChip758/llama-paddock/issues/5)
+
 ## [0.6.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.5.0...v0.6.0) (2026-10-30)
 
 ### Features
