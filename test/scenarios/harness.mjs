@@ -157,9 +157,9 @@ export function makeDataDir(sim, { instances = {}, pollInterval = 1, extra = "" 
   fs.mkdirSync(data, { mode: 0o700 });
   const lines = [`poll_interval: ${pollInterval}`, "metrics_open: true", extra, "instances:"];
   for (const h of sim.hosts) {
-    const o = { id: h.id, name: h.id, ollama_url: h.ollama_url, ollama_api_key: h.ollama_key, agent_url: h.agent_url, agent_token: h.agent_token, ...instances[h.id] };
+    const o = { id: h.id, name: h.id, ollama_url: h.ollama_url, ollama_proxy_key: h.ollama_key, agent_url: h.agent_url, agent_token: h.agent_token, ...instances[h.id] };
     lines.push(`  - id: ${o.id}`);
-    for (const k of ["name", "ollama_url", "ollama_api_key", "agent_url", "agent_token"]) if (o[k]) lines.push(`    ${k}: ${JSON.stringify(o[k])}`);
+    for (const k of ["name", "ollama_url", "ollama_proxy_key", "agent_url", "agent_token"]) if (o[k]) lines.push(`    ${k}: ${JSON.stringify(o[k])}`);
   }
   const config = path.join(dir, "config.yaml");
   fs.writeFileSync(config, lines.join("\n") + "\n", { mode: 0o600 });

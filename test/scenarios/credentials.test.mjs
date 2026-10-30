@@ -1,4 +1,4 @@
-// Rejected credentials (#5): a missing or wrong Ollama API key and a wrong agent token show as
+// Rejected credentials (#5): a missing or wrong proxy key for Ollama and a wrong agent token show as
 // readable errors on the host, and the API answers 502, never 401, so the browser doesn't take it
 // for its own session expiring.
 import { after, before, test as nodeTest } from "node:test";
@@ -10,10 +10,10 @@ const test = scenarioTest(nodeTest, holder);
 let c, sim;
 
 before(async () => {
-  // both hosts sit behind an API key; the dashboard only knows sim-1's
+  // both hosts sit behind a key-checking proxy; the dashboard only knows sim-1's
   holder.stack = await startStack({
     sim: { hosts: 2, ollamaKey: "sim-key-1,sim-key-2" },
-    data: { instances: { "sim-2": { ollama_api_key: null } } },
+    data: { instances: { "sim-2": { ollama_proxy_key: null } } },
   });
   ({ client: c, sim } = holder.stack);
 });
@@ -25,29 +25,29 @@ const signedIn = async () => {
   assert.equal(me.data.username, "admin");
 };
 
-test("the right API key is accepted", async () => {
+test("the right proxy key is accepted", async () => {
   const i = await c.waitInstance("sim-1", (x) => x.ollama_ok && x.agent_ok, "online");
-  assert.equal(i.has_ollama_key, true);
+  assert.equal(i.has_ollama_proxy_key, true);
   assert.equal(JSON.stringify(i).includes("sim-key-1"), false, "the key never reaches the browser");
 });
 
-test("missing API key: 'Ollama needs an API key', 502 not 401", async () => {
+test("missing proxy key: 'the proxy wants a key', 502 not 401", async () => {
   const i = await c.waitInstance("sim-2", (x) => !x.ollama_ok && x.ollama_error, "rejected");
-  assert.match(i.ollama_error, /Ollama needs an API key \(401\)/);
+  assert.match(i.ollama_error, /the proxy in front of Ollama wants a key \(401\)/);
   assert.ok(i.agent_ok, "the agent is unaffected");
   const r = await c.get("/api/instances/sim-2/models");
   assert.equal(r.status, 502);
-  assert.match(r.data.detail, /needs an API key/);
+  assert.match(r.data.detail, /wants a key/);
   await signedIn();
 });
 
-test("wrong API key: 'Ollama rejected the API key', 502 not 401", async () => {
+test("wrong proxy key: 'the proxy rejected the key', 502 not 401", async () => {
   await sim.scenario("sim-1", { ollama_key: "rotated-key" });
   const i = await c.waitInstance("sim-1", (x) => !x.ollama_ok, "rejected");
-  assert.match(i.ollama_error, /Ollama rejected the API key \(401\)/);
+  assert.match(i.ollama_error, /the proxy in front of Ollama rejected the key \(401\)/);
   const r = await c.post("/api/instances/sim-1/models/show", { model: "llama3.2:3b" });
   assert.equal(r.status, 502);
-  assert.match(r.data.detail, /rejected the API key/);
+  assert.match(r.data.detail, /rejected the key/);
   await signedIn();
 });
 
@@ -56,17 +56,17 @@ test("a pull with a rejected key ends as an error that names the key", async () 
   assert.equal(start.status, 200);
   const j = await c.waitJob(start.data.id, (x) => x.state !== "running", "finished");
   assert.equal(j.state, "error");
-  assert.match(j.error, /rejected the API key/);
+  assert.match(j.error, /rejected the key/);
 });
 
 test("the connection test reports a wrong key and a wrong token separately", async () => {
   const h = sim.host("sim-1");
   const r = await c.post("/api/test-connection", {
-    ollama_url: h.ollama_url, ollama_api_key: "wrong", agent_url: h.agent_url, agent_token: "wrong",
+    ollama_url: h.ollama_url, ollama_proxy_key: "wrong", agent_url: h.agent_url, agent_token: "wrong",
   });
   assert.equal(r.status, 200);
   assert.equal(r.data.ollama.ok, false);
-  assert.match(r.data.ollama.detail, /rejected the API key/);
+  assert.match(r.data.ollama.detail, /rejected the key/);
   assert.equal(r.data.agent.ok, false);
   assert.match(r.data.agent.detail, /invalid agent token/);
 });

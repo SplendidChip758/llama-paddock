@@ -99,8 +99,8 @@ export interface InstanceSnapshot {
   agent_url: string | null;
   has_agent: boolean;
   has_token: boolean;
-  /** An Ollama API key is stored. The key itself never leaves the server. */
-  has_ollama_key: boolean;
+  /** A key for the proxy in front of Ollama is stored. The key itself never leaves the server. */
+  has_ollama_proxy_key: boolean;
   /** "config": from config.yaml (read-only here); "ui": added in the dashboard. */
   source: "config" | "ui";
   ollama_ok: boolean;

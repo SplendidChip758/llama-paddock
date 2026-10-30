@@ -21,7 +21,8 @@
  *   --bind ADDR          listen address (default 127.0.0.1; 0.0.0.0 to reach it from Docker)
  *   --gpus LIST          GPUs per host, one number for all or per host: "2,1,0" (default 1)
  *   --agent-token T      agent token for every host (default sim-token)
- *   --ollama-key LIST    require an Ollama API key: one key for all hosts, or per host
+ *   --ollama-key LIST    answer 401 without this key, like an authenticating proxy in front of
+ *                        Ollama (Ollama has no keys itself): one key for all hosts, or per host
  *                        ("key1,,key3"; empty = no key). Default: none
  *   --pull-seconds S     how long a full model pull takes (default 8)
  *   --write-config FILE  write a dashboard config.yaml for these hosts and keep running
@@ -736,7 +737,7 @@ function configYaml() {
   for (const h of hosts.values()) {
     const v = hostView(h);
     lines.push(`  - id: ${h.id}`, `    name: ${h.id}`, `    ollama_url: ${v.ollama_url}`);
-    if (h.ollamaKey) lines.push(`    ollama_api_key: ${JSON.stringify(h.ollamaKey)}`);
+    if (h.ollamaKey) lines.push(`    ollama_proxy_key: ${JSON.stringify(h.ollamaKey)}`);
     lines.push(`    agent_url: ${v.agent_url}`, `    agent_token: ${JSON.stringify(h.agentToken)}`, "    tags: [sim]");
   }
   return lines.join("\n") + "\n";
@@ -787,7 +788,7 @@ async function main() {
   console.log(`paddock-sim: control API on http://${opts.bind}:${opts.basePort}/_sim/hosts`);
   for (const h of hosts.values()) {
     const v = hostView(h);
-    console.log(`paddock-sim: ${h.id}  Ollama ${v.ollama_url}${h.ollamaKey ? " (API key)" : ""}  agent ${v.agent_url}  ${h.gpus.length} GPU(s)`);
+    console.log(`paddock-sim: ${h.id}  Ollama ${v.ollama_url}${h.ollamaKey ? " (proxy key)" : ""}  agent ${v.agent_url}  ${h.gpus.length} GPU(s)`);
   }
 
   const shutdown = () => {
