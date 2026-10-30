@@ -39,11 +39,16 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
   const [agentUrl, setAgentUrl] = useState(host?.agent_url ?? "");
   const [agentTouched, setAgentTouched] = useState(!!host);
   const [token, setToken] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [clearKey, setClearKey] = useState(false);
   const [tags, setTags] = useState(host?.tags.join(", ") ?? "");
   const [checks, setChecks] = useState<{ ollama: Check; agent: Check | null } | null>(null);
   const [busy, setBusy] = useState<"" | "test" | "save" | "delete">("");
 
-  const body = () => ({ id: host?.id, name, ollama_url: ollamaUrl, agent_url: agentUrl, agent_token: token, tags });
+  const body = () => ({
+    id: host?.id, name, ollama_url: ollamaUrl, ollama_api_key: clearKey ? "" : apiKey, clear_ollama_api_key: clearKey,
+    agent_url: agentUrl, agent_token: token, tags,
+  });
 
   const onOllama = (v: string) => {
     setOllamaUrl(v);
@@ -119,6 +124,19 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
             <div className="hint">Ollama must listen on the network: <code>OLLAMA_HOST=0.0.0.0</code>.</div>
           )}
         </label>
+
+        <label className="field">
+          <span>Ollama API key</span>
+          <input type="password" autoComplete="new-password" value={apiKey} disabled={clearKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder={host?.has_ollama_key ? "unchanged (leave blank to keep)" : "blank if Ollama needs no key"} />
+          <div className="hint">Only for Ollama behind a proxy that checks <code>Authorization: Bearer</code>.</div>
+        </label>
+        {host?.has_ollama_key && (
+          <label className="row hint" style={{ gap: 6, margin: "-6px 0 14px" }}>
+            <input type="checkbox" checked={clearKey} onChange={(e) => setClearKey(e.target.checked)} /> Remove the stored key
+          </label>
+        )}
 
         <label className="field">
           <span>Name</span>

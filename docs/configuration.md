@@ -27,7 +27,7 @@ instances:
     tags: [linux, gpu]
 ```
 
-Only `ollama_url` is required; supply a stable, unique `id` using letters, digits, `_`, `.` or `-`. `name` defaults to the ID. Omit `agent_url` and `agent_token` for a host without an agent. Config-defined hosts take precedence over UI hosts with the same ID.
+Only `ollama_url` is required; supply a stable, unique `id` using letters, digits, `_`, `.` or `-`. `name` defaults to the ID. Omit `agent_url` and `agent_token` for a host without an agent. For Ollama behind a proxy that checks an API key, add `ollama_api_key: ${OLLAMA01_API_KEY}`: the dashboard sends it as `Authorization: Bearer <key>` on every Ollama call. Config-defined hosts take precedence over UI hosts with the same ID.
 
 `${VAR}` and `${VAR:-default}` expand from the dashboard process environment; the default is used when the variable is unset. Docker Compose passes values through `.env` using `env_file`. For a systemd install, put them in `/etc/llama-paddock/llama-paddock.env`. A source launch does not automatically read the repository's `.env`.
 
@@ -61,6 +61,6 @@ Only `ollama_url` is required; supply a stable, unique `id` using letters, digit
 | Docker Compose | `paddock-data` volume, mounted at `/data` |
 | Source | The path set by `PADDOCK_DATA_DIR` |
 
-`hosts.json` stores hosts added in the UI, including agent tokens. `auth.json` stores the login hash and session signing secret. `paddock.db` stores metric history and jobs; SQLite may also create `paddock.db-wal` and `paddock.db-shm`.
+`hosts.json` stores hosts added in the UI, including agent tokens and Ollama API keys. `auth.json` stores the login hash and session signing secret. `paddock.db` stores metric history and jobs; SQLite may also create `paddock.db-wal` and `paddock.db-shm`.
 
 Keep these files private (mode 600 on Linux) and retain the directory across upgrades. See [Backups](operations.md#backups) for copying SQLite data safely. Agent configuration is separate: [Linux](agent-linux.md) and [Windows](agent-windows.md#settings-and-updates).

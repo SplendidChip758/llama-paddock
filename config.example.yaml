@@ -38,3 +38,10 @@ instances:
   # - id: laptop
   #   name: laptop
   #   ollama_url: http://192.168.5.60:11434
+
+  # Ollama behind a proxy that wants an API key: sent as Authorization: Bearer
+  # on every Ollama call.
+  # - id: secured
+  #   name: secured
+  #   ollama_url: https://ollama.example.lan
+  #   ollama_api_key: ${SECURED_OLLAMA_KEY}

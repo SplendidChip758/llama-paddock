@@ -33,9 +33,9 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 | DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history |
 | POST | `/api/test-connection` | Host fields plus optional existing `id` → separate `ollama` and `agent` results |
 
-Host fields are `name`, `ollama_url`, `agent_url`, `agent_token` and `tags`. `ollama_url` is required. `tags` accepts an array or comma-separated string. Use the ID returned by creation or listed in `/api/instances` in later requests.
+Host fields are `name`, `ollama_url`, `ollama_api_key`, `agent_url`, `agent_token` and `tags`. `ollama_url` is required. `tags` accepts an array or comma-separated string. Use the ID returned by creation or listed in `/api/instances` in later requests.
 
-Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Changing either endpoint or the token clears that host's metric history. Config-defined hosts cannot be updated or removed through the API (409); edit the YAML instead.
+Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Likewise a blank or omitted `ollama_api_key` keeps the stored key; send `clear_ollama_api_key: true` to remove it. Neither secret is ever returned: `/api/instances` reports `has_token` and `has_ollama_key` instead. Changing either endpoint or the token clears that host's metric history; changing only the Ollama key keeps it. Config-defined hosts cannot be updated or removed through the API (409); edit the YAML instead.
 
 ## History
 
