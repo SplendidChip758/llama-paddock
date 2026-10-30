@@ -11,21 +11,24 @@ llama-paddock is a self-hosted dashboard for monitoring and managing a fleet of 
 | `agent/windows/paddock-agent.mjs` | Agent on Windows PCs (Scheduled Task) | Same HTTP API as the Linux agent. Change both together |
 | `install/*.sh` | One-liner installers (Proxmox LXC or local) | Served raw from the `main` and `dev` branches, not from releases: a merged change is live immediately |
 | `docs/` | User documentation, also built into the website's Docs section | Plain GitHub Markdown: each page starts with one `# Title` and links to other pages with relative `.md` paths. `docs/README.md` is the index and sets the website's sidebar |
+| `test/` | `sim/paddock-sim.mjs` (simulated Ollama hosts and agents) and `scenarios/` (`node:test` behaviour tests run in CI) | Plain Node, no dependencies |
 | `.github/workflows/` | `ci` (PR checks), `pr-title`, `release` (semantic-release) | |
 
 Runtime data (hosts added in the UI, login, `paddock.db`) lives in `PADDOCK_DATA_DIR`. Files there hold secrets: write them with mode 600.
 
 ## Checks
 
-There is no test suite. Before pushing, run what CI runs:
+Before pushing, run what CI runs:
 
 ```bash
-cd dashboard && npm ci && npm run typecheck && npm run build
+cd dashboard && npm ci && npm run typecheck && npm run build && npm run test:scenarios
 node --check agent/linux/paddock-agent.mjs && node --check agent/windows/paddock-agent.mjs
 for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
 ```
 
-Dev server: `cd dashboard && PADDOCK_DATA_DIR=../data npm run dev`. For behaviour changes, also run the build against a real or fake Ollama/agent and say in the PR what you ran.
+`test:scenarios` runs `test/scenarios/` with `node:test`: the built dashboard against simulated Ollama hosts and agents (`test/sim/paddock-sim.mjs`, no dependencies). For behaviour changes, add or extend a scenario there, and say in the PR what you ran.
+
+Dev server: `cd dashboard && PADDOCK_DATA_DIR=../data npm run dev`. Without a real Ollama host, run the simulator (CONTRIBUTING.md, Simulated hosts).
 
 ## Commit messages
 

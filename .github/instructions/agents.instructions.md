@@ -15,6 +15,7 @@ Each agent is one file, `paddock-agent.mjs`: plain Node ESM with **zero npm depe
 - Configuration comes from `PADDOCK_*` env vars, documented in the header comment. Add new ones there and in `docs/agent-linux.md` or `docs/agent-windows.md`.
 - `PADDOCK_DRY_RUN=1` must never call `systemctl`/`journalctl` (Linux) or restart Ollama (Windows). Keep that working for new actions.
 - Don't edit `VERSION`: the release workflow stamps it.
+- When the API changes, change the simulated agent in `test/sim/paddock-sim.mjs` too. The `real-agent` scenario test compares its shapes and env rules with the Linux agent's.
 - The dashboard has to keep working with older agents. Add fields and routes instead of changing existing ones, and have the dashboard handle a missing field.
 
 ## Checks
