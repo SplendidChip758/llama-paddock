@@ -1,3 +1,9 @@
+## [0.7.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.2...v0.7.0-dev.3) (2026-10-30)
+
+### Bug Fixes
+
+* **dashboard:** call the Ollama key a proxy key and document proxy setups ([#97](https://github.com/SplendidChip758/llama-paddock/issues/97)) ([1f6cfbb](https://github.com/SplendidChip758/llama-paddock/commit/1f6cfbbe676c4d98d67da8dc664bc9f8bf39c8f0)), closes [#5](https://github.com/SplendidChip758/llama-paddock/issues/5)
+
 ## [0.7.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.1...v0.7.0-dev.2) (2026-10-30)
 
 ### Features
