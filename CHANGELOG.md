@@ -1,3 +1,9 @@
+## [0.7.0-dev.5](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.4...v0.7.0-dev.5) (2026-10-30)
+
+### Features
+
+* **dashboard:** record host availability and model load events ([#100](https://github.com/SplendidChip758/llama-paddock/issues/100)) ([e56e3ff](https://github.com/SplendidChip758/llama-paddock/commit/e56e3ff6f3703997d810ca28d66831e787aad8a0)), closes [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) [#95](https://github.com/SplendidChip758/llama-paddock/issues/95)
+
 ## [0.7.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.3...v0.7.0-dev.4) (2026-10-30)
 
 ### Bug Fixes
