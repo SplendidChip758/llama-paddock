@@ -16,7 +16,7 @@ This covers the dashboard (Docker image and release tarball), the Linux and Wind
 
 **Please don't open a public issue for security problems.**
 
-Report privately through GitHub: go to the [Security tab](https://github.com/SplendidChip758/llama-paddock/security) and click **Report a vulnerability**. Only the maintainer can see the report.
+Report privately through GitHub: go to the [Security tab](https://github.com/SplendidChip758/llama-paddock/security) and click **Report a vulnerability**.
 
 Please include:
 
@@ -48,6 +48,6 @@ Please give a reasonable window, normally up to 90 days, for a fix to ship befor
 ### Out of scope
 
 - Deployments where the login has been turned off with `PADDOCK_AUTH=off` and no other authentication sits in front of the dashboard.
-- Exposing the dashboard or agent to the internet without TLS. Both are designed for a trusted LAN or a reverse proxy.
+- Exposing the dashboard or agent to the internet without TLS. Both are designed for a trusted LAN or a reverse proxy. See the [installation guide](docs/installation.md#add-your-ollama-hosts) for network setup.
 - Ollama itself, which has no authentication of its own. Report those issues [upstream](https://github.com/ollama/ollama/security).
 - Vulnerabilities in dependencies that aren't reachable in llama-paddock. Dependabot already bumps these weekly.

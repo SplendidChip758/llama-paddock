@@ -54,6 +54,8 @@ export type Platform = "linux" | "windows";
 
 export interface AgentStats {
   ts: number;
+  /** missing before 0.6.0; the dashboard then asks /health instead */
+  version?: string;
   platform?: Platform;
   system: SystemStats;
   nvidia: { available: boolean; error?: string; gpus: GpuStats[]; processes: GpuProcess[] };
@@ -104,6 +106,7 @@ export interface InstanceSnapshot {
   agent_ok: boolean;
   agent_error: string | null;
   version: string | null;
+  agent_version: string | null;
   ps: PsModel[];
   stats: AgentStats | null;
   updated: number | null;
@@ -113,6 +116,9 @@ export interface HistoryPoint {
   t: number;
   cpu?: number;
   mem?: number;
+  /** network throughput, bytes/s */
+  rx?: number;
+  tx?: number;
   gpus?: { u: number | null; m: number | null; mt: number | null; t: number | null; p: number | null }[];
   vram: number;
   loaded: number;
@@ -158,4 +164,6 @@ export interface EnvState {
   raw: string;
   effective: Record<string, string>;
   external: Record<string, string>;
+  /** Names the agent lets the dashboard set (a trailing * allows a prefix). Agents before 0.6.0 accept any name. */
+  allowed?: string[];
 }

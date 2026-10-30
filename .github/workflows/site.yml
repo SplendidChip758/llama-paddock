@@ -1,0 +1,44 @@
+# Rebuilds the website (llama-paddock-site, on Cloudflare) when something it
+# shows changes: the docs and ROADMAP.md, the roadmap issues, and CHANGELOG.md
+# after a stable release. The roadmap project's Status column sends no events
+# to this repo, so a schedule picks those changes up.
+#
+# SITE_DEPLOY_HOOK is the Cloudflare deploy hook URL (Workers → the site →
+# Settings → Builds → Deploy Hooks). Without it the job does nothing.
+name: site
+
+on:
+  push:
+    branches: [main, dev]
+    paths: ['docs/**', 'ROADMAP.md']
+  issues:
+    types: [opened, edited, closed, reopened, deleted, labeled, unlabeled, milestoned, demilestoned]
+  # Release commits carry [skip ci], so the changelog arrives through the release run.
+  workflow_run:
+    workflows: [release]
+    types: [completed]
+    branches: [main]
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions: {}
+
+# A burst of issue edits needs one build, not one each.
+concurrency:
+  group: site
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    if: github.repository == 'SplendidChip758/llama-paddock'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          HOOK: ${{ secrets.SITE_DEPLOY_HOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "::notice::SITE_DEPLOY_HOOK isn't set, so the site isn't rebuilt."
+            exit 0
+          fi
+          curl -fsS -X POST "$HOOK" -o /dev/null

@@ -20,6 +20,8 @@
  *   PADDOCK_OLLAMA_UNIT    default ollama.service
  *   PADDOCK_OVERRIDE_PATH  default /etc/systemd/system/ollama.service.d/override.conf
  *   PADDOCK_DISK_PATHS     extra mount points to report, comma separated
+ *   PADDOCK_AGENT_ENV_ALLOW extra variable names the dashboard may set, comma separated
+ *                          (a trailing * allows a prefix: "HSA_*,MY_VAR"); see ENV_ALLOW
  *   PADDOCK_DRY_RUN        "1" = never call systemctl/journalctl (testing)
  */
 import http from "node:http";
@@ -29,7 +31,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 
-const VERSION = "0.5.0";
+const VERSION = "0.6.0-dev.4";
 const TOKEN = process.env.PADDOCK_AGENT_TOKEN || "";
 const UNIT = process.env.PADDOCK_OLLAMA_UNIT || "ollama.service";
 const OVERRIDE_PATH =
@@ -37,6 +39,20 @@ const OVERRIDE_PATH =
 const DRY_RUN = process.env.PADDOCK_DRY_RUN === "1";
 const EXTRA_DISKS = (process.env.PADDOCK_DISK_PATHS || "").split(",").map((s) => s.trim()).filter(Boolean);
 const KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+// Variables the dashboard may set. Anything else (LD_PRELOAD, CUDA_INJECTION64_PATH, HSA_TOOLS_LIB, …)
+// could load code into Ollama, so a dashboard login or agent token must not be enough to set it.
+// The host can extend the list through PADDOCK_AGENT_ENV_ALLOW; variables already in the drop-in
+// that aren't listed are kept as they are and reported read-only.
+const ENV_ALLOW = [
+  "OLLAMA_*",
+  "CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL",
+  "HSA_OVERRIDE_GFX_VERSION", "GGML_CUDA_ENABLE_UNIFIED_MEMORY",
+  "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY",
+  ...(process.env.PADDOCK_AGENT_ENV_ALLOW || "").split(",").map((s) => s.trim()).filter(Boolean),
+];
+const envAllowed = (name) => ENV_ALLOW.some((p) => p.endsWith("*")
+  ? name.toUpperCase().startsWith(p.slice(0, -1).toUpperCase())
+  : name.toUpperCase() === p.toUpperCase());
 
 // ------------------------------------------------------------------ helpers
 function run(cmd, args, timeoutMs = 10_000) {
@@ -264,7 +280,7 @@ function renderOverride(env, other) {
 
 function readEnvState() {
   const raw = readText(OVERRIDE_PATH) ?? "";
-  return { managed: parseOverride(raw).env, override_path: OVERRIDE_PATH, raw };
+  return { managed: parseOverride(raw).env, override_path: OVERRIDE_PATH, raw, allowed: ENV_ALLOW };
 }
 
 async function effectiveEnv() {
@@ -302,14 +318,19 @@ async function restartService() {
 async function putEnv(body) {
   const vars = body?.vars;
   if (!vars || typeof vars !== "object" || Array.isArray(vars)) throw httpError(400, "body must be {vars: {...}, restart?: bool}");
+  const current = readText(OVERRIDE_PATH);
+  const { env: existing, other } = parseOverride(current ?? "");
   for (const [k, v] of Object.entries(vars)) {
     if (!KEY_RE.test(k)) throw httpError(400, `invalid variable name: ${JSON.stringify(k)}`);
     if (typeof v !== "string") throw httpError(400, `value of ${k} must be a string`);
     if (/[\r\n]/.test(v)) throw httpError(400, `newlines not allowed in value of ${k}`);
+    if (!envAllowed(k) && existing[k] !== v) {
+      throw httpError(400, `${k} is not an Ollama variable; add it to PADDOCK_AGENT_ENV_ALLOW on the host to manage it here`);
+    }
   }
-  const current = readText(OVERRIDE_PATH);
-  const { other } = parseOverride(current ?? "");
-  const content = renderOverride(vars, other);
+  // variables outside the allowlist stay exactly as they are, whether or not the request mentions them
+  const kept = Object.fromEntries(Object.entries(existing).filter(([k]) => !envAllowed(k)));
+  const content = renderOverride({ ...kept, ...vars }, other);
 
   fs.mkdirSync(path.dirname(OVERRIDE_PATH), { recursive: true });
   if (current !== null) {
@@ -357,7 +378,7 @@ const routes = {
   "GET /health": async () => ({ ok: true, version: VERSION, platform: "linux", hostname: os.hostname() }),
   "GET /stats": async () => {
     const [nvidia, service] = await Promise.all([nvidiaStats(), serviceStatus()]);
-    return { ts: Date.now() / 1000, platform: "linux", system: systemStats(), nvidia, service };
+    return { ts: Date.now() / 1000, version: VERSION, platform: "linux", system: systemStats(), nvidia, service };
   },
   "GET /env": async () => {
     const st = readEnvState();

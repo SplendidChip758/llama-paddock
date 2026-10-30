@@ -10,6 +10,7 @@ llama-paddock is a self-hosted dashboard for monitoring and managing a fleet of 
 | `agent/linux/paddock-agent.mjs` | Agent on each Linux Ollama host (systemd) | Plain Node, no dependencies, Node 18.15+ |
 | `agent/windows/paddock-agent.mjs` | Agent on Windows PCs (Scheduled Task) | Same HTTP API as the Linux agent. Change both together |
 | `install/*.sh` | One-liner installers (Proxmox LXC or local) | Served raw from the `main` and `dev` branches, not from releases: a merged change is live immediately |
+| `docs/` | User documentation, also built into the website's Docs section | Plain GitHub Markdown: each page starts with one `# Title` and links to other pages with relative `.md` paths. `docs/README.md` is the index and sets the website's sidebar |
 | `.github/workflows/` | `ci` (PR checks), `pr-title`, `release` (semantic-release) | |
 
 Runtime data (hosts added in the UI, login, `paddock.db`) lives in `PADDOCK_DATA_DIR`. Files there hold secrets: write them with mode 600.
@@ -65,13 +66,38 @@ Keep the issue, its branch and its PR connected:
 3. **Put `Closes #<n>` in the commit body** and in the PR description. The commit carries it to `main`: when `dev` is merged to `main`, GitHub closes the issue and the project moves it to `Done`. A hotfix PR straight into `main` closes it on merge. Don't set `Done` by hand: the project's auto-close workflow would close the issue before the change is on `main`.
 4. **After the PR merges to `dev`:** tick the finished items in the issue's scope checklist, note anything left over, and leave the issue open and `In Review` until it reaches `main`.
 
+### The website shows the roadmap
+
+The website's roadmap page is built from these issues and the project: each milestone, its items, their Status and progress bars. It rebuilds on issue changes and every 6 hours, so a stale Status is a wrong public roadmap.
+
+- **Every roadmap issue is on project #6**, with the `roadmap` label and a milestone. An issue that isn't on the project doesn't appear on the site.
+- **Keep Status current**, as above: `In Progress` when you start, `In Review` when the PR opens. Never leave finished work at `Todo`.
+- **Titles are shown as they are:** short and user-facing, no type prefix (`Long-range metric charts`, not `feat: long-range charts`).
+- **New planned work:** create the issue and add it to the project, then set its Status. Add a bullet to the milestone's section in ROADMAP.md if users would look for the feature.
+  ```bash
+  gh issue create --label enhancement,roadmap --milestone "M5: Updates (→ 1.0)" --title "<title>" --body-file <file>
+  gh project item-add 6 --owner SplendidChip758 --url <issue URL>
+  ```
+- **Setting Status by command** (these IDs don't change):
+  ```bash
+  item=$(gh project item-list 6 --owner SplendidChip758 --format json --limit 200 \
+    --jq '.items[] | select(.content.number == <n>) | .id')
+  gh project item-edit --project-id PVT_kwHOAOmHZM4BpBVK --id "$item" \
+    --field-id PVTSSF_lAHOAOmHZM4BpBVKzhnex1c --single-select-option-id <option>
+  # options: Todo f75ad846 · In Progress 47fc9ee4 · In Review 84dbe197 (Done is set by closing the issue)
+  ```
+- **The site parses ROADMAP.md**, so keep its formats:
+  - the milestone table, one row per milestone in order: `| M5 | [Updates](#m5-updates--10) | Theme | Version |`
+  - one `## M5: Name` section per milestone (and `## Later`), with features as `- **Name.** text` and a `**Done when:** …` line
+  - GitHub milestone titles start with the same code (`M5: …`), or are exactly `Later`. A new milestone needs all three: the GitHub milestone, the table row and the section.
+
 Small fixes and docs don't need an issue.
 
 ## Code conventions
 
 - Match the surrounding code: its comment density, naming and idiom. Comments say why, not what.
 - Avoid new dependencies, especially native modules. Prefer Node built-ins.
-- When you add a setting, env var, API endpoint or behaviour change, update the README.
+- When you add a setting, env var, API endpoint or behaviour change, update the matching page in `docs/` (the website's Docs section is built from it). New pages go in the `docs/README.md` index.
 - No tokens, passwords or personal hostnames/IPs in code, logs, commits or screenshots. Use the `192.168.30.x` example addresses that the docs already use.
 
 Each area has its own rules. **Read the file for the area you're changing:**

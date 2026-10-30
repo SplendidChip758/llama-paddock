@@ -293,6 +293,8 @@ PADDOCK_OLLAMA_UNIT=ollama.service
 PADDOCK_OVERRIDE_PATH=/etc/systemd/system/ollama.service.d/override.conf
 # extra mount points to report, comma separated (OLLAMA_MODELS is added automatically)
 PADDOCK_DISK_PATHS=
+# extra variables the dashboard may set, comma separated; a trailing * allows a prefix
+# PADDOCK_AGENT_ENV_ALLOW=
 EOF
     chmod 600 "$ENV_FILE"
   else

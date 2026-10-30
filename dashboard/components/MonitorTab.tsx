@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { api, fmtBytes, fmtDur, fmtMiB, fmtNum, instPath, level, pct, untilText } from "@/lib/format";
 import type { GpuProcess, GpuStats, HistoryPoint, InstanceSnapshot, ServiceStatus, SystemStats } from "@/lib/types";
+import { HistoryCharts } from "./HistoryCharts";
 import { usePaddock } from "./PaddockProvider";
 import { Meter, SparkCell, Stat } from "./ui";
 
@@ -42,6 +43,7 @@ export function MonitorTab({ st }: { st: InstanceSnapshot }) {
           <SystemCards sys={sys} hist={hist} svc={st.stats.service} />
         </div>
       )}
+      <HistoryCharts st={st} />
     </>
   );
 }

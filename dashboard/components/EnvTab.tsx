@@ -24,6 +24,12 @@ const ENV_KNOWN: Record<string, { d: string; opts?: string[] }> = {
   CUDA_VISIBLE_DEVICES: { d: "Restrict which GPUs Ollama can use (index or UUID list)" },
 };
 
+/** Same rule as the agents: exact name or prefix, case-insensitive. No list means an older agent, which accepts anything. */
+function allowedBy(list: string[] | undefined, name: string) {
+  const n = name.toUpperCase();
+  return !list || list.some((p) => (p.endsWith("*") ? n.startsWith(p.slice(0, -1).toUpperCase()) : n === p.toUpperCase()));
+}
+
 export function EnvTab({ st }: { st: InstanceSnapshot }) {
   const { toast } = usePaddock();
   const [env, setEnv] = useState<EnvState | null>(null);
@@ -49,10 +55,12 @@ export function EnvTab({ st }: { st: InstanceSnapshot }) {
   }, [load, st.has_agent]);
 
   const original = useMemo(() => env?.managed ?? {}, [env]);
+  const allowed = (k: string) => allowedBy(env?.allowed, k);
   const keys = [...new Set([...Object.keys(ENV_KNOWN), ...Object.keys(values)])];
-  const cleaned = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== ""));
+  // variables the agent won't let us change are shown but never sent as a change
+  const cleaned = (o: Record<string, string>) => Object.fromEntries(Object.entries(o).filter(([k, v]) => v !== "" && allowed(k)));
   const changes = [...new Set([...Object.keys(cleaned(values)), ...Object.keys(original)])].filter(
-    (k) => (original[k] ?? "") !== (values[k] ?? ""),
+    (k) => allowed(k) && (original[k] ?? "") !== (values[k] ?? ""),
   );
 
   if (!st.has_agent) return <div className="notice">Environment management needs the llama-paddock agent on this host.</div>;
@@ -84,6 +92,7 @@ export function EnvTab({ st }: { st: InstanceSnapshot }) {
     e.preventDefault();
     const k = newKey.trim();
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) return toast("Invalid variable name", "bad");
+    if (!allowed(k)) return toast(`${k} isn't an Ollama variable. Add it to PADDOCK_AGENT_ENV_ALLOW on the host to manage it here.`, "bad");
     setValues({ ...values, [k]: newVal.trim() });
     setNewKey("");
     setNewVal("");
@@ -123,6 +132,18 @@ export function EnvTab({ st }: { st: InstanceSnapshot }) {
           const changed = (original[k] ?? "") !== v;
           const ph = ext != null ? `inherited: ${ext}` : "not set (Ollama default)";
           const set = (val: string) => setValues({ ...values, [k]: val.trim() });
+          if (!allowed(k)) {
+            return (
+              <div key={k} className="envrow unset">
+                <div>
+                  <div className="key">{k}</div>
+                  <div className="desc">Set on the host and kept as is. Add it to PADDOCK_AGENT_ENV_ALLOW in the agent's settings to manage it here.</div>
+                </div>
+                <input type="text" value={v} readOnly />
+                <button className="ghost sm" title="read-only" disabled>✕</button>
+              </div>
+            );
+          }
           return (
             <div key={k} className={`envrow ${changed ? "changed" : ""} ${v === "" ? "unset" : ""}`}>
               <div>
@@ -146,6 +167,12 @@ export function EnvTab({ st }: { st: InstanceSnapshot }) {
           <input type="text" placeholder="value" className="grow" value={newVal} onChange={(e) => setNewVal(e.target.value)} autoComplete="off" />
           <button className="btn" type="submit">Add</button>
         </form>
+        {env.allowed && (
+          <div className="hint" style={{ marginTop: 6 }}>
+            Only Ollama and GPU variables can be set from here ({env.allowed.join(", ")}). Other names need{" "}
+            <span className="mono">PADDOCK_AGENT_ENV_ALLOW</span> in the agent&apos;s settings on the host.
+          </div>
+        )}
         <div className="row" style={{ justifyContent: "flex-end", marginTop: 18 }}>
           <button className="ghost" onClick={() => setValues({ ...original })}>Reset</button>
           <button className="btn" disabled={saving} onClick={() => save(false)}>Save without restart</button>

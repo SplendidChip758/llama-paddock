@@ -626,6 +626,7 @@ NEXT_TELEMETRY_DISABLED=1
 PADDOCK_USERNAME=admin
 PADDOCK_PASSWORD=${ADMIN_PASSWORD}
 # PADDOCK_AUTH=off disables the login, e.g. behind an auth proxy.
+# PADDOCK_TRUSTED_PROXIES=1 when a reverse proxy sits in front (see docs/security.md).
 EOF
     msg_ok "Wrote $CFG_DIR/llama-paddock.env"
   fi
@@ -707,11 +708,13 @@ local_uninstall() {
 }
 
 # Login banner for a container this installer created (not for installs into an existing
-# machine, which has its own). It reads everything at login, so it never goes stale.
+# machine, which has its own). It reads version, IP and status at login, so only changes to the
+# banner itself need a rewrite, which every update does.
 MOTD_FILE=/etc/profile.d/00_llama-paddock.sh
 write_motd() {
   cat > "$MOTD_FILE" <<EOF
-# llama-paddock login banner (written by install/dashboard.sh). Delete this file to turn it off.
+# llama-paddock login banner, written by install/dashboard.sh and rewritten on every update, so
+# edits here are lost. Delete this file to turn the banner off for good.
 case \$- in *i*) ;; *) return 0 ;; esac
 __lp_ver=\$(cat ${APP_DIR}/VERSION 2>/dev/null)
 __lp_port=\$(sed -n 's/^PORT=//p' ${CFG_DIR}/llama-paddock.env 2>/dev/null | tail -1)
@@ -727,12 +730,16 @@ printf '    🔄   Update:     update-llama-paddock\n\n'
 unset __lp_ver __lp_port __lp_ip __lp_state
 EOF
   chmod 644 "$MOTD_FILE"
-  # Quiet the distribution's own login text: Ubuntu's update-motd scripts, Debian's /etc/motd, and
-  # Ubuntu's /etc/legal notice, which pam_motd shows on a user's first login unless this marker exists
+  msg_ok "Login banner written"
+}
+
+# Quiet the distribution's own login text in a new CT: Ubuntu's update-motd scripts, Debian's
+# /etc/motd, and Ubuntu's /etc/legal notice, which pam_motd shows on a user's first login unless
+# this marker exists. Only once, so updates don't undo it if someone turns that text back on.
+quiet_login_text() {
   [[ -d /etc/update-motd.d ]] && chmod -x /etc/update-motd.d/* 2>/dev/null || true
   [[ -f /etc/motd ]] && : > /etc/motd
   mkdir -p /root/.cache && touch /root/.cache/motd.legal-displayed
-  msg_ok "Login banner added"
 }
 
 # ct_notes IP — HTML for the container's Notes panel in the Proxmox UI. Proxmox drops every
@@ -807,7 +814,14 @@ local_install() {
   write_config
   PORT=$(sed -n 's/^PORT=//p' "$CFG_DIR/llama-paddock.env" | tail -1); PORT=${PORT:-8080}
   write_service
-  [[ -n ${PADDOCK_NESTED-} ]] && write_motd
+  # a CT that proxmox_install just created gets the banner; one that already has it gets it
+  # refreshed, so updates bring banner changes along
+  if [[ -n ${PADDOCK_NESTED-} ]]; then
+    write_motd
+    quiet_login_text
+  elif [[ -f $MOTD_FILE ]]; then
+    write_motd
+  fi
 
   if [[ -n $has_systemd ]]; then
     systemctl daemon-reload
