@@ -19,6 +19,7 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 | POST | `/api/auth/password` | `{current, password}`; `current` is optional during the forced first-login change |
 | POST | `/api/auth/logout` | Clears the session cookie |
 | GET | `/api/healthz` | `{ok, version}`; no login required |
+| GET | `/metrics` | Prometheus metrics; needs the scrape token instead of a login, and is off unless configured. See [Prometheus](prometheus.md) |
 
 `PADDOCK_AUTH=off` disables dashboard authentication. Only use it when another layer protects access. See [Login](configuration.md#login). Unauthenticated API requests normally return 401, and failed requests use a JSON `detail` field.
 

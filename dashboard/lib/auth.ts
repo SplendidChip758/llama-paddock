@@ -53,7 +53,8 @@ async function matchesHash(password: string, stored: string): Promise<boolean> {
   return crypto.timingSafeEqual(got, want);
 }
 
-function safeEqual(a: string, b: string): boolean {
+/** Constant-time string comparison (hashing first makes the lengths equal). */
+export function safeEqual(a: string, b: string): boolean {
   const ha = crypto.createHash("sha256").update(a).digest();
   const hb = crypto.createHash("sha256").update(b).digest();
   return crypto.timingSafeEqual(ha, hb);

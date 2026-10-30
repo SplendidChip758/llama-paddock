@@ -22,6 +22,10 @@ export interface Settings {
   poll_interval: number;
   history_points: number;
   history_retention_days: number;
+  /** Bearer token for /metrics; null leaves the endpoint off unless metrics_open is set. */
+  metrics_token: string | null;
+  /** Serve /metrics without a token (only when no token is set). */
+  metrics_open: boolean;
   instances: Instance[];
 }
 
@@ -87,6 +91,9 @@ export function loadSettings(): Settings {
     poll_interval: Number(raw.poll_interval ?? 3),
     history_points: Number(raw.history_points ?? 400),
     history_retention_days: positive(raw.history_retention_days ?? 30, "history_retention_days"),
+    // `||`, not `??`: an unset ${VAR} in the YAML expands to "" and should fall through to the env
+    metrics_token: String(raw.metrics_token || process.env.PADDOCK_METRICS_TOKEN || "").trim() || null,
+    metrics_open: raw.metrics_open === true || raw.metrics_open === "true",
     instances: [...fromConfig, ...fromUi],
   };
 }
