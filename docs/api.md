@@ -78,11 +78,39 @@ These routes require an agent configured for the host.
 | Method | Path | Body / result |
 |---|---|---|
 | GET | `/api/instances/{id}/env` | Editable and inherited environment variables, and `allowed`: the names the agent lets you set (a trailing `*` allows a prefix) |
-| PUT | `/api/instances/{id}/env` | `{vars, restart?}`; restarts Ollama unless `restart` is `false`. A name outside `allowed` is refused with 400 unless its value is unchanged; names outside the list are kept as they are |
+| PUT | `/api/instances/{id}/env` | `{vars, restart?}`; replaces managed variables on the allowlist, removing omitted ones. Restarts Ollama unless `restart` is `false`. A name outside `allowed` is refused with 400 unless its value is unchanged; names outside the list are kept as they are |
 | POST | `/api/instances/{id}/restart` | Restarts Ollama |
 | GET | `/api/instances/{id}/logs?lines=500` | Log tail; default 200 lines, clamped to 10–2000 |
 
 Environment edits affect the managed systemd drop-in on Linux and the user's Ollama-related variables on Windows. See [Environment](usage.md#environment) before automating changes.
+
+### Preserve existing environment settings
+
+`vars` is a replacement, not a partial update. Both agents remove existing managed variables on the allowlist when you omit them. For example, sending only `OLLAMA_NUM_PARALLEL` can remove `OLLAMA_HOST` and `OLLAMA_MODELS`, changing network access or the model directory after a restart. Variables outside the allowlist and settings inherited from elsewhere are preserved.
+
+Read the current `managed` map, modify that map, and send the complete result back. This Bash example requires `curl`, `jq` and a valid session in `cookies.txt` from [authentication](#authentication), including the first-login password change:
+
+```bash
+(
+  set -eu
+  umask 077
+  dashboard_url=http://192.168.30.100:8080
+  instance_id=ollama-01 # use the ID returned by /api/instances
+  env_state=$(mktemp)
+  env_body=$(mktemp)
+  trap 'rm -f "$env_state" "$env_body"' EXIT
+
+  curl --fail --silent --show-error -b cookies.txt \
+    "$dashboard_url/api/instances/$instance_id/env" -o "$env_state"
+  jq '.managed + {"OLLAMA_NUM_PARALLEL": "2"} | {vars: ., restart: false}' \
+    "$env_state" > "$env_body"
+  curl --fail --silent --show-error -b cookies.txt \
+    -X PUT -H 'Content-Type: application/json' --data-binary "@$env_body" \
+    "$dashboard_url/api/instances/$instance_id/env" -o /dev/null
+)
+```
+
+This saves the settings without restarting Ollama. Verify them in the Environment tab, then use **Restart Ollama** when ready to apply them. Avoid concurrent environment edits while reading and writing: this sequence does not detect another user's changes. To intentionally remove a managed variable on the allowlist, omit it from the full map.
 
 ## Agent API
 
@@ -93,7 +121,7 @@ The agent listens separately, normally on port 11435. All endpoints except `/hea
 | GET | `/health` | Agent version, platform and hostname; unauthenticated |
 | GET | `/stats` | Agent version, platform, host, NVIDIA GPU and Ollama process stats |
 | GET | `/env` | Environment state, including the `allowed` names (agents from 0.6.0) |
-| PUT | `/env` | `{vars, restart}`; edit the allowed variables, keep the rest |
+| PUT | `/env` | `{vars, restart?}`; replace managed variables on the allowlist, removing omitted ones; preserve variables outside the list. Restarts unless `restart` is `false`. See [preserving settings](#preserve-existing-environment-settings) |
 | POST | `/service/restart` | Restart Ollama |
 | GET | `/logs?lines=500` | Ollama log tail |
 

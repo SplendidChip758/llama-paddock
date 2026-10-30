@@ -21,7 +21,7 @@ Runtime data (hosts added in the UI, login, `paddock.db`) lives in `PADDOCK_DATA
 Before pushing, run what CI runs:
 
 ```bash
-cd dashboard && npm ci && npm run typecheck && npm run build && npm run test:scenarios
+(cd dashboard && npm ci && npm run typecheck && npm run build && npm run test:scenarios)
 node --check agent/linux/paddock-agent.mjs && node --check agent/windows/paddock-agent.mjs
 for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
 ```
