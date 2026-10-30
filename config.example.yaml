@@ -43,9 +43,10 @@ instances:
   #   name: laptop
   #   ollama_url: http://192.168.5.60:11434
 
-  # Ollama behind a proxy that wants an API key: sent as Authorization: Bearer
-  # on every Ollama call.
+  # Ollama behind a proxy that checks a key (Ollama has no keys of its own):
+  # sent as Authorization: Bearer on every Ollama call. Setup examples:
+  # docs/security.md#protect-ollama-with-a-proxy-key
   # - id: secured
   #   name: secured
   #   ollama_url: https://ollama.example.lan
-  #   ollama_api_key: ${SECURED_OLLAMA_KEY}
+  #   ollama_proxy_key: ${SECURED_OLLAMA_KEY}

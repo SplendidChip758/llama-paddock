@@ -90,7 +90,7 @@ Use an absolute data path: the standalone server changes its working directory. 
 
 ## Add your Ollama hosts
 
-In **Add host**, enter a name and an Ollama URL such as `http://192.168.30.101:11434`. Add the agent URL (`http://192.168.30.101:11435`) and its token for GPU/host stats, environment editing, restarts and logs. If Ollama sits behind a proxy that requires an API key, enter it under **Ollama API key**; it's sent as `Authorization: Bearer <key>`. Leave the key blank when editing to keep the stored one. The connection test checks the Ollama and agent endpoints separately, and says when Ollama wants a key or rejects the one given.
+In **Add host**, enter a name and an Ollama URL such as `http://192.168.30.101:11434`. Add the agent URL (`http://192.168.30.101:11435`) and its token for GPU/host stats, environment editing, restarts and logs. Ollama has no keys of its own; if a proxy in front of it checks one ([setup examples](security.md#protect-ollama-with-a-proxy-key)), enter it under **Proxy key**. It's sent as `Authorization: Bearer <key>`, and leaving it blank when editing keeps the stored one. The connection test checks the Ollama and agent endpoints separately, and says when the proxy wants a key or rejects the one given.
 
 An agent is optional for model management. Follow the [Linux](agent-linux.md) or [Windows](agent-windows.md) guide to install one. Both endpoints must be reachable from the dashboard host; `localhost` in a Docker deployment refers to the dashboard container.
 

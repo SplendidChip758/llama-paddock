@@ -59,7 +59,7 @@ class InstanceState {
     const i = this.inst;
     return {
       id: i.id, name: i.name, tags: i.tags, ollama_url: i.ollama_url, agent_url: i.agent_url, has_agent: !!i.agent_url,
-      has_token: !!i.agent_token, has_ollama_key: !!i.ollama_api_key, source: i.source,
+      has_token: !!i.agent_token, has_ollama_proxy_key: !!i.ollama_proxy_key, source: i.source,
       ollama_ok: this.ollama_ok, ollama_error: this.ollama_error, agent_ok: this.agent_ok,
       agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.ps, stats: this.stats, updated: this.updated,
     };
@@ -126,12 +126,12 @@ function hostFields(body: InstanceInput, existing?: Instance) {
   if (!ollama_url) throw new HttpError(400, "Ollama URL is required");
   const name = String(body.name ?? "").trim().slice(0, 80) || new URL(ollama_url).hostname;
   const token = String(body.agent_token ?? "").trim();
-  const key = String(body.ollama_api_key ?? "").trim();
+  const key = String(body.ollama_proxy_key ?? body.ollama_api_key ?? "").trim();
   return {
     name,
     ollama_url,
     // blank keeps the stored key, so the browser never needs to see it
-    ollama_api_key: body.clear_ollama_api_key === true ? null : key || existing?.ollama_api_key || null,
+    ollama_proxy_key: body.clear_ollama_proxy_key === true ? null : key || existing?.ollama_proxy_key || null,
     agent_url,
     // blank keeps the stored token; no agent means no token
     agent_token: agent_url ? token || existing?.agent_token || null : null,
@@ -171,7 +171,7 @@ export function updateInstance(id: string, body: InstanceInput): Instance {
   if (moved) {
     p.instances.set(id, new InstanceState(inst));
     deleteHistory(id);
-  } else if (inst.ollama_api_key !== prev.ollama_api_key) p.instances.set(id, new InstanceState(inst));
+  } else if (inst.ollama_proxy_key !== prev.ollama_proxy_key) p.instances.set(id, new InstanceState(inst));
   else st.inst = inst;
   persistHosts(p);
   return inst;
@@ -218,14 +218,15 @@ const agentHeaders = (inst: Instance): Record<string, string> =>
   inst.agent_token ? { Authorization: `Bearer ${inst.agent_token}` } : {};
 
 const ollamaHeaders = (inst: Instance, json: boolean): Record<string, string> => ({
-  ...(inst.ollama_api_key ? { Authorization: `Bearer ${inst.ollama_api_key}` } : {}),
+  ...(inst.ollama_proxy_key ? { Authorization: `Bearer ${inst.ollama_proxy_key}` } : {}),
   ...(json ? { "Content-Type": "application/json" } : {}),
 });
 
 /** A readable message when Ollama (or the proxy in front of it) turns the request away. */
 function ollamaAuthError(inst: Instance, status: number): string | null {
   if (status !== 401 && status !== 403) return null;
-  return inst.ollama_api_key ? `Ollama rejected the API key (${status})` : `Ollama needs an API key (${status})`;
+  // Ollama has no keys of its own, so a 401/403 comes from a proxy in front of it
+  return inst.ollama_proxy_key ? `the proxy in front of Ollama rejected the key (${status})` : `the proxy in front of Ollama wants a key (${status})`;
 }
 
 async function upstreamError(r: Response): Promise<string> {

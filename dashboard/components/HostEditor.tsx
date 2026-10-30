@@ -46,7 +46,7 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
   const [busy, setBusy] = useState<"" | "test" | "save" | "delete">("");
 
   const body = () => ({
-    id: host?.id, name, ollama_url: ollamaUrl, ollama_api_key: clearKey ? "" : apiKey, clear_ollama_api_key: clearKey,
+    id: host?.id, name, ollama_url: ollamaUrl, ollama_proxy_key: clearKey ? "" : apiKey, clear_ollama_proxy_key: clearKey,
     agent_url: agentUrl, agent_token: token, tags,
   });
 
@@ -126,13 +126,13 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
         </label>
 
         <label className="field">
-          <span>Ollama API key</span>
+          <span>Proxy key (optional)</span>
           <input type="password" autoComplete="new-password" value={apiKey} disabled={clearKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder={host?.has_ollama_key ? "unchanged (leave blank to keep)" : "blank if Ollama needs no key"} />
-          <div className="hint">Only for Ollama behind a proxy that checks <code>Authorization: Bearer</code>.</div>
+            placeholder={host?.has_ollama_proxy_key ? "unchanged (leave blank to keep)" : "blank unless a proxy in front of Ollama checks a key"} />
+          <div className="hint">Ollama has no keys of its own. Use this when a proxy in front of it checks one; it's sent as <code>Authorization: Bearer</code>. <a href="https://github.com/SplendidChip758/llama-paddock/blob/main/docs/security.md#protect-ollama-with-a-proxy-key" target="_blank" rel="noreferrer">Setup examples</a></div>
         </label>
-        {host?.has_ollama_key && (
+        {host?.has_ollama_proxy_key && (
           <label className="row hint" style={{ gap: 6, margin: "-6px 0 14px" }}>
             <input type="checkbox" checked={clearKey} onChange={(e) => setClearKey(e.target.checked)} /> Remove the stored key
           </label>
