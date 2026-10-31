@@ -33,11 +33,15 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 | POST | `/api/instances` | Host fields below → `{id}` (201) |
 | PUT | `/api/instances/{id}` | Host fields below → `{id}` |
 | DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history and events |
-| POST | `/api/test-connection` | Host fields plus optional existing `id` → separate `ollama` and `agent` results |
+| POST | `/api/test-connection` | Host fields plus optional existing `id` → separate `ollama` and `agent` results; `agent.fingerprint` is the key the agent presented (`https://`) or reports (`http://`) |
+| POST | `/api/instances/{id}/agent-key` | `{fingerprint}` → pins that key for an `https://` agent, e.g. after its key was replaced; 409 when `config.yaml` sets it |
+| POST | `/api/instances/{id}/agent-https` | Switches a UI host's `http://` agent URL to `https://`, pinning the key the agent reports → `{id, agent_url, agent_fingerprint}`; 409 for `config.yaml` hosts or agents that don't report a key |
 
-Host fields are `name`, `ollama_url`, `ollama_proxy_key`, `agent_url`, `agent_token` and `tags`. `ollama_url` is required. `tags` accepts an array or comma-separated string. Use the ID returned by creation or listed in `/api/instances` in later requests.
+Host fields are `name`, `ollama_url`, `ollama_proxy_key`, `agent_url`, `agent_token`, `agent_fingerprint` and `tags`. `agent_fingerprint` applies to `https://` agent URLs: `SHA256:<base64>` as the agent installer prints it (bare base64 and hex are accepted too). Blank pins the key the agent presents on the first connection; omitted keeps the stored pin. `ollama_url` is required. `tags` accepts an array or comma-separated string. Use the ID returned by creation or listed in `/api/instances` in later requests.
 
-Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Likewise a blank or omitted `ollama_proxy_key` keeps the stored key; send `clear_ollama_proxy_key: true` to remove it. The 0.7.0 prereleases called it `ollama_api_key`, which is still accepted. Neither secret is ever returned: `/api/instances` reports `has_token` and `has_ollama_proxy_key` instead. Changing either endpoint or the token clears that host's metric history and events; changing only the proxy key keeps them. Config-defined hosts cannot be updated or removed through the API (409); edit the YAML instead.
+Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Likewise a blank or omitted `ollama_proxy_key` keeps the stored key; send `clear_ollama_proxy_key: true` to remove it. The 0.7.0 prereleases called it `ollama_api_key`, which is still accepted. Neither secret is ever returned: `/api/instances` reports `has_token` and `has_ollama_proxy_key` instead. Changing either endpoint or the token clears that host's metric history and events; changing only the proxy key, the agent URL's scheme or the pinned key keeps them.
+
+For agent encryption, `/api/instances` reports per host `agent_fingerprint` (the pinned key, or `null`), `agent_fingerprint_in_config`, `agent_key_changed` (the key the agent presented instead of the pinned one: the dashboard stops calling the agent until it's accepted) and `agent_https_fingerprint` (the key an `http://` agent reports, so it can be switched). See [encrypted agent connections](security.md#encrypted-agent-connections). Config-defined hosts cannot be updated or removed through the API (409); edit the YAML instead.
 
 ## History
 
@@ -146,7 +150,7 @@ This saves the settings without restarting Ollama. Verify them in the Environmen
 
 ## Agent API
 
-The agent listens separately, normally on port 11435. All endpoints except `/health` require `Authorization: Bearer <agent-token>`. The dashboard sends this header using the token stored for the host.
+The agent listens separately, normally on port 11435, for HTTPS and (unless `PADDOCK_AGENT_HTTP=off`) plain HTTP. All endpoints except `/health` require `Authorization: Bearer <agent-token>`. The dashboard sends this header using the token stored for the host, after checking the agent's key on `https://`. Agents from 0.7.0 on add `fingerprint`, the SHA-256 of their key, to `/health` and `/stats`. With plain HTTP off, an HTTP request gets 426 with `{detail, fingerprint}`.
 
 | Method | Path | Purpose |
 |---|---|---|

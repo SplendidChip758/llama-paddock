@@ -9,8 +9,10 @@
  * Each simulated host gets two ports, because the dashboard addresses hosts by
  * URL: one serves Ollama's HTTP API (the parts the dashboard uses), the other the
  * agent API of agent/linux/paddock-agent.mjs (/health, /stats, /env, /logs,
- * /service/restart, with the same bearer-token rule). A third port serves the
- * control API, which switches failure scenarios at runtime.
+ * /service/restart, with the same bearer-token rule). Like the agents, the agent
+ * port serves HTTPS with a self-signed certificate (a new key per host and run)
+ * and plain HTTP. A third port serves the control API, which switches failure
+ * scenarios at runtime.
  *
  * Ports, from --base-port B:   control = B,  host n (1-based):
  *                              Ollama  = B + 2n - 1,  agent = B + 2n
@@ -39,9 +41,14 @@
  *        create:  "normal" | "stall" | "fail"
  *        pull_seconds, ollama_key (string or null), agent_token,
  *        ollama_version, agent_version (null: /stats leaves the version out, like agents before 0.6.0)
+ *        agent_http:  false = HTTPS only (PADDOCK_AGENT_HTTP=off), true = both (default)
+ *        agent_tls:   false = no HTTPS and no fingerprint, like agents before 0.7.0
+ *        agent_key:   "new" = replace the agent's key, as the installer's PADDOCK_AGENT_NEW_KEY does
  *   GET  /_sim/config.yaml              the same config.yaml as --write-config
  */
 import http from "node:http";
+import https from "node:https";
+import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
@@ -221,6 +228,8 @@ function makeHost(n, o) {
     pid: 1000 + n * 37,
     hung: new Set(),
     servers: {},
+    agentTls: true,
+    agentHttp: true,
   };
   // the first host has something loaded, so the dashboard shows VRAM in use right away
   if (n === 1) h.loaded.set("llama3.2:3b", { until: Infinity, ctx: 4096 });
@@ -497,6 +506,90 @@ async function handleOllama(h, req, res) {
   }
 }
 
+// ------------------------------------------------------------------ agent TLS
+// The certificate writer of the agents' TLS section, copied: each host makes its key in memory.
+function derLength(n) {
+  if (n < 0x80) return Buffer.from([n]);
+  const bytes = [];
+  for (; n; n >>= 8) bytes.unshift(n & 0xff);
+  return Buffer.from([0x80 | bytes.length, ...bytes]);
+}
+function der(tag, ...parts) {
+  const body = Buffer.concat(parts.map((p) => (typeof p === "string" ? Buffer.from(p) : p)));
+  return Buffer.concat([Buffer.from([tag]), derLength(body.length), body]);
+}
+const derSeq = (...parts) => der(0x30, ...parts);
+function derOid(dotted) {
+  const [a, b, ...rest] = dotted.split(".").map(Number);
+  const out = [40 * a + b];
+  for (let v of rest) {
+    const group = [v & 0x7f];
+    while ((v >>= 7)) group.unshift((v & 0x7f) | 0x80);
+    out.push(...group);
+  }
+  return der(0x06, Buffer.from(out));
+}
+
+function selfSignedCert(privateKey) {
+  const serial = crypto.randomBytes(16);
+  serial[0] = (serial[0] & 0x7f) | 0x40; // positive, and no leading zero byte
+  const ecdsaSha256 = derSeq(derOid("1.2.840.10045.4.3.2"));
+  const name = derSeq(der(0x31, derSeq(derOid("2.5.4.3"), der(0x0c, "llama-paddock-agent"))));
+  const notBefore = new Date(Date.now() - 3600_000).toISOString().replace(/[-:T]/g, "").slice(2, 14) + "Z";
+  const tbs = derSeq(
+    der(0xa0, der(0x02, Buffer.from([2]))), // v3
+    der(0x02, serial),
+    ecdsaSha256,
+    name,
+    // 9999-12-31: no expiry (RFC 5280, 4.1.2.5)
+    derSeq(der(0x17, notBefore), der(0x18, "99991231235959Z")),
+    name,
+    crypto.createPublicKey(privateKey).export({ type: "spki", format: "der" }),
+    der(0xa3, derSeq(derSeq(derOid("2.5.29.19"), der(0x01, Buffer.from([0xff])), der(0x04, derSeq())))), // CA: false
+  );
+  const cert = derSeq(tbs, ecdsaSha256, der(0x03, Buffer.from([0]), crypto.sign("sha256", tbs, privateKey)));
+  return `-----BEGIN CERTIFICATE-----\n${cert.toString("base64").match(/.{1,64}/g).join("\n")}\n-----END CERTIFICATE-----\n`;
+}
+
+/** SHA256:<base64>, the same as `openssl x509 -pubkey | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | base64`. */
+const keyFingerprint = (publicKey) =>
+  `SHA256:${crypto.createHash("sha256").update(publicKey.export({ type: "spki", format: "der" })).digest("base64").replace(/=+$/, "")}`;
+
+function newAgentKey(h) {
+  const { privateKey } = crypto.generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  h.tls = {
+    key: privateKey.export({ type: "pkcs8", format: "pem" }),
+    cert: selfSignedCert(privateKey),
+    fingerprint: keyFingerprint(crypto.createPublicKey(privateKey)),
+  };
+}
+
+/** The agent port: HTTPS and plain HTTP on one port, told apart by the first byte as the agents do. */
+function agentServer(h) {
+  const onRequest = (req, res) => void handleAgent(h, req, res);
+  const plain = http.createServer(onRequest);
+  const secure = https.createServer({ key: h.tls.key, cert: h.tls.cert }, onRequest);
+  // the servers behind it never listen themselves, so they don't track connections: do it here
+  const sockets = new Set();
+  const front = net.createServer((socket) => {
+    sockets.add(socket);
+    socket.on("error", () => socket.destroy());
+    socket.once("close", () => sockets.delete(socket));
+    socket.once("readable", () => {
+      const head = socket.read(1);
+      if (!head) return socket.destroy();
+      socket.unshift(head);
+      (head[0] === 0x16 && h.agentTls ? secure : plain).emit("connection", socket);
+    });
+  });
+  // what stopListening() expects of an http.Server
+  front.closeAllConnections = () => {
+    for (const s of sockets) s.destroy();
+  };
+  front.useKey = () => secure.setSecureContext({ key: h.tls.key, cert: h.tls.cert });
+  return front;
+}
+
 // ------------------------------------------------------------------ agent API
 /** Smooth, changing values from the clock, so charts move without any state to keep. */
 const wave = (t, period, phase = 0) => (Math.sin((t / period + phase) * 2 * Math.PI) + 1) / 2;
@@ -533,6 +626,7 @@ function agentStats(h) {
     ts: t,
     ...(h.agentVersion ? { version: h.agentVersion } : {}),
     platform: "linux",
+    fingerprint: agentFingerprint(h),
     system: {
       hostname: h.hostname,
       uptime_s: Math.round(86400 * 3 + (Date.now() - h.startedAt) / 1000),
@@ -572,7 +666,7 @@ async function restartOllama(h) {
 }
 
 const agentRoutes = {
-  "GET /health": (h) => ({ ok: true, version: h.agentVersion ?? undefined, platform: "linux", hostname: h.hostname }),
+  "GET /health": (h) => ({ ok: true, version: h.agentVersion ?? undefined, platform: "linux", hostname: h.hostname, fingerprint: agentFingerprint(h) }),
   "GET /stats": (h) => agentStats(h),
   "GET /env": (h) => ({
     managed: { ...h.env }, override_path: OVERRIDE_PATH, raw: renderOverride(h.env), allowed: AGENT_ENV_ALLOW,
@@ -604,6 +698,8 @@ const agentRoutes = {
   },
 };
 
+const agentFingerprint = (h) => (h.agentTls ? h.tls.fingerprint : null);
+
 function agentAuthorized(h, req) {
   if (h.scenario.agent === "bad-token") return false;
   const a = req.headers.authorization ?? "";
@@ -618,6 +714,9 @@ async function handleAgent(h, req, res) {
   h.requests[`agent ${key}`] = (h.requests[`agent ${key}`] ?? 0) + 1;
   if (h.scenario.agent === "hang") return void h.hung.add(res);
   if (h.scenario.agent === "error") return sendJson(res, 500, { detail: "simulated agent failure" });
+  if (!req.socket.encrypted && !h.agentHttp) {
+    return sendJson(res, 426, { detail: "this agent only accepts HTTPS: use https:// in the agent URL", fingerprint: agentFingerprint(h) });
+  }
   const route = agentRoutes[key];
   if (!route) return sendJson(res, 404, { detail: "not found" });
   if (url.pathname !== "/health" && !agentAuthorized(h, req)) return sendJson(res, 401, { detail: "invalid agent token" });
@@ -676,7 +775,10 @@ async function setAgent(h, state) {
 
 async function applyScenario(h, patch) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new HttpErr(400, "body must be a JSON object");
-  const known = [...Object.keys(SCENARIO_VALUES), "pull_seconds", "ollama_key", "agent_token", "ollama_version", "agent_version"];
+  const known = [
+    ...Object.keys(SCENARIO_VALUES), "pull_seconds", "ollama_key", "agent_token", "ollama_version", "agent_version",
+    "agent_http", "agent_tls", "agent_key",
+  ];
   for (const [k, v] of Object.entries(patch)) {
     if (!known.includes(k)) throw new HttpErr(400, `unknown field ${k}; known: ${known.join(", ")}`);
     if (SCENARIO_VALUES[k] && !SCENARIO_VALUES[k].includes(v)) throw new HttpErr(400, `${k} must be one of ${SCENARIO_VALUES[k].join(", ")}`);
@@ -692,6 +794,18 @@ async function applyScenario(h, patch) {
   }
   if (patch.ollama_version !== undefined) h.ollamaVersion = String(patch.ollama_version);
   if (patch.agent_version !== undefined) h.agentVersion = patch.agent_version ? String(patch.agent_version) : null;
+  if (patch.agent_tls !== undefined) h.agentTls = !!patch.agent_tls;
+  if (patch.agent_http !== undefined) {
+    if (!patch.agent_http && !h.agentTls) throw new HttpErr(400, "agent_http can't be off without agent_tls: the agents refuse to start then");
+    h.agentHttp = !!patch.agent_http;
+  }
+  if (patch.agent_key !== undefined) {
+    if (patch.agent_key !== "new") throw new HttpErr(400, 'agent_key must be "new"');
+    newAgentKey(h);
+    h.servers.agent.useKey();
+    // like an agent restart: connections made with the old key end
+    h.servers.agent.closeAllConnections();
+  }
   if (patch.pull) h.scenario.pull = patch.pull;
   if (patch.create) h.scenario.create = patch.create;
   if (patch.ollama) await setOllama(h, patch.ollama);
@@ -707,6 +821,9 @@ function hostView(h, full = false) {
     hostname: h.hostname,
     ollama_url: `${base}:${h.ollamaPort}`,
     agent_url: `${base}:${h.agentPort}`,
+    agent_https_url: `${base.replace("http:", "https:")}:${h.agentPort}`,
+    agent_fingerprint: agentFingerprint(h),
+    agent_http: h.agentHttp,
     agent_token: h.agentToken,
     ollama_key: h.ollamaKey,
     gpus: h.gpus.length,
@@ -773,7 +890,8 @@ async function main() {
     await listen(control, opts.basePort);
     for (const h of hosts.values()) {
       h.servers.ollama = http.createServer((req, res) => void handleOllama(h, req, res));
-      h.servers.agent = http.createServer((req, res) => void handleAgent(h, req, res));
+      newAgentKey(h);
+      h.servers.agent = agentServer(h);
       await listen(h.servers.ollama, h.ollamaPort);
       await listen(h.servers.agent, h.agentPort);
     }

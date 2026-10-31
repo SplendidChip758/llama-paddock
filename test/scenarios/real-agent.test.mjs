@@ -3,6 +3,7 @@
 // env-name rules, so the other scenarios aren't testing against a simulator that has drifted.
 import { after, before, test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
@@ -32,6 +33,7 @@ before(async () => {
     env: {
       ...process.env, PADDOCK_AGENT_TOKEN: TOKEN, PADDOCK_AGENT_BIND: "127.0.0.1", PADDOCK_AGENT_PORT: String(port),
       PADDOCK_DRY_RUN: "1", PADDOCK_OVERRIDE_PATH: path.join(data.dir, "override.conf"),
+      PADDOCK_AGENT_TLS_KEY: path.join(data.dir, "agent.key"), PADDOCK_AGENT_TLS_CERT: path.join(data.dir, "agent.crt"),
     },
   });
   agentUrl = `http://127.0.0.1:${port}`;
@@ -62,6 +64,20 @@ test("the dashboard polls the real agent", async () => {
   assert.equal(i.agent_version, /const VERSION = "([^"]+)"/.exec(src)[1]);
   assert.equal(i.stats.platform, "linux");
   assert.equal(i.stats.service.active, "dry-run");
+});
+
+test("the real agent serves HTTPS on the same port, with the key it reports", async () => {
+  const health = await fetch(`${agentUrl}/health`).then((r) => r.json());
+  assert.match(health.fingerprint, /^SHA256:[A-Za-z0-9+/]{43}$/);
+  const form = { ollama_url: sim.host("sim-1").ollama_url, agent_url: agentUrl.replace("http:", "https:"), agent_token: TOKEN };
+  const ok = await c.post("/api/test-connection", { ...form, agent_fingerprint: health.fingerprint });
+  assert.equal(ok.data.agent.ok, true, JSON.stringify(ok.data));
+  assert.equal(ok.data.agent.fingerprint, health.fingerprint);
+  // the certificate it made: signed with its own key, no expiry, and the key readable only by its owner
+  const cert = new crypto.X509Certificate(fs.readFileSync(path.join(data.dir, "agent.crt")));
+  assert.ok(cert.verify(cert.publicKey));
+  assert.equal(new Date(cert.validTo).getUTCFullYear(), 9999);
+  assert.equal(fs.statSync(path.join(data.dir, "agent.key")).mode & 0o777, 0o600);
 });
 
 test("env, restart and logs go through to the real agent", async () => {

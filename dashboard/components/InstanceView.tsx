@@ -11,6 +11,7 @@ import { EnvTab } from "./EnvTab";
 import { LogsTab } from "./LogsTab";
 import { TABS, type Tab } from "@/lib/tabs";
 import { HostEditor } from "./HostEditor";
+import { AgentKeyNotice, AgentPlainChip, HttpsOffer, agentEncrypted } from "./AgentTls";
 
 export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
   const { instances, loaded, toast } = usePaddock();
@@ -50,7 +51,12 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
             <span>{label}</span>
             <span className="mono">{st.ollama_url}</span>
             <span>Ollama {st.version ?? "–"}</span>
-            {st.has_agent && <span>agent {st.agent_version ?? "unknown"}</span>}
+            {st.has_agent && (
+              <span title={agentEncrypted(st) ? `HTTPS, key ${st.agent_fingerprint ?? "pinned on first connection"}` : undefined}>
+                agent {st.agent_version ?? "unknown"}{agentEncrypted(st) ? " · HTTPS" : ""}
+              </span>
+            )}
+            <AgentPlainChip st={st} />
             {st.stats && <span>host {st.stats.system.hostname}{platform ? ` (${platform})` : ""}</span>}
             {svc && <span>service: {svc.active}{svc.sub ? `/${svc.sub}` : ""}</span>}
           </div>
@@ -70,7 +76,9 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
       </div>
       {editing && <HostEditor host={st} onClose={() => setEditing(false)} />}
       {st.ollama_error && <div className="notice bad">Ollama: {st.ollama_error}</div>}
-      {st.agent_error && <div className="notice warn">Agent: {st.agent_error}</div>}
+      <AgentKeyNotice st={st} />
+      {st.agent_error && !st.agent_key_changed && <div className="notice warn">Agent: {st.agent_error}</div>}
+      <HttpsOffer st={st} />
       <nav className="tabs">
         {TABS.map(([k, l]) => (
           <Link key={k} href={`/i/${encodeURIComponent(id)}/${k}`} className={tab === k ? "active" : ""}>

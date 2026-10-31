@@ -607,8 +607,9 @@ history_retention_days: 30  # metric history kept in /var/lib/llama-paddock
 #   - id: ollama-01
 #     name: ollama-01
 #     ollama_url: http://192.168.30.101:11434
-#     agent_url: http://192.168.30.101:11435
+#     agent_url: https://192.168.30.101:11435
 #     agent_token: \${AGENT_TOKEN_1}
+#     agent_fingerprint: "SHA256:…"   # printed by the agent installer
 EOF
     msg_ok "Wrote $CFG_DIR/config.yaml"
   else
