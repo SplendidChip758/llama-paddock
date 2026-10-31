@@ -1,3 +1,9 @@
+## [0.7.0-dev.6](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.5...v0.7.0-dev.6) (2026-10-31)
+
+### Features
+
+* encrypt dashboard-to-agent traffic with TLS ([#101](https://github.com/SplendidChip758/llama-paddock/issues/101)) ([d4fc103](https://github.com/SplendidChip758/llama-paddock/commit/d4fc103ef9f2ab2c2bfbfffd6aff97bb25cc5f59)), closes [#68](https://github.com/SplendidChip758/llama-paddock/issues/68)
+
 ## [0.7.0-dev.5](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.4...v0.7.0-dev.5) (2026-10-30)
 
 ### Features

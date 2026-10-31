@@ -37,7 +37,7 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 
-const VERSION = "0.7.0-dev.5";
+const VERSION = "0.7.0-dev.6";
 const TOKEN = process.env.PADDOCK_AGENT_TOKEN || "";
 const UNIT = process.env.PADDOCK_OLLAMA_UNIT || "ollama.service";
 const OVERRIDE_PATH =
