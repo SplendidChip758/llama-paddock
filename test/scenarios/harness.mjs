@@ -159,7 +159,7 @@ export function makeDataDir(sim, { instances = {}, pollInterval = 1, extra = "" 
   for (const h of sim.hosts) {
     const o = { id: h.id, name: h.id, ollama_url: h.ollama_url, ollama_proxy_key: h.ollama_key, agent_url: h.agent_url, agent_token: h.agent_token, ...instances[h.id] };
     lines.push(`  - id: ${o.id}`);
-    for (const k of ["name", "ollama_url", "ollama_proxy_key", "agent_url", "agent_token"]) if (o[k]) lines.push(`    ${k}: ${JSON.stringify(o[k])}`);
+    for (const k of ["name", "ollama_url", "ollama_proxy_key", "agent_url", "agent_token", "agent_fingerprint"]) if (o[k]) lines.push(`    ${k}: ${JSON.stringify(o[k])}`);
   }
   const config = path.join(dir, "config.yaml");
   fs.writeFileSync(config, lines.join("\n") + "\n", { mode: 0o600 });
@@ -292,7 +292,8 @@ export function metric(text, name, labels) {
 }
 
 /**
- * Start a simulator, a data dir and a signed-in dashboard. `stop()` tears all of it down and, when a
+ * Start a simulator, a data dir and a signed-in dashboard. `data` can be a function of the simulator,
+ * for config that depends on its ports. `stop()` tears all of it down and, when a
  * test marked the stack as failed, prints the processes' recent output, since CI only shows the assertion.
  */
 export async function startStack({ sim: simOpts = {}, data: dataOpts = {} } = {}) {
@@ -306,7 +307,7 @@ export async function startStack({ sim: simOpts = {}, data: dataOpts = {} } = {}
   };
   try {
     stack.sim = await startSim(simOpts);
-    stack.data = makeDataDir(stack.sim, dataOpts);
+    stack.data = makeDataDir(stack.sim, typeof dataOpts === "function" ? dataOpts(stack.sim) : dataOpts);
     stack.dashboard = await startDashboard(stack.data);
     stack.client = await new Client(stack.dashboard.url).login();
   } catch (e) {

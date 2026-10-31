@@ -11,6 +11,8 @@ import { Drawer } from "./ui";
 interface Check {
   ok: boolean;
   detail: string;
+  /** agent: the key it presented over https://, or reports having over http:// */
+  fingerprint?: string | null;
 }
 
 // Prerelease guides live on dev; stable installs use their release's documentation.
@@ -31,8 +33,10 @@ const hostOf = (url: string) => {
   return HOST_RE.test(host) ? host : "";
 };
 
-/** Agent default: same host as Ollama, port 11435. */
-const suggestAgent = (ollamaUrl: string) => (hostOf(ollamaUrl) ? `http://${hostOf(ollamaUrl)}:11435` : "");
+/** Agent default: same host as Ollama, port 11435. Agents from 0.7.0 on serve HTTPS there. */
+const suggestAgent = (ollamaUrl: string) => (hostOf(ollamaUrl) ? `https://${hostOf(ollamaUrl)}:11435` : "");
+
+const isHttps = (url: string) => /^https:\/\//i.test(url.trim());
 
 /** Add a host (no `host`) or edit/remove one added in the UI. */
 export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose: () => void }) {
@@ -43,6 +47,7 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
   const [agentUrl, setAgentUrl] = useState(host?.agent_url ?? "");
   const [agentTouched, setAgentTouched] = useState(!!host);
   const [token, setToken] = useState("");
+  const [fingerprint, setFingerprint] = useState(host?.agent_fingerprint ?? "");
   const [apiKey, setApiKey] = useState("");
   const [clearKey, setClearKey] = useState(false);
   const [tags, setTags] = useState(host?.tags.join(", ") ?? "");
@@ -51,7 +56,7 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
 
   const body = () => ({
     id: host?.id, name, ollama_url: ollamaUrl, ollama_proxy_key: clearKey ? "" : apiKey, clear_ollama_proxy_key: clearKey,
-    agent_url: agentUrl, agent_token: token, tags,
+    agent_url: agentUrl, agent_token: token, agent_fingerprint: fingerprint, tags,
   });
 
   const onOllama = (v: string) => {
@@ -63,7 +68,10 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
     setBusy("test");
     setChecks(null);
     try {
-      setChecks(await api("/api/test-connection", { method: "POST", body: body() }));
+      const r = await api<{ ollama: Check; agent: Check | null }>("/api/test-connection", { method: "POST", body: body() });
+      setChecks(r);
+      // a blank pin would be set from the first connection anyway; fill it in so it can be compared now
+      if (isHttps(agentUrl) && !fingerprint.trim() && r.agent?.ok && r.agent.fingerprint) setFingerprint(r.agent.fingerprint);
     } catch (e) {
       toast((e as Error).message, "bad");
     } finally {
@@ -149,7 +157,8 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
 
         <h2 style={{ margin: "20px 0 10px" }}>Agent</h2>
         <div className="hint" style={{ marginBottom: 12 }}>
-          Optional. The agent adds GPU and host stats, environment editing, restart and logs. Its installer prints the token.
+          Optional. The agent adds GPU and host stats, environment editing, restart and logs. Its installer prints the URL, the
+          token and the key fingerprint.
         </div>
         <label className="field">
           <span>Agent URL</span>
@@ -163,6 +172,17 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
               placeholder={host?.has_token ? "unchanged (leave blank to keep)" : "printed by the agent installer"} />
           </label>
         )}
+        {isHttps(agentUrl) && (
+          <label className="field">
+            <span>Agent key fingerprint</span>
+            <input type="text" className="mono" value={fingerprint} onChange={(e) => setFingerprint(e.target.value)}
+              placeholder="SHA256:… (blank: trust the key it presents first)" spellCheck={false} />
+            <div className="hint">
+              Printed by the agent installer. The dashboard only talks to an agent with this key, so nothing else can pick up its
+              token.
+            </div>
+          </label>
+        )}
 
         <label className="field">
           <span>Tags</span>
@@ -174,6 +194,15 @@ export function HostEditor({ host, onClose }: { host?: InstanceSnapshot; onClose
           <div className="checks">
             <div><span className={`dot ${checks.ollama.ok ? "ok" : "bad"}`} /> <b>Ollama</b> {checks.ollama.detail}</div>
             {checks.agent && <div><span className={`dot ${checks.agent.ok ? "ok" : "bad"}`} /> <b>Agent</b> {checks.agent.detail}</div>}
+            {checks.agent?.fingerprint && (isHttps(agentUrl) ? (
+              <div className="hint">
+                Key <span className="mono">{checks.agent.fingerprint}</span>. Compare it with what the agent installer printed.
+              </div>
+            ) : (
+              <div className="hint">
+                This agent supports HTTPS: use <code>https://</code> in the agent URL so its token isn&apos;t sent in plain text.
+              </div>
+            ))}
           </div>
         )}
 

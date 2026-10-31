@@ -7,6 +7,7 @@ import type { InstanceSnapshot } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
 import { Meter, Stat, statusOf } from "./ui";
 import { HostEditor } from "./HostEditor";
+import { AgentPlainChip, FleetHttpsOffer } from "./AgentTls";
 
 export function Overview() {
   const { instances, loaded, pollInterval } = usePaddock();
@@ -45,6 +46,7 @@ export function Overview() {
         <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>
       </div>
       {editor}
+      <FleetHttpsOffer instances={instances} />
       <div className="stats" style={{ marginBottom: 18 }}>
         <Stat k="Online" v={instances.filter((s) => s.ollama_ok).length} unit={`/ ${instances.length}`} />
         <Stat k="GPUs" v={gpus.length} />
@@ -64,7 +66,7 @@ function InstCard({ st }: { st: InstanceSnapshot }) {
   const [c, label] = statusOf(st);
   const sys = st.stats?.system;
   const gpus = st.stats?.nvidia?.gpus ?? [];
-  const err = st.ollama_error || st.agent_error;
+  const err = st.ollama_error || (st.agent_key_changed ? "the agent's key has changed: open the host to review it" : st.agent_error);
   const platform = st.stats?.platform;
   return (
     <div className="card inst-card" onClick={() => router.push(`/i/${encodeURIComponent(st.id)}/monitor`)}>
@@ -73,7 +75,10 @@ function InstCard({ st }: { st: InstanceSnapshot }) {
           <span className={`dot ${c}`} />
           <h3>{st.name}</h3>
         </div>
-        <span className={`chip ${c === "ok" ? "ok" : c === "bad" ? "bad" : ""}`}>{label}</span>
+        <div className="chips">
+          <AgentPlainChip st={st} />
+          <span className={`chip ${c === "ok" ? "ok" : c === "bad" ? "bad" : ""}`}>{label}</span>
+        </div>
       </div>
       <dl className="kv">
         <dt>Ollama</dt>

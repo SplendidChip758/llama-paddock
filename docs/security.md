@@ -40,8 +40,26 @@ Every response carries `Content-Security-Policy: frame-ancestors 'none'; base-ur
 ## Agents
 
 - Every agent request except `/health` needs the host's `PADDOCK_AGENT_TOKEN`. The token is stored in the dashboard's data directory and sent with every request, so keep that directory private and the agent's port reachable from the dashboard host only ([Linux](agent-linux.md), [Windows](agent-windows.md)).
-- Agent traffic is plain HTTP today. Anyone who can sniff the network between the dashboard and a host can copy the token. TLS between the two is planned ([#68](https://github.com/SplendidChip758/llama-paddock/issues/68)); until then, keep them on a network you trust.
+- Use `https://` agent URLs. Over plain HTTP, anyone who can sniff the network between the dashboard and a host can copy the token. See [encrypted agent connections](#encrypted-agent-connections).
 - The agent refuses to set variables outside its [allowlist](usage.md#environment), so neither a dashboard login nor a captured token is enough to load code into Ollama through `LD_PRELOAD` and similar. `PADDOCK_AGENT_ENV_ALLOW` extends the list, and it's read only from the agent's own settings on the host, never from the API.
+
+## Encrypted agent connections
+
+Agents from 0.7.0 on serve HTTPS. On its first start an agent creates an ECDSA key and a self-signed certificate for it (Linux: `/etc/llama-paddock-agent.key` and `.crt`, mode 600 for the key; Windows: `agent.key` and `agent.crt` next to `agent.json`), and its installer prints the key's fingerprint, `SHA256:…`. You can use your own key and certificate instead with `PADDOCK_AGENT_TLS_KEY` and `PADDOCK_AGENT_TLS_CERT` ([Linux](agent-linux.md#https), [Windows](agent-windows.md#settings-and-updates)).
+
+The dashboard doesn't check the certificate against a CA. It **pins the agent's key**, and checks it on every connection before it sends the token:
+
+- Enter the fingerprint the installer printed under **Agent key fingerprint** in Add host, or as `agent_fingerprint` in [`config.yaml`](configuration.md#declarative-hosts). This is the safe way: the dashboard never talks to anything else at that address.
+- Leave it blank, and the dashboard pins the key the agent presents on the first connection. **Test connection** shows that key and fills it in, so you can compare it with the installer's output before saving.
+- Because the key is pinned rather than the certificate, a new certificate for the same key needs no new pin, and the generated certificate never expires.
+
+If an agent presents a different key, the dashboard stops calling it, marks the agent down, and shows the pinned and the presented fingerprint on the host's page. A new key is expected after you replaced it (`PADDOCK_AGENT_NEW_KEY=1` for the Linux installer, `-NewKey` for the Windows one, or a reinstall). Compare the presented fingerprint with the installer's output, then choose **Accept new key**. Otherwise, something else may be answering at the agent's address. For a host whose `agent_fingerprint` is set in `config.yaml`, change it there.
+
+Hosts that still use `http://` agent URLs show **not encrypted**. Agents from 0.7.0 on serve HTTPS and plain HTTP on the same port, and report their key over HTTP too, so the dashboard offers **Switch to HTTPS** on the host's page and **Switch all to HTTPS** on the overview. The switch pins the key the agent reported over HTTP, after checking that the agent answers over HTTPS with it. Like pinning on the first connection, that trusts the network at that moment. For `config.yaml` hosts, change `agent_url` to `https://` and add `agent_fingerprint` there.
+
+New agent installs serve HTTPS only (`PADDOCK_AGENT_HTTP=off`). Updated agents keep plain HTTP on, so a dashboard from before 0.7.0 keeps working. Turn it off once every dashboard uses `https://`. Over plain HTTP, an agent with HTTP off answers only with a 426 error that names its key.
+
+This covers the dashboard's calls to agents. Its calls to Ollama on port 11434 can go to an `https://` [proxy](proxy.md#ollama-behind-a-proxy).
 
 ## Ollama's own port
 

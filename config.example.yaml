@@ -17,14 +17,17 @@ instances:
   - id: ollama-01
     name: ollama-01 · Node-01 P100
     ollama_url: http://192.168.30.101:11434
-    agent_url: http://192.168.30.101:11435
+    agent_url: https://192.168.30.101:11435
     agent_token: ${OLLAMA01_AGENT_TOKEN}
+    # the agent's key, as its installer printed it; the dashboard refuses an agent with another key
+    # agent_fingerprint: "SHA256:…"
     tags: [p100, node-01]
 
   - id: ollama-02
     name: ollama-02 · Node-02 P100
     ollama_url: http://192.168.30.102:11434
-    agent_url: http://192.168.30.102:11435
+    # without agent_fingerprint, the key the agent presents first is pinned (kept in agent-pins.json)
+    agent_url: https://192.168.30.102:11435
     agent_token: ${OLLAMA02_AGENT_TOKEN}
     tags: [p100, node-02]
 
@@ -34,7 +37,7 @@ instances:
   # - id: gaming-pc
   #   name: gaming-pc · RTX
   #   ollama_url: http://192.168.5.50:11434
-  #   agent_url: http://192.168.5.50:11435
+  #   agent_url: https://192.168.5.50:11435
   #   agent_token: ${GAMINGPC_AGENT_TOKEN}
 
   # An instance without an agent still gets ollama ps + full model management;

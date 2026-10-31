@@ -98,6 +98,7 @@ h3 { font-size: 15px; }
 .chip.acc { color: var(--accent2); border-color: color-mix(in srgb, var(--accent) 50%, var(--line)); }
 .chip.ok { color: var(--ok); }
 .chip.bad { color: var(--bad); }
+.chip.warn { color: var(--warn); }
 
 /* ---------- meters ---------- */
 .meter { margin: 10px 0; }
