@@ -598,14 +598,18 @@ poll_interval: 3        # seconds between polls of every host
 history_points: 400     # recent samples shown in sparklines
 history_retention_days: 30  # metric history kept in /var/lib/llama-paddock
 
+# Prometheus /metrics is off until a scrape token is set: put
+# PADDOCK_METRICS_TOKEN=<random> in llama-paddock.env, or see docs/prometheus.md.
+
 # Add hosts in the dashboard (Add host). Hosts listed here also work, but are
 # read-only in the UI. Tokens can live in llama-paddock.env as \${VAR}.
 # instances:
 #   - id: ollama-01
 #     name: ollama-01
 #     ollama_url: http://192.168.30.101:11434
-#     agent_url: http://192.168.30.101:11435
+#     agent_url: https://192.168.30.101:11435
 #     agent_token: \${AGENT_TOKEN_1}
+#     agent_fingerprint: "SHA256:…"   # printed by the agent installer
 EOF
     msg_ok "Wrote $CFG_DIR/config.yaml"
   else
@@ -626,7 +630,7 @@ NEXT_TELEMETRY_DISABLED=1
 PADDOCK_USERNAME=admin
 PADDOCK_PASSWORD=${ADMIN_PASSWORD}
 # PADDOCK_AUTH=off disables the login, e.g. behind an auth proxy.
-# PADDOCK_TRUSTED_PROXIES=1 when a reverse proxy sits in front (see docs/security.md).
+# PADDOCK_TRUSTED_PROXIES=1 when a reverse proxy sits in front (see docs/proxy.md).
 EOF
     msg_ok "Wrote $CFG_DIR/llama-paddock.env"
   fi

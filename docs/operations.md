@@ -11,7 +11,7 @@ Back up your data before upgrading, especially when changing release channels.
 | Dashboard installer | Run `update-llama-paddock` inside its container/VM, or `pct exec <ctid> -- update-llama-paddock` from Proxmox |
 | Docker Compose | Run `docker compose pull` then `docker compose up -d` from the Compose directory |
 | Linux agent | Run `update-llama-paddock-agent` on the Ollama host, or re-run its installer. It installs the latest stable release; for a prerelease agent, pass its tag: `update-llama-paddock-agent v0.6.0-dev.2` |
-| Windows agent | Copy the new files and re-run `install.ps1` from the same account; see [Windows updates](agent-windows.md#settings-and-updates) |
+| Windows agent | Extract `llama-paddock-agent-windows.zip` from the new release and re-run `install.ps1` from the same account; see [Windows updates](agent-windows.md#settings-and-updates) |
 | Source | Update your checkout and repeat the [build steps](installation.md#from-source) |
 
 Installer updates keep configuration and existing agent tokens. Docker updates retain the data volume.
@@ -52,6 +52,9 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-pa
 |---|---|
 | Dashboard cannot reach Ollama | Check the URL from the dashboard host/container, the host firewall and `OLLAMA_HOST`. In Docker, `localhost` refers to the dashboard container. |
 | Models work but GPU stats, environment or logs do not | Check the agent URL and token, port 11435, and whether the agent is running. `/health` on the agent is unauthenticated; a successful health check does not verify the token. |
+| Agent: "it doesn't answer HTTPS" | The agent is older than 0.7.0. Update it, or use `http://` in the agent URL until then. |
+| Agent: "this agent only accepts HTTPS" | The agent runs with `PADDOCK_AGENT_HTTP=off`. Use **Switch to HTTPS** on the host's page, or `https://` in the agent URL. |
+| "The agent's key has changed" | The agent presented a different key than the pinned one, and the dashboard stopped calling it. If you replaced the key or reinstalled the agent, compare the presented fingerprint with the installer's output and accept it. See [encrypted agent connections](security.md#encrypted-agent-connections). |
 | Windows host disappears after signing out | Both the Ollama desktop app and agent logon task need the user's session. |
 | No GPU process memory on Windows | Consumer GPUs in WDDM mode do not expose per-process VRAM through `nvidia-smi`, so the process table can be empty. |
 | No AMD or Apple GPU cards | GPU collection currently uses `nvidia-smi`; AMD and Apple support are planned. |

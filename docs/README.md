@@ -4,7 +4,8 @@ How to install, configure, use and script llama-paddock. Start with [installing 
 
 <!-- The website builds its Docs section from this folder, and this page sets
 its sidebar: each ## heading is a group, and each list item that links to a
-page is an entry, in this order. Keep that format. -->
+page is an entry, in this order. Items indented under an entry are nested in a
+group named after it. Keep that format. -->
 
 ## Install
 
@@ -12,12 +13,17 @@ page is an entry, in this order. Keep that format. -->
 - [The agent on Linux](agent-linux.md): install, settings, firewall, updates and removal
 - [The agent on Windows](agent-windows.md): the logon task, firewall, settings and updates
 
+## Configure
+
+- [Configuration and login](configuration.md): `config.yaml`, environment variables, login and the data directory
+- [Security](security.md): what a login can do, exposing the dashboard, lockout, cross-site requests and agent tokens
+  - [Reverse proxies](proxy.md): the dashboard behind a proxy, and Ollama behind a proxy that checks a key
+- [Prometheus and Grafana](prometheus.md): the `/metrics` endpoint, its scrape token, the metric list and a Grafana dashboard
+
 ## Use
 
 - [Using the dashboard](usage.md): Monitor and History, Models, Environment, Logs and jobs
-- [Configuration and login](configuration.md): `config.yaml`, environment variables, login and the data directory
 - [Operations](operations.md): updates, backups, prereleases, uninstalling and troubleshooting
-- [Security](security.md): what a login can do, exposing the dashboard safely and reverse proxies
 
 ## Reference
 

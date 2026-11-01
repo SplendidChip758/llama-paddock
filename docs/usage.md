@@ -35,6 +35,8 @@ The Environment tab shows every common `OLLAMA_*` variable with a description, p
 - **Linux:** only the `Environment=` lines in `override.conf` are rewritten; other directives (`LimitNOFILE=`, `User=`, …) are kept. A timestamped `.bak` is written first (last 10 kept), then `daemon-reload` and a restart.
 - **Windows:** the user variables are updated, then the Ollama app is stopped and relaunched with the new values.
 
+When scripting environment changes, send the complete managed variable map: omitted variables on the allowlist are removed. The dashboard editor sends this full map for you. See the [API example](api.md#preserve-existing-environment-settings) to preserve existing settings.
+
 Only variables Ollama and its GPU runtimes read can be set from the dashboard: `OLLAMA_*`, `CUDA_VISIBLE_DEVICES`, `CUDA_DEVICE_ORDER`, `HIP_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`, `GPU_DEVICE_ORDINAL`, `HSA_OVERRIDE_GFX_VERSION`, `GGML_CUDA_ENABLE_UNIFIED_MEMORY` and the `HTTP_PROXY`, `HTTPS_PROXY` and `NO_PROXY` variables. Other names, such as `LD_PRELOAD`, could load code into Ollama, so a dashboard login must not be enough to set them. To manage another variable from the dashboard, add it to `PADDOCK_AGENT_ENV_ALLOW` in the agent's settings on that host ([Linux](agent-linux.md), [Windows](agent-windows.md#settings-and-updates)). A variable that is already set but not on the list is shown read-only and left as it is when you save.
 
 ![Environment tab](images/environment.png)
@@ -47,7 +49,7 @@ The Logs tab tails `journalctl -u ollama` on Linux, `server.log` on Windows, wit
 
 ## History and jobs
 
-Metric history and job state are stored in `paddock.db` in the [data directory](configuration.md#data-directory). The Monitor tab's sparklines show the last `history_points` polls and its History charts the longer ranges; the same data is available through the [history API](api.md#history).
+Metric history and job state are stored in `paddock.db` in the [data directory](configuration.md#data-directory). The Monitor tab's sparklines show the last `history_points` polls and its History charts the longer ranges; the same data is available through the [history API](api.md#history). The dashboard also records when Ollama and the agent go down or come back and when models are loaded or unloaded, along with the times it wasn't watching, through the [events API](api.md#events).
 
 Pulls and model creation run in the background and stay visible in the Jobs drawer across page refreshes. After a dashboard restart, running pulls resume if their host still exists. Running creates are marked interrupted; check the model list before trying again.
 

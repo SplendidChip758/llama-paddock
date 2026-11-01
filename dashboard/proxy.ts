@@ -32,6 +32,8 @@ function sameOrigin(req: NextRequest): boolean {
 export function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
   const isApi = pathname.startsWith("/api/");
+  // Prometheus can't sign in: the route checks its own scrape token (app/metrics/route.ts)
+  if (pathname === "/metrics") return NextResponse.next();
 
   if (isApi && req.method !== "GET" && req.method !== "HEAD" && !sameOrigin(req)) {
     return NextResponse.json({ detail: "cross-origin request refused" }, { status: 403 });

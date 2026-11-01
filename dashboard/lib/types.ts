@@ -57,6 +57,8 @@ export interface AgentStats {
   /** missing before 0.6.0; the dashboard then asks /health instead */
   version?: string;
   platform?: Platform;
+  /** SHA-256 of the agent's TLS key (agents from 0.7.0 on), missing when it can't serve HTTPS */
+  fingerprint?: string | null;
   system: SystemStats;
   nvidia: { available: boolean; error?: string; gpus: GpuStats[]; processes: GpuProcess[] };
   service: ServiceStatus;
@@ -99,6 +101,16 @@ export interface InstanceSnapshot {
   agent_url: string | null;
   has_agent: boolean;
   has_token: boolean;
+  /** https:// agents: the pinned key, SHA256:<base64>. null until the first connection pins it. */
+  agent_fingerprint: string | null;
+  /** The pin comes from config.yaml, so it can only be changed there. */
+  agent_fingerprint_in_config: boolean;
+  /** The key the agent presented instead of the pinned one. The dashboard stops calling the agent until it is accepted. */
+  agent_key_changed: string | null;
+  /** The key an http:// agent reports: it can serve HTTPS, and this is what to pin when switching. */
+  agent_https_fingerprint: string | null;
+  /** A key for the proxy in front of Ollama is stored. The key itself never leaves the server. */
+  has_ollama_proxy_key: boolean;
   /** "config": from config.yaml (read-only here); "ui": added in the dashboard. */
   source: "config" | "ui";
   ollama_ok: boolean;
@@ -124,7 +136,28 @@ export interface HistoryPoint {
   loaded: number;
 }
 
-export type JobState = "running" | "done" | "error" | "cancelled";
+/**
+ * A change the poller observed. Polls are periodic, so `t` is when a change was first seen, not
+ * when it happened: a model loaded and unloaded between two polls leaves no event at all.
+ */
+export interface HostEvent {
+  instance: string;
+  t: number;
+  /** ollama / agent: reachability changed (up). load / unload: a model appeared in or left /api/ps. */
+  kind: "ollama" | "agent" | "load" | "unload";
+  /** the first observation after a time in which this was unknown (a dashboard restart, a gap in polling, or Ollama
+   *  unreachable for model events), so it began at or before t */
+  first: boolean;
+  up?: boolean;
+  /** why ollama or agent is down */
+  error?: string;
+  model?: string;
+  digest?: string;
+  context_length?: number;
+  size_vram?: number;
+}
+
+export type JobState ="running" | "done" | "error" | "cancelled";
 
 export interface JobInfo {
   id: string;

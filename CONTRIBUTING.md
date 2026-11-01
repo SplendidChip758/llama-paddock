@@ -12,20 +12,73 @@ npm ci
 PADDOCK_DATA_DIR="$PWD/../data" npm run dev
 ```
 
-Open `http://localhost:8080`. The initial login is printed in the terminal unless you set `PADDOCK_PASSWORD`. Add a real or fake Ollama host when checking behavior. For deployment instructions, see the [documentation](docs/README.md); for source layout, see [Architecture](docs/architecture.md).
+Open `http://localhost:8080`. The initial login is printed in the terminal unless you set `PADDOCK_PASSWORD`. Add a real Ollama host, or use the [simulator](#simulated-hosts) when you don't have one. For deployment instructions, see the [documentation](docs/README.md); for source layout, see [Architecture](docs/architecture.md).
 
-There is no automated test suite. Before pushing, run the same checks as CI from the repository root:
+Before pushing, run the same checks as CI from the repository root:
 
 ```bash
-(cd dashboard && npm ci && npm run typecheck && npm run build)
+(cd dashboard && npm ci && npm run typecheck && npm run build && npm run test:scenarios)
 node --check agent/linux/paddock-agent.mjs
 node --check agent/windows/paddock-agent.mjs
 for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
 ```
 
-For behavior changes, also exercise the built dashboard against a real or fake Ollama/agent and describe what you ran in the PR. Keep the Linux and Windows agent APIs aligned. Update the relevant documentation and README entry points when adding settings, endpoints or behavior.
+For behavior changes, also exercise the built dashboard against a real or simulated Ollama/agent, add a [scenario test](#scenario-tests) when the simulator can show the behavior, and describe what you ran in the PR. Keep the Linux and Windows agent APIs aligned. Update the relevant documentation and README entry points when adding settings, endpoints or behavior.
 
 Read [AGENTS.md](AGENTS.md) and the area-specific rules it links before changing code. Never commit runtime data, tokens, passwords or private host details.
+
+### Simulated hosts
+
+`test/sim/paddock-sim.mjs` simulates Ollama hosts and their agents, so you can work on the dashboard without a GPU and make hosts fail on purpose. It's plain Node with no dependencies. Each host gets two ports, since the dashboard addresses hosts by URL: one serves the parts of Ollama's API the dashboard uses (`/api/version`, `/api/tags`, `/api/ps`, `/api/show`, a streamed and resumable `/api/pull`, `/api/create`, `/api/copy`, `/api/delete`, `/api/generate` for load/unload), the other the agent API (`/health`, `/stats` with changing GPU readings, `/env` with the agents' allowlist, `/service/restart`, `/logs`, bearer-token auth).
+
+```bash
+mkdir -p data/sim
+node test/sim/paddock-sim.mjs --hosts 3 --gpus 2,1,0 --write-config data/sim/config.yaml
+
+# in a second terminal
+cd dashboard
+PADDOCK_DATA_DIR="$PWD/../data/sim" PADDOCK_CONFIG="$PWD/../data/sim/config.yaml" npm run dev
+```
+
+Run the simulator from the repository root; it stays in the foreground until Ctrl+C. `--write-config` writes a `config.yaml` with the hosts' URLs, tokens and keys (`GET /_sim/config.yaml` returns the same). Ports start at `--base-port` (default 11700): the control API on the base port, then Ollama and agent for each host (`sim-1` on 11701 and 11702, `sim-2` on 11703 and 11704, …). Other options: `--agent-token`, `--ollama-key` (one key for every host, or per host: `key1,,key3`), `--pull-seconds` and `--bind`; `--help` lists them. Each also works as an env var, such as `PADDOCK_SIM_HOSTS=3`.
+
+The control API changes a host's behavior while everything runs:
+
+| Request | Does |
+|---|---|
+| `GET /_sim/hosts` | Every host: URLs, token, key, GPUs and current scenario |
+| `GET /_sim/hosts/<id>` | One host, plus its models, partial downloads, pull log and request counts |
+| `POST /_sim/hosts/<id>/scenario` | Change any of the fields below; the rest stay as they are |
+
+| Field | Values |
+|---|---|
+| `ollama` | `up`, `down` (port closed), `hang` (never answers), `error` (HTTP 500) |
+| `agent` | `up`, `down`, `hang`, `error`, `bad-token` (401 for every token) |
+| `pull` | `normal`, `stall` (stops making progress), `fail` (error line mid-stream), `drop` (connection cut mid-stream) |
+| `create` | `normal`, `stall`, `fail` |
+| `ollama_key`, `agent_token` | require a different key (or `null` for none) or token, like a rotated credential |
+| `pull_seconds`, `ollama_version`, `agent_version` | download speed; versions to report (`agent_version: null` leaves it out of `/stats`, like agents before 0.6.0) |
+
+```bash
+curl -X POST localhost:11700/_sim/hosts/sim-2/scenario -d '{"ollama":"down"}'
+curl -X POST localhost:11700/_sim/hosts/sim-1/scenario -d '{"pull":"fail","agent":"bad-token"}'
+```
+
+A pull that is cut off keeps its partial download in the simulator, and the next pull of that model resumes from it, as Ollama does.
+
+### Scenario tests
+
+`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, availability and model load events (including the gap a restart leaves), and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
+
+```bash
+cd dashboard
+npm run build
+npm run test:scenarios
+```
+
+They use `node:test` and need no dependencies. Ports come from 18100–18119 (dashboard) and 11700–11799 (simulator and agent); set `PADDOCK_TEST_DASHBOARD_PORTS` or `PADDOCK_TEST_SIM_PORTS` (for example `19000-19019`) if those are taken. `PADDOCK_TEST_VERBOSE=1` streams the processes' output and `PADDOCK_TEST_KEEP=1` keeps the temporary data directories. When a test fails, the dashboard's and simulator's recent output is printed after it.
+
+When you change how the dashboard reacts to a host, add or extend a scenario. If the agent API changes, update the simulator with it: the `real-agent` test compares their shapes.
 
 ## Start a change
 
@@ -173,4 +226,4 @@ On `dev` the same steps produce a prerelease instead: version `X.Y.Z-dev.N`, a G
 
 If nothing releasable landed (only `docs`, `chore`, `ci` and so on), the workflow exits without releasing.
 
-Release assets include `llama-paddock-dashboard-vX.Y.Z.tar.gz`, both agent scripts and `SHA256SUMS`. Runtime dependency and base-image updates from Dependabot use `fix(deps): …` so they ship in patch releases.
+Release assets include `llama-paddock-dashboard-vX.Y.Z.tar.gz`, both agent scripts, `llama-paddock-agent-windows.zip` (the Windows agent with its installer) and `SHA256SUMS`. Runtime dependency and base-image updates from Dependabot use `fix(deps): …` so they ship in patch releases.

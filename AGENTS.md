@@ -10,29 +10,32 @@ llama-paddock is a self-hosted dashboard for monitoring and managing a fleet of 
 | `agent/linux/paddock-agent.mjs` | Agent on each Linux Ollama host (systemd) | Plain Node, no dependencies, Node 18.15+ |
 | `agent/windows/paddock-agent.mjs` | Agent on Windows PCs (Scheduled Task) | Same HTTP API as the Linux agent. Change both together |
 | `install/*.sh` | One-liner installers (Proxmox LXC or local) | Served raw from the `main` and `dev` branches, not from releases: a merged change is live immediately |
-| `docs/` | User documentation, also built into the website's Docs section | Plain GitHub Markdown: each page starts with one `# Title` and links to other pages with relative `.md` paths. `docs/README.md` is the index and sets the website's sidebar |
+| `docs/` | User documentation, also built into the website's Docs section | Plain GitHub Markdown: each page starts with one `# Title` and links to other pages with relative `.md` paths. `docs/README.md` is the index and sets the website's sidebar: its `##` groups (Install, Configure, Use, Reference) and the entries under them, with indented entries nested |
+| `test/` | `sim/paddock-sim.mjs` (simulated Ollama hosts and agents) and `scenarios/` (`node:test` behaviour tests run in CI) | Plain Node, no dependencies |
 | `.github/workflows/` | `ci` (PR checks), `pr-title`, `release` (semantic-release) | |
 
 Runtime data (hosts added in the UI, login, `paddock.db`) lives in `PADDOCK_DATA_DIR`. Files there hold secrets: write them with mode 600.
 
 ## Checks
 
-There is no test suite. Before pushing, run what CI runs:
+Before pushing, run what CI runs:
 
 ```bash
-cd dashboard && npm ci && npm run typecheck && npm run build
+(cd dashboard && npm ci && npm run typecheck && npm run build && npm run test:scenarios)
 node --check agent/linux/paddock-agent.mjs && node --check agent/windows/paddock-agent.mjs
 for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
 ```
 
-Dev server: `cd dashboard && PADDOCK_DATA_DIR=../data npm run dev`. For behaviour changes, also run the build against a real or fake Ollama/agent and say in the PR what you ran.
+`test:scenarios` runs `test/scenarios/` with `node:test`: the built dashboard against simulated Ollama hosts and agents (`test/sim/paddock-sim.mjs`, no dependencies). For behaviour changes, add or extend a scenario there, and say in the PR what you ran.
+
+Dev server: `cd dashboard && PADDOCK_DATA_DIR=../data npm run dev`. Without a real Ollama host, run the simulator (CONTRIBUTING.md, Simulated hosts).
 
 ## Commit messages
 
 Releases are fully automated: semantic-release reads every commit message to pick the next version, so a wrong type ships a wrong version. **Read [.github/instructions/commit-message.instructions.md](.github/instructions/commit-message.instructions.md) before committing.** In short:
 
 - Conventional Commits: `<type>(<scope>): <summary>`, an imperative lowercase summary, and a body that says why.
-- `feat` bumps the minor version and `fix`/`perf` the patch version. `docs`, `chore`, `ci`, `build`, `refactor` don't release.
+- `feat` bumps the minor version and `fix`/`perf` the patch version. `docs`, `test`, `style`, `refactor`, `build`, `ci` and `chore` don't release.
 - **Never mark a change as breaking (`!`, `BREAKING CHANGE:`) unless the maintainer agrees.** 1.0.0 is cut deliberately, never as a side effect.
 - Never edit `CHANGELOG.md` or version fields by hand.
 
@@ -64,7 +67,7 @@ Keep the issue, its branch and its PR connected:
    Closing keywords in a PR only link it when the PR targets the default branch (`main`). Feature PRs target `dev`, so the linked branch is what connects them.
 2. **Set the project Status to `In Progress`** (`gh project item-edit`, project #6) when you start, and to **`In Review`** when you open the PR.
 3. **Put `Closes #<n>` in the commit body** and in the PR description. The commit carries it to `main`: when `dev` is merged to `main`, GitHub closes the issue and the project moves it to `Done`. A hotfix PR straight into `main` closes it on merge. Don't set `Done` by hand: the project's auto-close workflow would close the issue before the change is on `main`.
-4. **After the PR merges to `dev`:** tick the finished items in the issue's scope checklist, note anything left over, and leave the issue open and `In Review` until it reaches `main`.
+4. **After the PR merges to `dev`:** tick the finished items in the issue's scope checklist, note anything left over, and leave the issue open and `In Review` until it reaches `main`. Only releasing types get the `released on @dev` label, so a `test` or `docs` change has no label to show it's on `dev`. Set its Status anyway.
 
 ### The website shows the roadmap
 
@@ -92,6 +95,10 @@ The website's roadmap page is built from these issues and the project: each mile
   - GitHub milestone titles start with the same code (`M5: …`), or are exactly `Later`. A new milestone needs all three: the GitHub milestone, the table row and the section.
 
 Small fixes and docs don't need an issue.
+
+### Choosing what to work on
+
+Milestone numbers aren't a queue. Follow ROADMAP.md's **Delivery order**: finish M1, then M3 alerts and diagnostics, then the M4 core (users, scoped tokens, audit log, accessibility) before M5's update controls. [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) holds the 1.0 release checklist. Work that the checklist names comes before items marked as not blocking 1.0 (M2's advanced workbench, M4's wall display, PWA and themes, M5's Ollama updater, M6 to M8).
 
 ## Code conventions
 

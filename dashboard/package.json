@@ -1,6 +1,6 @@
 {
   "name": "llama-paddock",
-  "version": "0.6.0",
+  "version": "0.7.0-dev.7",
   "private": true,
   "engines": {
     "node": ">=22.13"
@@ -10,7 +10,8 @@
     "dev": "next dev -p 8080",
     "build": "next build",
     "start": "next start -p 8080",
-    "typecheck": "next typegen && tsc --noEmit"
+    "typecheck": "next typegen && tsc --noEmit",
+    "test:scenarios": "node --test --test-concurrency=1 --test-timeout=180000 \"../test/scenarios/*.test.mjs\""
   },
   "dependencies": {
     "next": "16.4.3",

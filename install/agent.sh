@@ -6,8 +6,12 @@
 # On a Proxmox VE host: lists your containers, you pick the Ollama LXC, and the
 # agent is installed inside it (via pct exec).
 # Inside the Ollama LXC/VM itself: installs the agent directly.
-# Re-running it updates the agent and keeps its token.
+# Re-running it updates the agent and keeps its token and key.
 # PADDOCK_UNINSTALL=1 removes it again (same as uninstall-llama-paddock-agent).
+#
+# The agent serves HTTPS with its own key; the installer prints the key's fingerprint
+# for the dashboard. New installs turn plain HTTP off (PADDOCK_AGENT_HTTP=off in the
+# env file). Updated installs keep it on until you switch the dashboard to https://.
 #
 # Options (environment variables):
 #   PADDOCK_VERSION      latest (default) | v1.2.3 | main  — which agent version to fetch
@@ -15,6 +19,7 @@
 #   PADDOCK_BRANCH       branch used when there is no release yet (default: main)
 #   PADDOCK_AGENT_TOKEN  reuse an existing token instead of generating one
 #   PADDOCK_AGENT_PORT   default 11435
+#   PADDOCK_AGENT_NEW_KEY=1  replace the agent's HTTPS key; accept the new one in the dashboard afterwards
 #   PADDOCK_OLLAMA_REMOTE  1 = let other machines reach Ollama (sets OLLAMA_HOST=0.0.0.0), 0 = leave it;
 #                        asked when interactive, unattended runs leave it alone unless set
 #   PADDOCK_CTID         Proxmox: container to install into (skips the prompt)
@@ -31,6 +36,9 @@ SELF_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/install/agent.sh"
 PREFIX=/opt/llama-paddock-agent
 ENV_FILE=/etc/llama-paddock-agent.env
 UNIT_FILE=/etc/systemd/system/llama-paddock-agent.service
+# the agent creates these on first start (its defaults for PADDOCK_AGENT_TLS_KEY / _CERT)
+TLS_KEY=/etc/llama-paddock-agent.key
+TLS_CERT=/etc/llama-paddock-agent.crt
 NODE_MIN="18.15"
 
 init_colors() {
@@ -121,11 +129,12 @@ proxmox_install() {
   pct exec "$CT_ID" -- env \
     PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_NESTED=1 PADDOCK_REPO="$REPO" PADDOCK_BRANCH="$BRANCH" PADDOCK_VERSION="$VERSION" \
     PADDOCK_AGENT_PORT="$AGENT_PORT" PADDOCK_AGENT_TOKEN="${PADDOCK_AGENT_TOKEN-}" PADDOCK_OLLAMA_REMOTE="$remote" \
+    PADDOCK_AGENT_NEW_KEY="${PADDOCK_AGENT_NEW_KEY-}" \
     bash -c "curl -fsSL '$SELF_URL' | bash"
 
   local ip; ip=$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}')
   echo
-  msg_ok "Agent installed in CT ${CT_ID}.  In the dashboard, Add host with agent URL http://${ip:-<ct-ip>}:${AGENT_PORT}"
+  msg_ok "Agent installed in CT ${CT_ID}.  In the dashboard, Add host with agent URL https://${ip:-<ct-ip>}:${AGENT_PORT} and the details above"
   echo "   Update later:  pct exec ${CT_ID} -- update-llama-paddock-agent"
   echo "   Uninstall:     pct exec ${CT_ID} -- uninstall-llama-paddock-agent"
 }
@@ -203,7 +212,7 @@ local_uninstall() {
   fi
   confirm "Remove the llama-paddock agent from $(hostname)?" n || die "cancelled, nothing was removed"
   systemctl disable --now llama-paddock-agent >/dev/null 2>&1 || true
-  rm -f "$UNIT_FILE" "$ENV_FILE" /usr/local/bin/update-llama-paddock-agent /usr/local/bin/uninstall-llama-paddock-agent
+  rm -f "$UNIT_FILE" "$ENV_FILE" "$TLS_KEY" "$TLS_CERT" /usr/local/bin/update-llama-paddock-agent /usr/local/bin/uninstall-llama-paddock-agent
   rm -rf "$PREFIX"
   systemctl daemon-reload 2>/dev/null || true
   msg_ok "Agent removed from $(hostname)"
@@ -217,12 +226,23 @@ write_uninstaller() {
     echo '#!/usr/bin/env bash'
     echo '# Remove the llama-paddock agent from this machine (written by install/agent.sh; PADDOCK_YES=1 skips the question)'
     echo 'set -euo pipefail'
-    declare -p PREFIX ENV_FILE UNIT_FILE
+    declare -p PREFIX ENV_FILE UNIT_FILE TLS_KEY TLS_CERT
     declare -f init_colors msg_info msg_ok msg_warn die confirm local_uninstall
     echo 'init_colors'
     echo 'local_uninstall'
   } > /usr/local/bin/uninstall-llama-paddock-agent
   chmod 755 /usr/local/bin/uninstall-llama-paddock-agent
+}
+
+# The agent's address on this machine: https:// unless it can't serve HTTPS (no key, or an old agent).
+# -k: it's the agent's own self-signed certificate, on the loopback interface.
+agent_local_url() {
+  local port; port=$(sed -n 's/^PADDOCK_AGENT_PORT=//p' "$ENV_FILE")
+  if curl -fsSk -o /dev/null "https://127.0.0.1:${port}/health" 2>/dev/null; then
+    echo "https://127.0.0.1:${port}"
+  else
+    echo "http://127.0.0.1:${port}"
+  fi
 }
 
 # Let the dashboard reach Ollama: set OLLAMA_HOST through the agent's own /env API, so the override
@@ -247,13 +267,13 @@ configure_ollama_host() {
     return 0
   fi
 
-  local port token api vars
-  port=$(sed -n 's/^PADDOCK_AGENT_PORT=//p' "$ENV_FILE"); token=$(sed -n 's/^PADDOCK_AGENT_TOKEN=//p' "$ENV_FILE")
-  api="http://127.0.0.1:${port}/env"
-  vars=$(curl -fsS -H "Authorization: Bearer $token" "$api" \
+  local token api vars
+  token=$(sed -n 's/^PADDOCK_AGENT_TOKEN=//p' "$ENV_FILE")
+  api="$(agent_local_url)/env"
+  vars=$(curl -fsSk -H "Authorization: Bearer $token" "$api" \
     | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const vars={...JSON.parse(s).managed,OLLAMA_HOST:"0.0.0.0"};console.log(JSON.stringify({vars,restart:true}))})') \
     || { msg_warn "could not read Ollama's settings from the agent; set OLLAMA_HOST=0.0.0.0 in the dashboard's Environment tab"; return 0; }
-  if curl -fsS -X PUT -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$vars" "$api" >/dev/null; then
+  if curl -fsSk -X PUT -H "Authorization: Bearer $token" -H 'Content-Type: application/json' -d "$vars" "$api" >/dev/null; then
     msg_ok "Ollama restarted with OLLAMA_HOST=0.0.0.0, reachable on port 11434"
   else
     msg_warn "could not set OLLAMA_HOST; set it to 0.0.0.0 in the dashboard's Environment tab"
@@ -295,10 +315,25 @@ PADDOCK_OVERRIDE_PATH=/etc/systemd/system/ollama.service.d/override.conf
 PADDOCK_DISK_PATHS=
 # extra variables the dashboard may set, comma separated; a trailing * allows a prefix
 # PADDOCK_AGENT_ENV_ALLOW=
+# HTTPS key and certificate; the agent creates them on first start (PADDOCK_AGENT_NEW_KEY=1 on the installer replaces them)
+PADDOCK_AGENT_TLS_KEY=$TLS_KEY
+PADDOCK_AGENT_TLS_CERT=$TLS_CERT
+# off: HTTPS only. "on" also serves plain HTTP, for dashboards before 0.7.0
+PADDOCK_AGENT_HTTP=off
 EOF
     chmod 600 "$ENV_FILE"
   else
     msg_ok "Keeping existing $ENV_FILE (token unchanged)"
+  fi
+
+  if [[ -n ${PADDOCK_AGENT_NEW_KEY-} ]]; then
+    local key cert
+    key=$(sed -n 's/^PADDOCK_AGENT_TLS_KEY=//p' "$ENV_FILE"); cert=$(sed -n 's/^PADDOCK_AGENT_TLS_CERT=//p' "$ENV_FILE")
+    # only the agent's own key: one you put in place yourself is yours to replace
+    [[ ${key:-$TLS_KEY} == "$TLS_KEY" && ${cert:-$TLS_CERT} == "$TLS_CERT" ]] \
+      || die "PADDOCK_AGENT_TLS_KEY/CERT in $ENV_FILE point to your own files; replace those yourself"
+    rm -f "$TLS_KEY" "$TLS_CERT"
+    msg_ok "Removed the agent's key; it makes a new one when it starts"
   fi
 
   sed "s#@NODE@#$(command -v node)#" "$tmp/llama-paddock-agent.service" > "$UNIT_FILE"
@@ -317,22 +352,43 @@ EOF
   systemctl enable llama-paddock-agent >/dev/null 2>&1
   systemctl restart llama-paddock-agent
   local ok=""
+  local port; port=$(sed -n 's/^PADDOCK_AGENT_PORT=//p' "$ENV_FILE")
   for _ in $(seq 1 10); do
-    curl -fsS "http://127.0.0.1:$(sed -n 's/^PADDOCK_AGENT_PORT=//p' "$ENV_FILE")/health" >/dev/null 2>&1 && { ok=1; break; }
+    { curl -fsSk "https://127.0.0.1:${port}/health" || curl -fsS "http://127.0.0.1:${port}/health"; } >/dev/null 2>&1 && { ok=1; break; }
     sleep 1
   done
   [[ -n $ok ]] && msg_ok "Agent is running" || msg_warn "Agent not answering yet — check: journalctl -u llama-paddock-agent"
   [[ -n $ok ]] && configure_ollama_host
 
-  local ip; ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  local ip fingerprint="" http_on=""
+  ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  [[ -n $ok ]] && fingerprint=$(curl -fsSk "https://127.0.0.1:${port}/health" 2>/dev/null \
+    | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).fingerprint||"")}catch{console.log("")}})') || true
+  grep -qi '^PADDOCK_AGENT_HTTP=off' "$ENV_FILE" || http_on=1
   echo
   echo "   ${C_B}Add this host in the dashboard${C_0} (Add host):"
   echo "     Ollama URL:   http://${ip:-<this-host>}:11434"
-  echo "     Agent URL:    http://${ip:-<this-host>}:${AGENT_PORT}"
+  if [[ -n $fingerprint ]]; then
+    echo "     Agent URL:    https://${ip:-<this-host>}:${port}"
+  else
+    echo "     Agent URL:    http://${ip:-<this-host>}:${port}"
+  fi
   if [[ -n $new_token ]]; then
     echo "     Agent token:  ${C_B}${new_token}${C_0}"
   else
     echo "     Agent token:  (unchanged — see PADDOCK_AGENT_TOKEN in $ENV_FILE)"
+  fi
+  if [[ -n $fingerprint ]]; then
+    echo "     Key fingerprint: ${C_B}${fingerprint}${C_0}"
+    if [[ -n ${PADDOCK_AGENT_NEW_KEY-} ]]; then
+      echo "   The key is new: the dashboard shows that it changed. Compare it with the fingerprint above, then accept it."
+    fi
+    if [[ -n $http_on ]]; then
+      echo "   This agent also serves plain HTTP, for dashboards that still use http://. Once the dashboard"
+      echo "   uses https:// (it offers the switch), set PADDOCK_AGENT_HTTP=off in $ENV_FILE and restart the agent."
+    fi
+  elif [[ -n $ok ]]; then
+    msg_warn "The agent serves plain HTTP only: it couldn't set up its HTTPS key. Check: journalctl -u llama-paddock-agent"
   fi
   echo
   echo "   Restrict port ${AGENT_PORT} to the dashboard host, e.g.:  ufw allow from <dashboard-ip> to any port ${AGENT_PORT} proto tcp"

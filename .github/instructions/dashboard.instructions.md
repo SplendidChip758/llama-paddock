@@ -32,4 +32,6 @@ Next.js 16 (App Router) + React 19 + TypeScript, built with `output: "standalone
 npm run typecheck && npm run build
 ```
 
-Dev server: `PADDOCK_DATA_DIR=../data npm run dev`. There's no test suite. For behaviour changes, also run the standalone build (`node .next/standalone/server.js`, after copying `.next/static`) against a real or fake Ollama and agent.
+Then `npm run test:scenarios`: the scenario tests in `test/scenarios/` run the standalone build against the simulator (`test/sim/paddock-sim.mjs`). When you change how the dashboard reacts to hosts, jobs or credentials, add or extend a scenario there.
+
+Dev server: `PADDOCK_DATA_DIR=../data npm run dev`, against a real Ollama host or the simulator (CONTRIBUTING.md, Simulated hosts).
