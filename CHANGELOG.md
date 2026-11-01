@@ -1,3 +1,9 @@
+## [0.7.0-dev.7](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.6...v0.7.0-dev.7) (2026-11-01)
+
+### Features
+
+* **agent-windows:** attach the windows agent as a zip to releases ([#102](https://github.com/SplendidChip758/llama-paddock/issues/102)) ([c19efa7](https://github.com/SplendidChip758/llama-paddock/commit/c19efa7dd94e591aec0a6bc3c71340eb80ac00c4))
+
 ## [0.7.0-dev.6](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.5...v0.7.0-dev.6) (2026-10-31)
 
 ### Features
