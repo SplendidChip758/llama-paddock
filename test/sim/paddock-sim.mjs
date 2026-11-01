@@ -472,8 +472,9 @@ const ollamaRoutes = {
 
 function ollamaAuthorized(h, req) {
   if (!h.ollamaKey) return true;
-  const m = /^Bearer\s+(.+)$/i.exec(req.headers.authorization ?? "");
-  return !!m && m[1].trim() === h.ollamaKey;
+  // a plain prefix check, as the agents do: a regex over the header can backtrack on crafted input
+  const a = req.headers.authorization ?? "";
+  return a.toLowerCase().startsWith("bearer ") && a.slice(7).trim() === h.ollamaKey;
 }
 
 async function handleOllama(h, req, res) {
