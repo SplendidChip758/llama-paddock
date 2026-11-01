@@ -40,7 +40,11 @@ The dashboard connects directly to Ollama for model management. Add the optional
 
 ## Quick start
 
-### Proxmox or Debian/Ubuntu
+Two pieces: the **dashboard**, installed once, and the optional **agent** on each Ollama host.
+
+### 1. Install the dashboard
+
+#### Proxmox or Debian/Ubuntu
 
 Run as root on a **Proxmox VE host** to create a dedicated dashboard LXC, or inside an existing **Debian/Ubuntu LXC or VM** to install there:
 
@@ -50,15 +54,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-pa
 
 Open the printed URL, sign in with the generated password, choose a new password, then **Add host** with your Ollama URL.
 
-For GPU and host stats, environment editing, restarts and logs, install the agent on each Ollama host. On Linux, run this on the Proxmox host (it asks which container) or inside the Ollama LXC/VM:
-
-```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/agent.sh)"
-```
-
-It prints the agent URL and token to enter under **Add host**. Details: [Linux agent](docs/agent-linux.md) · [Windows agent](docs/agent-windows.md).
-
-### Docker
+#### Docker
 
 ```bash
 git clone https://github.com/SplendidChip758/llama-paddock.git
@@ -73,6 +69,33 @@ docker compose up -d
 ```
 
 Open `http://<docker-host>:8080`, change the initial password, and **Add host**. The named data volume keeps hosts, login, history and job state across upgrades.
+
+### 2. Install the agent on each Ollama host
+
+The agent adds GPU and host stats, environment editing, restarts and logs. Without it, the dashboard still manages models. The installer prints the agent URL and token to enter under **Add host**.
+
+#### Linux
+
+Run this on the Proxmox host (it asks which container) or inside the Ollama LXC/VM:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/main/install/agent.sh)"
+```
+
+Details: [Linux agent](docs/agent-linux.md).
+
+#### Windows
+
+Needs Node.js 18.15 or newer (`winget install OpenJS.NodeJS.LTS`). Download the agent from the latest release, then run the installer from the account that runs Ollama, in an admin PowerShell to add the firewall rule:
+
+```powershell
+Invoke-WebRequest https://github.com/SplendidChip758/llama-paddock/releases/latest/download/llama-paddock-agent-windows.zip -OutFile llama-paddock-agent-windows.zip
+Expand-Archive llama-paddock-agent-windows.zip -DestinationPath . -Force
+cd llama-paddock-agent-windows
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -AllowFrom 192.168.30.0/24
+```
+
+Then set `OLLAMA_HOST` to `0.0.0.0:11434` in the dashboard's Environment tab, so the dashboard can reach Ollama. Details: [Windows agent](docs/agent-windows.md).
 
 ### Requirements
 
