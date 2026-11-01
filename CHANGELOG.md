@@ -1,3 +1,18 @@
+## [0.7.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.6.0...v0.7.0) (2026-11-01)
+
+### Features
+
+* **agent-windows:** attach the windows agent as a zip to releases ([#102](https://github.com/SplendidChip758/llama-paddock/issues/102)) ([c19efa7](https://github.com/SplendidChip758/llama-paddock/commit/c19efa7dd94e591aec0a6bc3c71340eb80ac00c4))
+* **dashboard:** add a Prometheus /metrics endpoint ([#94](https://github.com/SplendidChip758/llama-paddock/issues/94)) ([2cfe8a6](https://github.com/SplendidChip758/llama-paddock/commit/2cfe8a6d05f7c29cb6ca3e8cf6331009562daf17)), closes [#6](https://github.com/SplendidChip758/llama-paddock/issues/6)
+* **dashboard:** record host availability and model load events ([#100](https://github.com/SplendidChip758/llama-paddock/issues/100)) ([e56e3ff](https://github.com/SplendidChip758/llama-paddock/commit/e56e3ff6f3703997d810ca28d66831e787aad8a0)), closes [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) [#95](https://github.com/SplendidChip758/llama-paddock/issues/95)
+* **dashboard:** support Ollama instances that need an API key ([#93](https://github.com/SplendidChip758/llama-paddock/issues/93)) ([72daf5a](https://github.com/SplendidChip758/llama-paddock/commit/72daf5adc0caa6cb62df2cf416cdb2fc9aa4dc95)), closes [#5](https://github.com/SplendidChip758/llama-paddock/issues/5)
+* encrypt dashboard-to-agent traffic with TLS ([#101](https://github.com/SplendidChip758/llama-paddock/issues/101)) ([d4fc103](https://github.com/SplendidChip758/llama-paddock/commit/d4fc103ef9f2ab2c2bfbfffd6aff97bb25cc5f59)), closes [#68](https://github.com/SplendidChip758/llama-paddock/issues/68)
+
+### Bug Fixes
+
+* **dashboard:** call the Ollama key a proxy key and document proxy setups ([#97](https://github.com/SplendidChip758/llama-paddock/issues/97)) ([1f6cfbb](https://github.com/SplendidChip758/llama-paddock/commit/1f6cfbbe676c4d98d67da8dc664bc9f8bf39c8f0)), closes [#5](https://github.com/SplendidChip758/llama-paddock/issues/5)
+* **dashboard:** repair help links and clarify administration docs ([#99](https://github.com/SplendidChip758/llama-paddock/issues/99)) ([13912e8](https://github.com/SplendidChip758/llama-paddock/commit/13912e8d2333a99a2f437e27a9ce11f4da580ef6))
+
 ## [0.7.0-dev.7](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0-dev.6...v0.7.0-dev.7) (2026-11-01)
 
 ### Features
