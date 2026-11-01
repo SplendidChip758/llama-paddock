@@ -2,7 +2,8 @@
 # Conventional Commits since the last v* tag and, if any warrant a release:
 # bumps the version in the dashboard and agents, updates CHANGELOG.md, commits
 # that back to the branch, tags it and creates a GitHub release with the
-# dashboard tarball (used by install/dashboard.sh), both agents and SHA256SUMS.
+# dashboard tarball (used by install/dashboard.sh), both agents, a zip of the
+# Windows agent with its installer, and SHA256SUMS.
 # The docker jobs then publish that version's image to GHCR.
 # Config: .releaserc.json
 #

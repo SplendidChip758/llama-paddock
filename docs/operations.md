@@ -11,7 +11,7 @@ Back up your data before upgrading, especially when changing release channels.
 | Dashboard installer | Run `update-llama-paddock` inside its container/VM, or `pct exec <ctid> -- update-llama-paddock` from Proxmox |
 | Docker Compose | Run `docker compose pull` then `docker compose up -d` from the Compose directory |
 | Linux agent | Run `update-llama-paddock-agent` on the Ollama host, or re-run its installer. It installs the latest stable release; for a prerelease agent, pass its tag: `update-llama-paddock-agent v0.6.0-dev.2` |
-| Windows agent | Copy the new files and re-run `install.ps1` from the same account; see [Windows updates](agent-windows.md#settings-and-updates) |
+| Windows agent | Extract `llama-paddock-agent-windows.zip` from the new release and re-run `install.ps1` from the same account; see [Windows updates](agent-windows.md#settings-and-updates) |
 | Source | Update your checkout and repeat the [build steps](installation.md#from-source) |
 
 Installer updates keep configuration and existing agent tokens. Docker updates retain the data volume.

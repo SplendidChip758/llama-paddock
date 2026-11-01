@@ -4,7 +4,17 @@ The Windows agent runs in your session next to the Ollama desktop app and adds G
 
 Prerequisite: Node.js 18.15 or newer (`winget install OpenJS.NodeJS.LTS`).
 
-Copy [`agent/windows/`](../agent/windows/) to the PC, open PowerShell in that directory, and run the installer **from the account that runs Ollama**. Run it in an admin PowerShell if you want it to add the firewall rule:
+Every [release](https://github.com/SplendidChip758/llama-paddock/releases) has `llama-paddock-agent-windows.zip`: the agent, `install.ps1` and `uninstall.ps1`. Download and extract it on the PC:
+
+```powershell
+Invoke-WebRequest https://github.com/SplendidChip758/llama-paddock/releases/latest/download/llama-paddock-agent-windows.zip -OutFile llama-paddock-agent-windows.zip
+Expand-Archive llama-paddock-agent-windows.zip -DestinationPath . -Force
+cd llama-paddock-agent-windows
+```
+
+For a prerelease, download the zip from that release on the releases page instead. You can also copy [`agent/windows/`](../agent/windows/) from a clone of the repository.
+
+Then run the installer in that folder **from the account that runs Ollama**. Run it in an admin PowerShell if you want it to add the firewall rule:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1 -AllowFrom 192.168.30.0/24
@@ -42,6 +52,6 @@ Settings live in `%LOCALAPPDATA%\llama-paddock-agent\agent.json`. Environment va
 | `PADDOCK_DISK_PATHS` | empty | Extra drives or folders to report, comma-separated |
 | `PADDOCK_AGENT_ENV_ALLOW` | empty | Extra variables the dashboard may set, comma-separated; a trailing `*` allows a prefix (`HSA_*,MY_VAR`). See [Environment](usage.md#environment) |
 
-To update, copy the newer Windows agent files to the PC and re-run `install.ps1` from the same account. It keeps the existing `agent.json` and restarts the task. `-Token` and `-Port` initialize new configurations; they do not overwrite an existing file. `-NewKey` replaces the agent's HTTPS key; the dashboard then shows that the key changed, and you accept the new one there after comparing it with the installer's output. If you change the port in `agent.json`, also pass the matching `-Port` when re-running the installer so its firewall rule uses that port.
+To update, download and extract the zip from the newer release and re-run `install.ps1` from the same account. It keeps the existing `agent.json` and restarts the task. `-Token` and `-Port` initialize new configurations; they do not overwrite an existing file. `-NewKey` replaces the agent's HTTPS key; the dashboard then shows that the key changed, and you accept the new one there after comparing it with the installer's output. If you change the port in `agent.json`, also pass the matching `-Port` when re-running the installer so its firewall rule uses that port.
 
 The agent targets the standard Ollama desktop install, not an `ollama serve` process managed by NSSM or another Windows service wrapper. See [Troubleshooting](operations.md#troubleshooting) for firewall and GPU limitations.
