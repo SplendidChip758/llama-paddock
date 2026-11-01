@@ -84,6 +84,22 @@ export interface PsModel {
   context_length?: number;
 }
 
+/** See modelSplit() in lib/split.ts. */
+export interface ModelSplit {
+  /** gpu: all in VRAM · partial: some in system RAM, run by the CPU · cpu: none in VRAM ·
+   *  cloud: runs remotely · unknown: Ollama didn't report usable sizes */
+  state: "gpu" | "partial" | "cpu" | "cloud" | "unknown";
+  /** share of the model in VRAM, 0–100; null for cloud and unknown */
+  gpu_pct: number | null;
+  /** bytes in system RAM; null for cloud and unknown */
+  cpu_bytes: number | null;
+}
+
+/** An /api/ps entry as the dashboard serves it. */
+export interface LoadedModel extends PsModel {
+  split: ModelSplit;
+}
+
 export interface TagModel {
   name: string;
   model: string;
@@ -91,6 +107,11 @@ export interface TagModel {
   digest: string;
   modified_at: string;
   details?: ModelDetails;
+  /** cloud models: the model and host Ollama forwards requests to */
+  remote_model?: string;
+  remote_host?: string;
+  /** added by the dashboard: see isCloudModel() */
+  cloud?: boolean;
 }
 
 export interface InstanceSnapshot {
@@ -119,7 +140,7 @@ export interface InstanceSnapshot {
   agent_error: string | null;
   version: string | null;
   agent_version: string | null;
-  ps: PsModel[];
+  ps: LoadedModel[];
   stats: AgentStats | null;
   updated: number | null;
 }

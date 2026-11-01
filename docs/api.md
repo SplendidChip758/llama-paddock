@@ -41,6 +41,8 @@ Host fields are `name`, `ollama_url`, `ollama_proxy_key`, `agent_url`, `agent_to
 
 Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Likewise a blank or omitted `ollama_proxy_key` keeps the stored key; send `clear_ollama_proxy_key: true` to remove it. The 0.7.0 prereleases called it `ollama_api_key`, which is still accepted. Neither secret is ever returned: `/api/instances` reports `has_token` and `has_ollama_proxy_key` instead. Changing either endpoint or the token clears that host's metric history and events; changing only the proxy key, the agent URL's scheme or the pinned key keeps them.
 
+Each loaded model in `ps` (Ollama's `/api/ps` entry) also has `split`: `{state, gpu_pct, cpu_bytes}`. `state` is `gpu` (all in VRAM), `partial` (some in system RAM, run by the CPU), `cpu` (none in VRAM), `cloud` (an Ollama cloud model) or `unknown` (Ollama left out `size` or `size_vram`, or they don't add up). `gpu_pct` is the share in VRAM, 0–100, rounded and never 0 or 100 for `partial`; it and `cpu_bytes` are `null` for `cloud` and `unknown`. See [GPU/CPU split](usage.md#gpucpu-split).
+
 For agent encryption, `/api/instances` reports per host `agent_fingerprint` (the pinned key, or `null`), `agent_fingerprint_in_config`, `agent_key_changed` (the key the agent presented instead of the pinned one: the dashboard stops calling the agent until it's accepted) and `agent_https_fingerprint` (the key an `http://` agent reports, so it can be switched). See [encrypted agent connections](security.md#encrypted-agent-connections). Config-defined hosts cannot be updated or removed through the API (409); edit the YAML instead.
 
 ## History
@@ -94,7 +96,7 @@ Events follow `history_retention_days`. When an observed span is older than the 
 
 | Method | Path | Body / result |
 |---|---|---|
-| GET | `/api/instances/{id}/models` | Installed models from Ollama |
+| GET | `/api/instances/{id}/models` | Installed models from Ollama's `/api/tags`, each with `cloud`: `true` for an Ollama cloud model (Ollama reports `remote_host`, or the tag ends in `cloud`) |
 | POST | `/api/instances/{id}/models/show` | `{model}` → details, parsed parameters, system prompt and native context length |
 | POST | `/api/instances/{id}/models/pull` | `{model}` → background job |
 | POST | `/api/instances/{id}/models/create` | `{model, from, parameters?, system?}` → background job |

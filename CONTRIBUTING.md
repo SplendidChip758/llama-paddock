@@ -58,6 +58,9 @@ The control API changes a host's behavior while everything runs:
 | `create` | `normal`, `stall`, `fail` |
 | `ollama_key`, `agent_token` | require a different key (or `null` for none) or token, like a rotated credential |
 | `pull_seconds`, `ollama_version`, `agent_version` | download speed; versions to report (`agent_version: null` leaves it out of `/stats`, like agents before 0.6.0) |
+| `ps_size_vram` | `false` leaves `size_vram` out of `/api/ps`, so the GPU/CPU split is unknown |
+
+Loading a model with a `num_ctx` too large for the GPUs' free memory gives it a partial GPU/CPU split, and `options.num_gpu: 0` or a host without GPUs puts it all on the CPU. Pulling a name ending in `-cloud` or `:cloud` adds an Ollama cloud model, listed with `remote_host` and never shown as loaded.
 
 ```bash
 curl -X POST localhost:11700/_sim/hosts/sim-2/scenario -d '{"ollama":"down"}'
