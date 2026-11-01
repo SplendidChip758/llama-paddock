@@ -58,6 +58,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .pill { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 0 7px; border-radius: 999px; color: var(--muted); }
 .pill.live { background: var(--accent); color: var(--bg); }
+.pill.alert { background: var(--bad); color: var(--bg); }
+.jobsbtn.active { border-color: var(--accent); }
 
 .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
 .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
@@ -215,6 +217,18 @@ label.field > span { display: block; font-size: 12.5px; color: var(--muted); mar
 .job .top-line { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .job .status { font-size: 12.5px; color: var(--muted); margin: 4px 0 6px; font-family: var(--mono); word-break: break-word; }
 
+/* alerts */
+.alertlist { display: grid; }
+.alertline { display: flex; gap: 12px; align-items: flex-start; padding: 10px 2px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
+.alertline:last-child { border-bottom: none; }
+.alertline > .dot { margin-top: 6px; }
+.alertline .grow { flex: 1; min-width: 0; word-break: break-word; }
+.alertline a:hover { color: var(--accent2); }
+tr.off td { opacity: .55; }
+div.field { margin-bottom: 14px; }
+.fieldlabel { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 5px; }
+.hostpick { display: grid; gap: 6px; margin-top: 8px; padding: 10px 12px; background: var(--bg2); border-radius: 8px; font-size: 13px; }
+
 /* logs */
 pre.logs {
   background: var(--bg2); border: 1px solid var(--line); border-radius: var(--r); padding: 14px;
@@ -274,6 +288,7 @@ code { font-family: var(--mono); font-size: .92em; background: var(--panel2); pa
   .g2, .g3 { grid-template-columns: 1fr; }
   .envrow { grid-template-columns: 1fr; }
   .paramrow { grid-template-columns: 1fr; }
+  .alertline { flex-wrap: wrap; }
   .top { flex-wrap: wrap; padding: 10px 16px; justify-content: space-between; row-gap: 8px; }
   .instnav { order: 3; flex-basis: 100%; margin: 0 -4px; }
 }

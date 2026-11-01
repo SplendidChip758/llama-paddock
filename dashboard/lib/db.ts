@@ -4,7 +4,7 @@ import "server-only";
 import fs from "node:fs";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { dataDir, dataFile } from "./store";
-import type { HistoryPoint, HostEvent, JobInfo } from "./types";
+import type { AlertKind, AlertTransition, HistoryPoint, HostEvent, JobInfo } from "./types";
 
 const DB_FILE = "paddock.db";
 
@@ -51,6 +51,17 @@ const MIGRATIONS: string[] = [
     up INTEGER, error TEXT, model TEXT, digest TEXT, context_length INTEGER, size_vram INTEGER
   );
   CREATE INDEX events_instance_t ON events (instance, t);
+  `,
+  `
+  -- alert_transitions: alerts firing and resolving. The latest row per (rule, instance, subject) with
+  -- state = 'firing' is an alert that is still firing, so it carries on after a restart.
+  CREATE TABLE alert_transitions (
+    id INTEGER PRIMARY KEY, t REAL NOT NULL, rule TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
+    instance TEXT NOT NULL, subject TEXT NOT NULL, state TEXT NOT NULL, value REAL, detail TEXT NOT NULL,
+    flapping INTEGER NOT NULL
+  );
+  CREATE INDEX alert_transitions_key ON alert_transitions (rule, instance, subject, id);
+  CREATE INDEX alert_transitions_t ON alert_transitions (t);
   `,
 ];
 
@@ -211,6 +222,7 @@ export function deleteHistory(instance: string) {
     d.prepare("DELETE FROM gpu_samples WHERE instance = ?").run(instance);
     d.prepare("DELETE FROM observed WHERE instance = ?").run(instance);
     d.prepare("DELETE FROM events WHERE instance = ?").run(instance);
+    d.prepare("DELETE FROM alert_transitions WHERE instance = ?").run(instance);
   });
 }
 
@@ -249,6 +261,7 @@ export function maintainHistory(retentionDays: number, now = Date.now() / 1000) 
       d.prepare("DELETE FROM gpu_samples WHERE res = ? AND t < ?").run(res, cutoff);
     }
     trimEvents(d, Math.floor(now - retentionDays * DAY));
+    trimAlertTransitions(d, Math.floor(now - retentionDays * DAY));
   });
 }
 
@@ -417,6 +430,61 @@ export function eventHistory(instance: string, range: HistoryRange, hasAgent: bo
     initial,
     events: all.filter((e) => e.t >= from),
   };
+}
+
+// ============================================================================ alert transitions
+interface TransitionRow {
+  id: number; t: number; rule: string; name: string; kind: string; instance: string; subject: string;
+  state: string; value: number | null; detail: string; flapping: number;
+}
+
+const toTransition = (r: TransitionRow): AlertTransition => ({
+  id: r.id, t: r.t, rule: r.rule, name: r.name, kind: r.kind as AlertKind, instance: r.instance, subject: r.subject,
+  state: r.state as AlertTransition["state"], value: r.value, detail: r.detail, flapping: !!r.flapping,
+});
+
+/** Append transitions in one transaction; each gets its id here. */
+export function recordAlertTransitions(list: AlertTransition[]) {
+  if (!list.length) return;
+  tx((d) => {
+    const add = d.prepare(`INSERT INTO alert_transitions (t, rule, name, kind, instance, subject, state, value, detail, flapping)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const x of list) {
+      x.id = Number(add.run(x.t, x.rule, x.name, x.kind, x.instance, x.subject, x.state, x.value, x.detail, x.flapping ? 1 : 0).lastInsertRowid);
+    }
+  });
+}
+
+/** The latest transition of every alert whose latest transition is "firing": what was firing when the dashboard stopped. */
+export function firingAlerts(): AlertTransition[] {
+  const rows = db().prepare(`SELECT a.* FROM alert_transitions a
+    JOIN (SELECT max(id) AS id FROM alert_transitions GROUP BY rule, instance, subject) l ON l.id = a.id
+    WHERE a.state = 'firing'`).all() as unknown as TransitionRow[];
+  return rows.map(toTransition);
+}
+
+/** Firing transitions since `since`, for telling flapping alerts apart after a restart. */
+export function recentFirings(since: number): AlertTransition[] {
+  return (db().prepare("SELECT * FROM alert_transitions WHERE state = 'firing' AND t >= ? ORDER BY id").all(since) as unknown as TransitionRow[])
+    .map(toTransition);
+}
+
+/** Transitions in id order: after `after`, or else the latest `limit`. */
+export function alertTransitions(after: number | null, limit: number): AlertTransition[] {
+  const d = db();
+  const rows = after === null
+    ? (d.prepare("SELECT * FROM (SELECT * FROM alert_transitions ORDER BY id DESC LIMIT ?) ORDER BY id").all(limit) as unknown as TransitionRow[])
+    : (d.prepare("SELECT * FROM alert_transitions WHERE id > ? ORDER BY id LIMIT ?").all(after, limit) as unknown as TransitionRow[]);
+  return rows.map(toTransition);
+}
+
+/** Drop transitions past the retention, except the one that says an alert is still firing. */
+function trimAlertTransitions(d: DatabaseSync, cutoff: number) {
+  d.prepare(`DELETE FROM alert_transitions WHERE t < ? AND id NOT IN (
+    SELECT a.id FROM alert_transitions a
+    JOIN (SELECT max(id) AS id FROM alert_transitions GROUP BY rule, instance, subject) l ON l.id = a.id
+    WHERE a.state = 'firing'
+  )`).run(cutoff);
 }
 
 // ============================================================================ jobs

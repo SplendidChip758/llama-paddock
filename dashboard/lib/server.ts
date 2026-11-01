@@ -9,15 +9,13 @@ import {
 import {
   deleteHistory, deleteJobs, loadJobs, maintainHistory, recordObservations, recordSamples, saveJob, type ObservedSpan,
 } from "./db";
+import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
+import { HttpError } from "./http-error";
 import { withSplit } from "./split";
 import type { AgentStats, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, PsModel } from "./types";
 
 // ============================================================================ errors
-export class HttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}
+export { HttpError };
 
 export function json(body: unknown, status = 200) {
   return Response.json(body, { status });
@@ -64,6 +62,9 @@ class InstanceState {
   updated: number | null = null;
   /** what has been recorded in the events table for this host; see observe() */
   observed: Observation | null = null;
+  /** Ollama restarts started from the dashboard that are still running, and when the last one's effects should be over (ms) */
+  restarting = 0;
+  restart_settled = 0;
 
   constructor(public inst: Instance) {}
 
@@ -212,12 +213,15 @@ export function updateInstance(id: string, body: InstanceInput): Instance {
   if (moved) {
     p.instances.set(id, new InstanceState(inst));
     deleteHistory(id);
+    forgetAlerts(id, "the host's address or token was changed");
   } else if (
     inst.ollama_proxy_key !== prev.ollama_proxy_key || inst.agent_url !== prev.agent_url || inst.agent_fingerprint !== prev.agent_fingerprint
   ) {
     const next = new InstanceState(inst);
     // same server, so its observed span and events carry on
     next.observed = st.observed;
+    next.restarting = st.restarting;
+    next.restart_settled = st.restart_settled;
     p.instances.set(id, next);
   } else st.inst = inst;
   persistHosts(p);
@@ -230,6 +234,7 @@ export function removeInstance(id: string) {
   p.instances.delete(id);
   persistHosts(p);
   deleteHistory(id);
+  forgetAlerts(id, "the host was removed");
 }
 
 /** Accept the key an https:// agent presents now, e.g. after its key was replaced. */
@@ -277,6 +282,8 @@ export async function switchAgentToHttps(id: string): Promise<Instance> {
   if (p.instances.get(id) !== st) throw new HttpError(409, `${prev.name} was changed meanwhile; try again`);
   const fresh = new InstanceState(next);
   fresh.observed = st.observed;
+  fresh.restarting = st.restarting;
+  fresh.restart_settled = st.restart_settled;
   p.instances.set(id, fresh);
   persistHosts(p);
   return next;
@@ -493,6 +500,21 @@ export async function agent<T = any>(inst: Instance, method: string, path: strin
   return (await agentCall<T>(inst, method, path, body, timeoutMs)).data;
 }
 
+/** Run an Ollama restart asked for in the dashboard, so the alert rules don't take it for a crash. */
+export async function expectedRestart<T>(id: string, fn: () => Promise<T>): Promise<T> {
+  const st = getState(id);
+  st.restarting++;
+  try {
+    return await fn();
+  } finally {
+    // the host may have been edited meanwhile; the live state is the one the poller reads
+    const live = paddock().instances.get(id) ?? st;
+    live.restarting = Math.max(0, live.restarting - 1);
+    // a few polls for Ollama to come back and load again
+    live.restart_settled = Date.now() + (3 * paddock().settings.poll_interval + 10) * 1000;
+  }
+}
+
 // ============================================================================ poller
 const AGENT_VERSION_RECHECK_MS = 10 * 60_000;
 
@@ -597,6 +619,12 @@ function observe(st: InstanceState, gapAfter: number): { span: ObservedSpan; eve
   return { span: o.span, events };
 }
 
+const polledHost = (st: InstanceState): PolledHost => ({
+  id: st.inst.id, t: st.updated!, has_agent: !!st.inst.agent_url,
+  ollama_ok: st.ollama_ok, ollama_error: st.ollama_error, agent_ok: st.agent_ok, agent_error: st.agent_error,
+  stats: st.stats, ps: st.ps, restart_expected: st.restarting > 0 || Date.now() < st.restart_settled,
+});
+
 const MAINTAIN_EVERY_MS = 60_000;
 
 async function pollLoop(p: Paddock) {
@@ -617,6 +645,11 @@ async function pollLoop(p: Paddock) {
     // a poll that is late by a few intervals (plus slack for hosts that time out) is a gap in observation
     const gapAfter = 3 * p.settings.poll_interval + 30;
     const changes = observed.map((st) => observe(st, gapAfter));
+    try {
+      evaluateAlerts(observed.map(polledHost), [...p.instances.keys()], gapAfter);
+    } catch (e) {
+      console.error("[llama-paddock] evaluating alert rules failed:", e);
+    }
     try {
       recordObservations(changes.map((c) => c.span), changes.flatMap((c) => c.events));
     } catch (e) {

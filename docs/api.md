@@ -32,14 +32,14 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 | GET | `/api/instances/{id}/events` | Availability and model load events over a range; see [Events](#events) |
 | POST | `/api/instances` | Host fields below → `{id}` (201) |
 | PUT | `/api/instances/{id}` | Host fields below → `{id}` |
-| DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history and events |
+| DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history, events and alert transitions; its firing alerts resolve |
 | POST | `/api/test-connection` | Host fields plus optional existing `id` → separate `ollama` and `agent` results; `agent.fingerprint` is the key the agent presented (`https://`) or reports (`http://`) |
 | POST | `/api/instances/{id}/agent-key` | `{fingerprint}` → pins that key for an `https://` agent, e.g. after its key was replaced; 409 when `config.yaml` sets it |
 | POST | `/api/instances/{id}/agent-https` | Switches a UI host's `http://` agent URL to `https://`, pinning the key the agent reports → `{id, agent_url, agent_fingerprint}`; 409 for `config.yaml` hosts or agents that don't report a key |
 
 Host fields are `name`, `ollama_url`, `ollama_proxy_key`, `agent_url`, `agent_token`, `agent_fingerprint` and `tags`. `agent_fingerprint` applies to `https://` agent URLs: `SHA256:<base64>` as the agent installer prints it (bare base64 and hex are accepted too). Blank pins the key the agent presents on the first connection; omitted keeps the stored pin. `ollama_url` is required. `tags` accepts an array or comma-separated string. Use the ID returned by creation or listed in `/api/instances` in later requests.
 
-Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Likewise a blank or omitted `ollama_proxy_key` keeps the stored key; send `clear_ollama_proxy_key: true` to remove it. The 0.7.0 prereleases called it `ollama_api_key`, which is still accepted. Neither secret is ever returned: `/api/instances` reports `has_token` and `has_ollama_proxy_key` instead. Changing either endpoint or the token clears that host's metric history and events; changing only the proxy key, the agent URL's scheme or the pinned key keeps them.
+Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Likewise a blank or omitted `ollama_proxy_key` keeps the stored key; send `clear_ollama_proxy_key: true` to remove it. The 0.7.0 prereleases called it `ollama_api_key`, which is still accepted. Neither secret is ever returned: `/api/instances` reports `has_token` and `has_ollama_proxy_key` instead. Changing either endpoint or the token clears that host's metric history, events and alert transitions; changing only the proxy key, the agent URL's scheme or the pinned key keeps them.
 
 Each loaded model in `ps` (Ollama's `/api/ps` entry) also has `split`: `{state, gpu_pct, cpu_bytes}`. `state` is `gpu` (all in VRAM), `partial` (some in system RAM, run by the CPU), `cpu` (none in VRAM), `cloud` (an Ollama cloud model) or `unknown` (Ollama left out `size` or `size_vram`, or they don't add up). `gpu_pct` is the share in VRAM, 0–100, rounded and never 0 or 100 for `partial`; it and `cpu_bytes` are `null` for `cloud` and `unknown`. See [GPU/CPU split](usage.md#gpucpu-split).
 
@@ -91,6 +91,30 @@ Available points depend on how long the dashboard has collected data and the [re
 Events are observations, not exact usage. `t` is the poll in which a change was first seen, so it happened since the previous poll, and a model that was loaded and unloaded between two polls leaves no event. `first: true` marks the first observation after a time in which the state was unknown: after a dashboard restart or a gap in polling, and for models once Ollama is reachable again. That state began at or before `t`. While Ollama is unreachable, its loaded models are unknown, so there are no unload events for them. A model whose digest or context changes is recorded as an unload and a load, because Ollama loaded it again.
 
 Events follow `history_retention_days`. When an observed span is older than the retention, the state at the cutoff is kept as `first` events, so a long span still starts with a known state.
+
+## Alerts
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/alerts` | `{active, store_error}`: alerts that are pending or firing, and the last error saving transitions (`null` when fine) |
+| GET | `/api/alerts/rules` | `{rules}` |
+| PUT | `/api/alerts/rules` | `{rules}` → `{rules}`; replaces the whole list. Rules left out are deleted, and their firing alerts resolve |
+| GET | `/api/alerts/transitions?after=…&limit=…` | `{transitions}` in order: alerts firing and resolving after the transition id `after`, or else the latest `limit` (1–1000, default 200) |
+
+A rule is `{id, name, kind, enabled, threshold, for_s, clear_s, hosts}`:
+
+| Field | Meaning |
+|---|---|
+| `id` | Letters, digits, `_`, `.` or `-`. Omit it for a new rule to get one made from the name. Keep it when editing: alerts belong to the rule's ID |
+| `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable` or `ollama_crash`; see [Alerts](alerts.md#rules) |
+| `threshold` | Above 0, at most 150 for `gpu_temp` and 100 for the percentages; `null` for the kinds without one |
+| `for_s`, `clear_s` | Whole seconds, 0 to 86400: how long the condition has to hold before firing, and be gone before resolving |
+| `hosts` | Host IDs, or `null` for every host including ones added later |
+| `enabled` | `false` keeps the rule without checking it |
+
+An active alert is `{rule, name, kind, instance, subject, state, since, fired_at, value, detail, unknown, flapping}`. `subject` tells apart several alerts of one rule on a host: `gpu0`, `gpu1`, … for GPUs, the path for disks, empty otherwise. `state` is `pending` (the condition holds, but not yet for `for_s`) or `firing`. `since` is when the condition was first seen and `fired_at` when it fired. `unknown: true` means the last poll had no data for it, so it can neither fire nor resolve until data comes back; see [Missing data](alerts.md#missing-data). `value` is the reading in the threshold's unit, or `null`.
+
+A transition is `{id, t, rule, name, kind, instance, subject, state, value, detail, flapping}` with `state` `firing` or `resolved`. The rule's name and kind are copied, so they stay readable after the rule changes. Poll with `after` set to the last `id` you saw to follow new transitions. Transitions follow `history_retention_days`, except the latest one of an alert that is still firing.
 
 ## Models and jobs
 

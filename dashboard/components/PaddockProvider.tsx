@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "@/lib/format";
-import type { InstanceSnapshot, JobInfo } from "@/lib/types";
+import type { ActiveAlert, InstanceSnapshot, JobInfo } from "@/lib/types";
 
 interface Toast {
   id: number;
@@ -29,6 +29,10 @@ interface Ctx {
   setJobsOpen: (open: boolean) => void;
   /** Bumped when a pull/create job finishes, so model lists can reload. */
   jobsDoneTick: number;
+  /** firing and pending alerts, refreshed with the fleet */
+  alerts: ActiveAlert[];
+  /** saving alert transitions failed: firing alerts may not survive a dashboard restart */
+  alertsStoreError: string | null;
 }
 
 const PaddockCtx = createContext<Ctx | null>(null);
@@ -48,6 +52,8 @@ export function PaddockProvider({ children }: { children: ReactNode }) {
   const [jobsOpen, setJobsOpen] = useState(false);
   const [jobsDoneTick, setJobsDoneTick] = useState(0);
   const [me, setMe] = useState<Me | null>(null);
+  const [alerts, setAlerts] = useState<ActiveAlert[]>([]);
+  const [alertsStoreError, setAlertsStoreError] = useState<string | null>(null);
   const seenDone = useRef<Set<string> | null>(null);
   const toastId = useRef(0);
   const pollRef = useRef(3);
@@ -60,9 +66,16 @@ export function PaddockProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshInstances = useCallback(async () => {
-    const d = await api<{ poll_interval: number; instances: InstanceSnapshot[] }>("/api/instances");
+    const [d, a] = await Promise.all([
+      api<{ poll_interval: number; instances: InstanceSnapshot[] }>("/api/instances"),
+      api<{ active: ActiveAlert[]; store_error: string | null }>("/api/alerts").catch(() => null),
+    ]);
     setPollInterval(d.poll_interval);
     setInstances(d.instances);
+    if (a) {
+      setAlerts(a.active);
+      setAlertsStoreError(a.store_error);
+    }
     setLoaded(true);
   }, []);
 
@@ -113,7 +126,7 @@ export function PaddockProvider({ children }: { children: ReactNode }) {
   }, [refreshJobs]);
 
   return (
-    <PaddockCtx.Provider value={{ instances, refreshInstances, me, loaded, pollInterval, jobs, refreshJobs, toast, jobsOpen, setJobsOpen, jobsDoneTick }}>
+    <PaddockCtx.Provider value={{ instances, refreshInstances, me, loaded, pollInterval, jobs, refreshJobs, toast, jobsOpen, setJobsOpen, jobsDoneTick, alerts, alertsStoreError }}>
       {children}
       <div className="toasts">
         {toasts.map((t) => (
