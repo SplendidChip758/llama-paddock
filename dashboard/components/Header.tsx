@@ -7,6 +7,7 @@ import { JobsDrawer } from "./JobsDrawer";
 import { statusOf } from "./ui";
 import { Logo } from "./Logo";
 import { api } from "@/lib/format";
+import { loudAlerts } from "./AlertBits";
 
 export function Header({ version }: { version: string }) {
   const pre = version.includes("-");
@@ -16,7 +17,8 @@ export function Header({ version }: { version: string }) {
   const currentId = m ? decodeURIComponent(m[1]) : null;
   const tab = m?.[2] ?? "monitor";
   const running = jobs.filter((j) => j.state === "running").length;
-  const firing = alerts.filter((a) => a.state === "firing").length;
+  // silenced and acknowledged alerts still show on the Alerts page, but don't call for attention
+  const firing = loudAlerts(alerts).length;
 
   return (
     <>
