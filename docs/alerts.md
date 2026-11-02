@@ -80,10 +80,22 @@ Each channel sends its messages one at a time, in order. A message that fails is
 The channel list shows when each channel last sent a message, or why the last one failed. Messages still waiting when the dashboard stops are lost; the alert itself is recorded either way.
 
 Webhook URLs, tokens and SMTP passwords work like passwords. They are stored in `alert-channels.json` (mode 600) and never shown again: leave the field blank when editing to keep the stored one.
+## Silences
+
+A silenced alert still shows on the Alerts page and is still recorded, but it doesn't count toward the header's and the hosts' alert badges. On an active alert:
+
+- **Acknowledge** silences it until it resolves. The next time it fires, it's a new alert.
+- **Silence for…** silences it for an hour, 8 hours, a day or 7 days, including if it resolves and fires again in that time.
+
+**Silence host for…** on a host's page silences every alert on that host for a while, for maintenance. The **Silences** list on the Alerts page shows what is silenced and until when; **End** stops a silence early. Silences are kept in `paddock.db`, so they survive a restart, and end by themselves when their time is up.
+
+## History
+
+**History** on the Alerts page lists alerts that fired, newest first, with when each fired and resolved and how long it lasted; filter it by host. A host's **N alerts** badge on the overview opens it filtered to that host. It covers the transitions kept for `history_retention_days`.
 
 ## Where rules and alerts are stored
 
-Rules are saved in `alert-rules.json` in the [data directory](configuration.md#data-directory) when you first change them. Until then the built-in defaults apply. Each alert firing and resolving is recorded in `paddock.db`, kept for `history_retention_days` like the other history; an alert that is still firing keeps its record however old it is.
+Rules are saved in `alert-rules.json` in the [data directory](configuration.md#data-directory) when you first change them. Until then the built-in defaults apply. Each alert firing and resolving, and each silence, is recorded in `paddock.db`, kept for `history_retention_days` like the other history; an alert that is still firing keeps its record however old it is.
 
 If saving to `paddock.db` fails, the Alerts page says so. Alerts keep working, but a restart may forget which ones were firing.
 

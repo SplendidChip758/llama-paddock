@@ -218,6 +218,57 @@ export interface ActiveAlert {
   unknown: boolean;
   /** fired repeatedly in a short time; it now has to stay clear longer before it resolves */
   flapping: boolean;
+  /** a silence or acknowledgement that matches it: it still shows and is recorded, but isn't counted or sent */
+  silence: AlertSilence | null;
+}
+
+/** One stretch of a timeline. unobserved: the dashboard wasn't polling; unknown: polled, but not yet seen either way. */
+export interface AvailabilitySegment {
+  start: number;
+  end: number;
+  state: "up" | "down" | "unknown" | "unobserved";
+  /** down: why, as the poll that saw it go down reported */
+  error?: string;
+}
+
+/** Ollama's or the agent's availability over a range. Only observed time counts: up_pct is up / (up + down). */
+export interface Availability {
+  up_pct: number | null;
+  up_s: number;
+  down_s: number;
+  unknown_s: number;
+  unobserved_s: number;
+  segments: AvailabilitySegment[];
+  /** the down segments, newest first; ongoing: still down at the last poll */
+  outages: { start: number; end: number; error: string | null; ongoing: boolean }[];
+}
+
+export interface HostAvailability {
+  range: string;
+  from: number;
+  to: number;
+  /** share of the range the dashboard was polling the host */
+  coverage: number;
+  ollama: Availability;
+  /** null for a host without an agent */
+  agent: Availability | null;
+}
+
+/**
+ * Alerts muted for a while. rule, instance and subject say what it matches; null matches anything,
+ * so a silence with only `instance` covers a whole host (maintenance).
+ */
+export interface AlertSilence {
+  id: number;
+  created: number;
+  rule: string | null;
+  instance: string | null;
+  subject: string | null;
+  /** unix seconds; null for an acknowledgement */
+  until: number | null;
+  /** an acknowledgement: lasts until its alert resolves */
+  until_resolved: boolean;
+  note: string;
 }
 
 /** An alert starting or ending. Rule name and kind are copied, since rules can change later. */

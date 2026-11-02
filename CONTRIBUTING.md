@@ -82,7 +82,7 @@ The control API also receives webhooks, for trying [notification channels](docs/
 
 ### Scenario tests
 
-`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, availability and model load events (including the gap a restart leaves), alert rules (durations, firing and resolving, flapping, unreachable hosts, crashes, missing observations and restarts), notification channels (webhook, Discord, Slack and email messages, per-rule channels, retries, secrets), and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
+`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, availability and model load events (including the gap a restart leaves), alert rules (durations, firing and resolving, flapping, unreachable hosts, crashes, missing observations and restarts), alert silences and acknowledgements, notification channels (webhook, Discord, Slack and email messages, per-rule channels, retries, secrets), availability timelines (outages, unobserved gaps), and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
 
 ```bash
 cd dashboard
