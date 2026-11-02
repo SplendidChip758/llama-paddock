@@ -71,9 +71,18 @@ curl -X POST localhost:11700/_sim/hosts/sim-1/scenario -d '{"pull":"fail","agent
 
 A pull that is cut off keeps its partial download in the simulator, and the next pull of that model resumes from it, as Ollama does.
 
+The control API also receives webhooks, for trying [notification channels](docs/alerts.md#notifications) without Discord or Slack: point a Webhook, Discord or Slack channel at `http://localhost:11700/_sim/webhook/<name>` (any name). The simulator logs each message's summary.
+
+| Endpoint | Does |
+|---|---|
+| `POST /_sim/webhook/<name>` | Records the message; 204 |
+| `GET /_sim/webhook/<name>` | `{received: [{t, headers, body}]}` |
+| `POST /_sim/webhook/<name>/fail` | `{status, times, retry_after}`: answer the next `times` messages (default 1) with that error status, and a `Retry-After` header if given |
+| `DELETE /_sim/webhook/<name>` | Forgets what was received and any failures still set |
+
 ### Scenario tests
 
-`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, availability and model load events (including the gap a restart leaves), alert rules (durations, firing and resolving, flapping, unreachable hosts, crashes, missing observations and restarts), alert silences and acknowledgements, availability timelines (outages, unobserved gaps), and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
+`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, availability and model load events (including the gap a restart leaves), alert rules (durations, firing and resolving, flapping, unreachable hosts, crashes, missing observations and restarts), alert silences and acknowledgements, notification channels (webhook, Discord, Slack and email messages, per-rule channels, retries, secrets), availability timelines (outages, unobserved gaps), and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
 
 ```bash
 cd dashboard
