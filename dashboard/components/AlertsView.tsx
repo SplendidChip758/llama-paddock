@@ -4,13 +4,15 @@ import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, fmtDur } from "@/lib/format";
 import { ALERT_KINDS, DEFAULT_CLEAR_S, durText, parseDur, subjectText } from "@/lib/rules";
-import type { ActiveAlert, AlertKind, AlertRule } from "@/lib/types";
+import type { ActiveAlert, AlertKind, AlertRule, NotifyChannel } from "@/lib/types";
+import { ChannelsSection } from "./ChannelsSection";
 import { usePaddock } from "./PaddockProvider";
 import { Drawer } from "./ui";
 
 export function AlertsView() {
   const { alerts, alertsStoreError, instances, toast } = usePaddock();
   const [rules, setRules] = useState<AlertRule[] | null>(null);
+  const [channels, setChannels] = useState<NotifyChannel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // index into rules, or "new"
   const [editing, setEditing] = useState<number | "new" | null>(null);
@@ -18,7 +20,12 @@ export function AlertsView() {
 
   const load = useCallback(async () => {
     try {
-      setRules((await api<{ rules: AlertRule[] }>("/api/alerts/rules")).rules);
+      const [r, c] = await Promise.all([
+        api<{ rules: AlertRule[] }>("/api/alerts/rules"),
+        api<{ channels: NotifyChannel[] }>("/api/alerts/channels"),
+      ]);
+      setRules(r.rules);
+      setChannels(c.channels);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -45,6 +52,11 @@ export function AlertsView() {
   };
 
   const hostName = (id: string) => instances.find((i) => i.id === id)?.name ?? id;
+  const notifyText = (r: AlertRule) => {
+    if (r.channels == null) return channels?.length ? <span className="faint">all channels</span> : <span className="faint">no channels yet</span>;
+    if (!r.channels.length) return <span className="faint">dashboard only</span>;
+    return r.channels.map((id) => channels?.find((c) => c.id === id)?.name ?? `${id} (deleted)`).join(", ");
+  };
   const firing = alerts.filter((a) => a.state === "firing");
   const pending = alerts.filter((a) => a.state === "pending");
 
@@ -89,7 +101,7 @@ export function AlertsView() {
             <div className="tablewrap">
               <table>
                 <thead>
-                  <tr><th>On</th><th>Rule</th><th>Condition</th><th>Hosts</th><th /></tr>
+                  <tr><th>On</th><th>Rule</th><th>Condition</th><th>Hosts</th><th>Notify</th><th /></tr>
                 </thead>
                 <tbody>
                   {rules.map((r, i) => (
@@ -102,6 +114,7 @@ export function AlertsView() {
                       <td><b>{r.name}</b><div className="faint" style={{ fontSize: 12 }}>{ALERT_KINDS[r.kind].label}</div></td>
                       <td>{conditionText(r)}</td>
                       <td>{r.hosts ? r.hosts.map(hostName).join(", ") : <span className="faint">all hosts</span>}</td>
+                      <td>{notifyText(r)}</td>
                       <td>
                         <div className="actions">
                           <button className="btn sm" onClick={() => setEditing(i)}>Edit</button>
@@ -120,9 +133,12 @@ export function AlertsView() {
         </div>
       </div>
 
+      <ChannelsSection channels={channels} onSaved={setChannels} />
+
       {editing !== null && rules && (
         <RuleEditor
           rule={editing === "new" ? undefined : rules[editing]}
+          channels={channels ?? []}
           busy={busy}
           onClose={() => setEditing(null)}
           onSave={async (r) => {
@@ -171,8 +187,9 @@ function AlertLine({ a, host }: { a: ActiveAlert; host: string }) {
   );
 }
 
-function RuleEditor({ rule, busy, onClose, onSave, onDelete }: {
+function RuleEditor({ rule, channels, busy, onClose, onSave, onDelete }: {
   rule?: AlertRule;
+  channels: NotifyChannel[];
   busy: boolean;
   onClose: () => void;
   onSave: (r: AlertRule) => void;
@@ -188,6 +205,8 @@ function RuleEditor({ rule, busy, onClose, onSave, onDelete }: {
   const [allHosts, setAllHosts] = useState(!rule?.hosts);
   const [hosts, setHosts] = useState<string[]>(rule?.hosts ?? []);
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
+  const [allChannels, setAllChannels] = useState(rule?.channels == null);
+  const [chosen, setChosen] = useState<string[]>(rule?.channels ?? []);
   const forS = parseDur(forText);
   const clearS = parseDur(clearText);
 
@@ -210,6 +229,7 @@ function RuleEditor({ rule, busy, onClose, onSave, onDelete }: {
       threshold: info.unit ? Number(threshold) : null,
       for_s: forS ?? -1, clear_s: clearS ?? -1,
       hosts: allHosts ? null : hosts,
+      channels: allChannels ? null : chosen,
     });
   };
 
@@ -277,6 +297,26 @@ function RuleEditor({ rule, busy, onClose, onSave, onDelete }: {
               {!choices.length && <div className="hint">No hosts yet.</div>}
             </div>
           )}
+        </div>
+
+        <div className="field">
+          <span className="fieldlabel">Notify</span>
+          <label className="row hint" style={{ gap: 6, marginTop: 0 }}>
+            <input type="checkbox" checked={allChannels} onChange={(e) => setAllChannels(e.target.checked)} /> Every channel, including ones added later
+          </label>
+          {!allChannels && (
+            <div className="hostpick">
+              {[...channels.map((c) => ({ id: c.id, name: c.name })), ...chosen.filter((id) => !channels.some((c) => c.id === id)).map((id) => ({ id, name: `${id} (deleted)` }))].map((c) => (
+                <label key={c.id} className="row" style={{ gap: 6 }}>
+                  <input type="checkbox" checked={chosen.includes(c.id)}
+                    onChange={(e) => setChosen(e.target.checked ? [...chosen, c.id] : chosen.filter((x) => x !== c.id))} />
+                  {c.name}
+                </label>
+              ))}
+              <div className="hint">{chosen.length ? "" : "None chosen: the alert only shows in the dashboard."}</div>
+            </div>
+          )}
+          {!channels.length && <div className="hint">No channels yet: add one under Notifications on this page.</div>}
         </div>
 
         <label className="row hint" style={{ gap: 6, marginBottom: 14 }}>

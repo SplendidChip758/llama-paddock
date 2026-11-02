@@ -194,6 +194,8 @@ export interface AlertRule {
   clear_s: number;
   /** host ids, or null for every host, including ones added later */
   hosts: string[] | null;
+  /** notification channel ids, or null for every channel, including ones added later. Missing before 0.8.0: every channel */
+  channels?: string[] | null;
 }
 
 /**
@@ -231,6 +233,41 @@ export interface AlertTransition {
   value: number | null;
   detail: string;
   flapping: boolean;
+}
+
+export type ChannelType = "webhook" | "discord" | "slack" | "email";
+
+/** A notification channel as the API returns it. Secrets (URLs, tokens, passwords) never leave the server. */
+export interface NotifyChannel {
+  id: string;
+  name: string;
+  type: ChannelType;
+  enabled: boolean;
+  /** also send a message when an alert resolves */
+  send_resolved: boolean;
+  /** webhook, discord, slack: the URL with everything after the host hidden */
+  url_hint: string | null;
+  /** webhook: a bearer token is set */
+  has_token: boolean;
+  email: {
+    host: string;
+    port: number;
+    security: "tls" | "starttls" | "none";
+    username: string | null;
+    has_password: boolean;
+    from: string;
+    to: string[];
+  } | null;
+  status: ChannelStatus;
+}
+
+/** How deliveries to a channel have gone since the dashboard started. */
+export interface ChannelStatus {
+  last_ok: number | null;
+  last_error: string | null;
+  last_error_at: number | null;
+  /** messages waiting to be sent, retries included */
+  queued: number;
 }
 
 export type JobState ="running" | "done" | "error" | "cancelled";

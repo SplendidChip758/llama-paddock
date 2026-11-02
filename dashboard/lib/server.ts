@@ -11,6 +11,7 @@ import {
 } from "./db";
 import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
 import { HttpError } from "./http-error";
+import { startNotifications } from "./notify";
 import { withSplit } from "./split";
 import type { AgentStats, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, PsModel } from "./types";
 
@@ -118,6 +119,7 @@ export function paddock(): Paddock {
       pollerStarted: false,
     };
     restoreJobs(g.__paddock);
+    startNotifications((id) => g.__paddock?.instances.get(id)?.inst.name ?? id);
   }
   const p = g.__paddock;
   if (!p.pollerStarted) {

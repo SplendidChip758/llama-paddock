@@ -2,7 +2,7 @@
 
 The dashboard checks alert rules against every poll of every host: GPU temperature, VRAM usage, disk space, unreachable hosts and agents, and Ollama crashing. Open **Alerts** in the header to see what is firing and to edit the rules. The header shows how many alerts are firing.
 
-Alerts are shown in the dashboard, logged, and recorded in `paddock.db`. Sending them to Discord, Slack, email or a webhook is not available yet.
+Alerts are shown in the dashboard, logged, recorded in `paddock.db`, and sent to the [notification channels](#notifications) you set up: Discord, Slack, email or any webhook.
 
 ## Rules
 
@@ -22,6 +22,7 @@ A new installation starts with these six rules for every host. Each rule has:
 - **For:** how long the condition has to hold before the alert fires. Until then it shows as *pending*. `0` fires on the first poll that sees it.
 - **Clear for:** how long the condition has to be gone before a firing alert resolves (default 1 minute), so a value hovering around the threshold doesn't fire and resolve on every poll.
 - **Hosts:** every host, including ones added later, or a chosen list.
+- **Notify:** every [notification channel](#notifications), including ones added later, or a chosen list. Choosing none keeps the rule's alerts in the dashboard only.
 
 Add several rules of the same kind for different thresholds or hosts, for example a lower temperature limit for one GPU host. Disabling or deleting a rule, or taking a host out of it, resolves its firing alerts.
 
@@ -39,10 +40,51 @@ An alert only changes with data. When a poll has no value for it, because the ag
 
 A pause in polling longer than `3 × poll_interval + 30` seconds, such as a dashboard restart, breaks every duration the same way. Alerts that were firing when the dashboard stopped are still firing after it starts, and they don't fire a second time.
 
+## Notifications
+
+Under **Notifications** on the Alerts page, add the channels alerts are sent to. Each rule sends to every channel unless you choose some in the rule. A channel gets a message when an alert fires and, unless you turn off **Also send when an alert resolves**, when it resolves. **Send test** sends a test message with the settings in the editor, before you save them.
+
+| Channel | What you need |
+|---|---|
+| **Discord** | A channel webhook: in Discord, *Edit channel → Integrations → Webhooks → New webhook → Copy webhook URL*. Messages never mention anyone |
+| **Slack** | An [incoming webhook](https://api.slack.com/messaging/webhooks) URL, `https://hooks.slack.com/services/…`. Mattermost and Rocket.Chat incoming webhooks take the same messages |
+| **Email** | Your mail provider's SMTP server, port and encryption (STARTTLS on 587, TLS on 465), a user name and password (for Gmail or Microsoft 365, an app password), the sender address, and up to 20 recipients. *None* (port 25) is only for a relay on your own network, and can't log in, so a password is never sent unencrypted. The server's certificate is checked |
+| **Webhook** | Any URL that takes a JSON `POST`, such as an n8n, Node-RED or Home Assistant webhook. An optional token is sent as `Authorization: Bearer <token>` |
+
+Messages name the rule, the host and what it applies to, such as `Firing: GPU temperature on gpu-01 · GPU0`, followed by the reading, such as `GPU0 (NVIDIA GeForce RTX 3090) at 91°C`. Resolved messages go to the channels that got the firing one.
+
+### The webhook's JSON
+
+```json
+{
+  "source": "llama-paddock",
+  "version": "0.8.0",
+  "state": "firing",
+  "summary": "Firing: GPU temperature on gpu-01 · GPU0",
+  "detail": "GPU0 (NVIDIA GeForce RTX 3090) at 91°C",
+  "time": "2026-11-02T09:14:07.000Z",
+  "alert": {
+    "id": 42, "rule": "gpu-temp", "name": "GPU temperature", "kind": "gpu_temp",
+    "instance": "gpu-01", "host": "gpu-01", "subject": "gpu0",
+    "value": 91, "detail": "GPU0 (NVIDIA GeForce RTX 3090) at 91°C", "flapping": false, "t": 1793610847
+  }
+}
+```
+
+`state` is `firing`, `resolved` or `test`; a test message has `alert: null`. In `alert`, `instance` is the host's ID and `host` its name, `subject` is `gpu0`, `gpu1`, … for GPUs, a path for disks, and empty otherwise, and `value` is the reading in the rule's unit, or `null`. `id` and `t` are the transition's, as in the [API](api.md#alerts). New fields may be added; existing ones keep their meaning.
+
+### Delivery
+
+Each channel sends its messages one at a time, in order. A message that fails is tried again after 5 seconds, 30 seconds and 2 minutes, or after the time a `429` answer's `Retry-After` asks for. An answer such as `400` or `404` means the channel's settings are wrong, so that message isn't tried again. A channel that is down doesn't hold up the others.
+
+The channel list shows when each channel last sent a message, or why the last one failed. Messages still waiting when the dashboard stops are lost; the alert itself is recorded either way.
+
+Webhook URLs, tokens and SMTP passwords work like passwords. They are stored in `alert-channels.json` (mode 600) and never shown again: leave the field blank when editing to keep the stored one.
+
 ## Where rules and alerts are stored
 
 Rules are saved in `alert-rules.json` in the [data directory](configuration.md#data-directory) when you first change them. Until then the built-in defaults apply. Each alert firing and resolving is recorded in `paddock.db`, kept for `history_retention_days` like the other history; an alert that is still firing keeps its record however old it is.
 
 If saving to `paddock.db` fails, the Alerts page says so. Alerts keep working, but a restart may forget which ones were firing.
 
-Rules, active alerts and the recorded transitions are also available through the [API](api.md#alerts).
+Channels are saved in `alert-channels.json` in the same directory. Rules, channels, active alerts and the recorded transitions are also available through the [API](api.md#alerts).

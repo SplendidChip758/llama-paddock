@@ -61,7 +61,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pill.alert { background: var(--bad); color: var(--bg); }
 .jobsbtn.active { border-color: var(--accent); }
 
-.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
+.dot { display: inline-block; vertical-align: middle; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
 .dot.ok { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
 .dot.warn { background: var(--warn); }
 .dot.bad { background: var(--bad); }
@@ -221,6 +221,8 @@ label.field > span { display: block; font-size: 12.5px; color: var(--muted); mar
 .alertlist { display: grid; }
 .alertline { display: flex; gap: 12px; align-items: flex-start; padding: 10px 2px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
 .alertline:last-child { border-bottom: none; }
+.chstatus { font-size: 12.5px; max-width: 360px; word-break: break-word; }
+.chstatus .dot { margin-right: 4px; }
 .alertline > .dot { margin-top: 6px; }
 .alertline .grow { flex: 1; min-width: 0; word-break: break-word; }
 .alertline a:hover { color: var(--accent2); }

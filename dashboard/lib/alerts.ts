@@ -26,8 +26,8 @@ const RUNNER_MISSING_POLLS = 2;
 // ============================================================================ rules
 const ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 
-/** hostIds: the hosts a rule may name, or null to accept any (rules read back from the file). */
-function validRule(raw: unknown, hostIds: Set<string> | null): Omit<AlertRule, "id"> & { id: string | null } {
+/** hostIds, channelIds: the hosts and channels a rule may name, or null to accept any (rules read back from the file). */
+function validRule(raw: unknown, hostIds: Set<string> | null, channelIds: Set<string> | null): Omit<AlertRule, "id"> & { id: string | null } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, "each rule must be an object");
   const r = raw as Record<string, unknown>;
   if (!isAlertKind(r.kind)) throw new HttpError(400, `kind must be one of ${Object.keys(ALERT_KINDS).join(", ")}`);
@@ -58,9 +58,18 @@ function validRule(raw: unknown, hostIds: Set<string> | null): Omit<AlertRule, "
     if (unknown.length) throw new HttpError(400, `${name}: unknown host ${unknown.join(", ")}`);
   }
 
+  // an empty list is allowed: the alert shows in the dashboard and isn't sent anywhere
+  let channels: string[] | null = null;
+  if (r.channels != null) {
+    if (!Array.isArray(r.channels)) throw new HttpError(400, `${name}: channels must be a list of channel ids, or null for every channel`);
+    channels = [...new Set(r.channels.map(String))];
+    const unknown = channelIds ? channels.filter((c) => !channelIds.has(c)) : [];
+    if (unknown.length) throw new HttpError(400, `${name}: unknown channel ${unknown.join(", ")}`);
+  }
+
   return {
     id, name, kind: r.kind, enabled: r.enabled !== false, threshold,
-    for_s: seconds(r.for_s, info.for_s, "for_s"), clear_s: seconds(r.clear_s, DEFAULT_CLEAR_S, "clear_s"), hosts,
+    for_s: seconds(r.for_s, info.for_s, "for_s"), clear_s: seconds(r.clear_s, DEFAULT_CLEAR_S, "clear_s"), hosts, channels,
   };
 }
 
@@ -79,7 +88,7 @@ function readRules(): AlertRule[] {
   const ids = new Set<string>();
   for (const raw of stored.rules) {
     try {
-      const r = validRule(raw, null);
+      const r = validRule(raw, null, null);
       if (r.id === null || ids.has(r.id)) throw new HttpError(400, `missing or repeated id ${r.id}`);
       ids.add(r.id);
       rules.push(r as AlertRule);
@@ -90,18 +99,21 @@ function readRules(): AlertRule[] {
   return rules;
 }
 
-export const listRules = (): AlertRule[] => alerts().rules.map((r) => ({ ...r, hosts: r.hosts && [...r.hosts] }));
+export const listRules = (): AlertRule[] =>
+  alerts().rules.map((r) => ({ ...r, hosts: r.hosts && [...r.hosts], channels: r.channels ? [...r.channels] : null }));
 
 /** Validate and store a complete rule list. A rule without an id gets one from its name. */
-export function saveRules(raw: unknown, hostIds: string[]): AlertRule[] {
+export function saveRules(raw: unknown, hostIds: string[], channelIds: string[]): AlertRule[] {
   if (!Array.isArray(raw)) throw new HttpError(400, "rules must be a list");
   if (raw.length > 200) throw new HttpError(400, "at most 200 rules");
   const previous = new Map(alerts().rules.map((r) => [r.id, r]));
   const parsed = raw.map((r) => {
-    // a host the rule already named may have been removed since, or be gone from config.yaml for now: keep it
+    // a host or channel the rule already named may have been removed since, or be gone from config.yaml for now: keep it
     const id = (r as AlertRule | null)?.id;
-    const known = new Set([...hostIds, ...((typeof id === "string" && previous.get(id)?.hosts) || [])]);
-    return validRule(r, known);
+    const before = typeof id === "string" ? previous.get(id) : undefined;
+    const knownHosts = new Set([...hostIds, ...(before?.hosts ?? [])]);
+    const knownChannels = new Set([...channelIds, ...(before?.channels ?? [])]);
+    return validRule(r, knownHosts, knownChannels);
   });
   const taken = new Set<string>();
   for (const r of parsed) {

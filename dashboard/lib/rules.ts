@@ -54,7 +54,7 @@ export const DEFAULT_RULES: AlertRule[] = (
   ] as const
 ).map(([id, kind, enabled]) => ({
   id, name: ALERT_KINDS[kind].label, kind, enabled,
-  threshold: ALERT_KINDS[kind].threshold, for_s: ALERT_KINDS[kind].for_s, clear_s: DEFAULT_CLEAR_S, hosts: null,
+  threshold: ALERT_KINDS[kind].threshold, for_s: ALERT_KINDS[kind].for_s, clear_s: DEFAULT_CLEAR_S, hosts: null, channels: null,
 }));
 
 /** "for 2m" style text for a rule's duration. */
