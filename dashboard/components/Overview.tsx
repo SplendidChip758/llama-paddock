@@ -5,7 +5,8 @@ import { useState } from "react";
 import { fmtDur, fmtMiB, pct } from "@/lib/format";
 import type { InstanceSnapshot } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
-import { Meter, Stat, statusOf } from "./ui";
+import { isOffloaded } from "@/lib/split";
+import { Meter, SplitChip, Stat, statusOf } from "./ui";
 import { HostEditor } from "./HostEditor";
 import { AgentPlainChip, FleetHttpsOffer } from "./AgentTls";
 
@@ -33,6 +34,7 @@ export function Overview() {
   const vUsed = gpus.reduce((a, g) => a + (g.mem_used_mib ?? 0), 0);
   const vTot = gpus.reduce((a, g) => a + (g.mem_total_mib ?? 0), 0);
   const watts = gpus.reduce((a, g) => a + (g.power_w ?? 0), 0);
+  const offloaded = instances.reduce((a, s) => a + s.ps.filter((m) => isOffloaded(m.split)).length, 0);
 
   return (
     <>
@@ -52,7 +54,7 @@ export function Overview() {
         <Stat k="GPUs" v={gpus.length} />
         <Stat k="VRAM used" v={fmtMiB(vUsed)} unit={`/ ${fmtMiB(vTot)}`} />
         <Stat k="GPU power" v={watts.toFixed(0)} unit="W" />
-        <Stat k="Models loaded" v={instances.reduce((a, s) => a + s.ps.length, 0)} />
+        <Stat k="Models loaded" v={instances.reduce((a, s) => a + s.ps.length, 0)} unit={offloaded ? `${offloaded} not fully on GPU` : undefined} />
       </div>
       <div className="grid g3">
         {instances.map((st) => <InstCard key={st.id} st={st} />)}
@@ -68,6 +70,7 @@ function InstCard({ st }: { st: InstanceSnapshot }) {
   const gpus = st.stats?.nvidia?.gpus ?? [];
   const err = st.ollama_error || (st.agent_key_changed ? "the agent's key has changed: open the host to review it" : st.agent_error);
   const platform = st.stats?.platform;
+  const offloaded = st.ps.filter((m) => isOffloaded(m.split));
   return (
     <div className="card inst-card" onClick={() => router.push(`/i/${encodeURIComponent(st.id)}/monitor`)}>
       <div className="card-head">
@@ -107,8 +110,14 @@ function InstCard({ st }: { st: InstanceSnapshot }) {
       ))}
       {!st.has_agent && <div className="hint" style={{ marginTop: 10 }}>No agent — GPU/host stats unavailable</div>}
       <div className="chips" style={{ marginTop: 12 }}>
-        {st.ps.length ? st.ps.map((m) => <span key={m.name} className="chip acc">{m.name}</span>) : <span className="faint" style={{ fontSize: 12.5 }}>No models loaded</span>}
+        {st.ps.length ? st.ps.map((m) => <SplitChip key={m.name} m={m} />) : <span className="faint" style={{ fontSize: 12.5 }}>No models loaded</span>}
       </div>
+      {offloaded.length > 0 && (
+        <div className="split-note">
+          <b>Not fully on the GPU:</b> {offloaded.map((m) => m.name).join(", ")}. If that isn't intended, try a smaller num_ctx
+          or quantization, or unload other models. The Monitor tab has details.
+        </div>
+      )}
       {err && <div className="hint" style={{ color: "var(--bad)", marginTop: 10 }}>{err}</div>}
     </div>
   );

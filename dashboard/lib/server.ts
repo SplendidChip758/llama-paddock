@@ -9,6 +9,7 @@ import {
 import {
   deleteHistory, deleteJobs, loadJobs, maintainHistory, recordObservations, recordSamples, saveJob, type ObservedSpan,
 } from "./db";
+import { withSplit } from "./split";
 import type { AgentStats, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, PsModel } from "./types";
 
 // ============================================================================ errors
@@ -74,7 +75,7 @@ class InstanceState {
       agent_key_changed: this.agent_key_changed, agent_https_fingerprint: this.agent_https_fingerprint,
       has_ollama_proxy_key: !!i.ollama_proxy_key, source: i.source,
       ollama_ok: this.ollama_ok, ollama_error: this.ollama_error, agent_ok: this.agent_ok,
-      agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.ps, stats: this.stats, updated: this.updated,
+      agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.ps.map(withSplit), stats: this.stats, updated: this.updated,
     };
   }
 }

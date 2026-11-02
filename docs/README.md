@@ -22,7 +22,7 @@ group named after it. Keep that format. -->
 
 ## Use
 
-- [Using the dashboard](usage.md): Monitor and History, Models, Environment, Logs and jobs
+- [Using the dashboard](usage.md): fleet overview, Monitor and History, Models, the GPU/CPU split, Environment, Logs and jobs
 - [Operations](operations.md): updates, backups, prereleases, uninstalling and troubleshooting
 
 ## Reference

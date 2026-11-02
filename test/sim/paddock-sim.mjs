@@ -44,6 +44,12 @@
  *        agent_http:  false = HTTPS only (PADDOCK_AGENT_HTTP=off), true = both (default)
  *        agent_tls:   false = no HTTPS and no fingerprint, like agents before 0.7.0
  *        agent_key:   "new" = replace the agent's key, as the installer's PADDOCK_AGENT_NEW_KEY does
+ *        ps_size_vram: false = leave size_vram out of /api/ps, so the dashboard can't tell the split
+ *
+ * Models: loading with a num_ctx whose KV cache doesn't fit in the GPUs puts the rest in system RAM
+ * (a partial GPU/CPU split), as does a host without GPUs or options.num_gpu 0 (all on the CPU).
+ * Pulling a name ending in "-cloud" or ":cloud" adds an Ollama cloud model: listed with
+ * remote_host/remote_model, answering /api/generate, but never in /api/ps since it runs remotely.
  *   GET  /_sim/config.yaml              the same config.yaml as --write-config
  */
 import http from "node:http";
@@ -144,9 +150,13 @@ const FAMILIES = [
   { match: /./, family: "llama", arch: "llama", ctx: 131072, caps: ["completion", "tools"] },
 ];
 
+const CLOUD_NAME = /[:-]cloud$/;
+
 /** A model as /api/tags would list it, made up from its name. */
 function makeModel(name, extra = {}) {
   name = fullName(name);
+  // a cloud model is a small stub pointing at the remote model; its size is the stub's
+  const cloud = CLOUD_NAME.test(name) ? { remote_model: name.replace(CLOUD_NAME, "").replace(/:$/, ""), remote_host: "https://ollama.com:443", size: 384 } : {};
   const f = FAMILIES.find((x) => x.match.test(name));
   const params = Number(/(\d+(?:\.\d+)?)b\b/i.exec(name)?.[1] ?? (1 + unit(name) * 7).toFixed(1));
   return {
@@ -167,11 +177,15 @@ function makeModel(name, extra = {}) {
     template: "{{ .System }}\n{{ .Prompt }}",
     system: null,
     params: params * 1e9,
+    ...cloud,
     ...extra,
   };
 }
 
-const tagView = (m) => ({ name: m.name, model: m.model, modified_at: m.modified_at, size: m.size, digest: m.digest, details: m.details });
+const tagView = (m) => ({
+  name: m.name, model: m.model, ...(m.remote_host ? { remote_model: m.remote_model, remote_host: m.remote_host } : {}),
+  modified_at: m.modified_at, size: m.size, digest: m.digest, details: m.details,
+});
 
 // ------------------------------------------------------------------ host state
 const SEED_MODELS = ["llama3.2:3b", "qwen2.5-coder:7b", "nomic-embed-text:latest"];
@@ -214,7 +228,7 @@ function makeHost(n, o) {
       index: i, uuid: `GPU-${hash(`${id}/${i}`).slice(0, 8)}-${hash(`${id}/${i}`).slice(8, 12)}-sim0-${hash(`${id}/${i}`).slice(12, 24)}`,
     })),
     models: new Map(SEED_MODELS.map((name) => [name, makeModel(name)])),
-    /** name → { until: ms timestamp or Infinity, ctx } */
+    /** name → { until: ms timestamp or Infinity, ctx, cpuOnly: options.num_gpu was 0 } */
     loaded: new Map(),
     /** model → bytes already downloaded, so a pull that was cut off resumes (Ollama keeps partial blobs) */
     partial: new Map(),
@@ -230,6 +244,7 @@ function makeHost(n, o) {
     servers: {},
     agentTls: true,
     agentHttp: true,
+    psSizeVram: true,
   };
   // the first host has something loaded, so the dashboard shows VRAM in use right away
   if (n === 1) h.loaded.set("llama3.2:3b", { until: Infinity, ctx: 4096 });
@@ -257,7 +272,7 @@ function psModels(h) {
     }
     // file size plus KV cache for the context; spills into system RAM once the GPUs are full
     const size = m.size + l.ctx * 128 * 1024;
-    const size_vram = Math.max(0, Math.min(size, vramFree));
+    const size_vram = l.cpuOnly ? 0 : Math.max(0, Math.min(size, vramFree));
     vramFree -= size_vram;
     out.push({
       name, model: name, size, digest: m.digest, details: m.details, size_vram, context_length: l.ctx,
@@ -412,11 +427,12 @@ async function generate(h, body, res) {
     logLine(h, `unloaded ${m.name}`);
     return sendJson(res, 200, { ...base, done_reason: "unload" });
   }
-  if (!h.loaded.has(m.name)) {
+  if (!h.loaded.has(m.name) && !m.remote_host) {
     await sleep(300);
     logLine(h, `loaded ${m.name}`);
   }
-  h.loaded.set(m.name, { until: Date.now() + ka, ctx: Number(body.options?.num_ctx) || 4096 });
+  // cloud models run remotely: Ollama forwards the request and loads nothing
+  if (!m.remote_host) h.loaded.set(m.name, { until: Date.now() + ka, ctx: Number(body.options?.num_ctx) || 4096, cpuOnly: body.options?.num_gpu === 0 });
   if (!body.prompt) return sendJson(res, 200, { ...base, done_reason: "load" });
   const text = "This is a simulated response from llama-paddock's test host.";
   if (body.stream === false) return sendJson(res, 200, { ...base, response: text, done_reason: "stop", eval_count: 12 });
@@ -436,7 +452,7 @@ const ollamaRoutes = {
   },
   "GET /api/version": (h) => ({ version: h.ollamaVersion }),
   "GET /api/tags": (h) => ({ models: [...h.models.values()].map(tagView) }),
-  "GET /api/ps": (h) => ({ models: psModels(h) }),
+  "GET /api/ps": (h) => ({ models: psModels(h).map(({ size_vram, ...m }) => (h.psSizeVram ? { ...m, size_vram } : m)) }),
   "POST /api/show": async (h, req) => {
     const body = await readBody(req);
     const m = needModel(h, body.model ?? body.name);
@@ -619,7 +635,7 @@ function agentStats(h) {
   const memTotal = 64 * GiB;
   const memUsed = Math.round(6 * GiB + ps.reduce((s, m) => s + (m.size - m.size_vram), 0) + 0.5 * GiB * wave(t, 60));
   const diskTotal = 500 * GiB;
-  const diskUsed = 40 * GiB + [...h.models.values()].reduce((s, m) => s + m.size, 0) + [...h.partial.values()].reduce((s, b) => s + b, 0);
+  const diskUsed = 40 * GiB + [...h.models.values()].reduce((s, m) => s + (m.remote_host ? 0 : m.size), 0) + [...h.partial.values()].reduce((s, b) => s + b, 0);
   const service = ollamaUp
     ? { active: "active", sub: "running", since: new Date(h.startedAt).toUTCString(), main_pid: h.pid, restarts: String(h.restarts) }
     : { active: "failed", sub: "failed", since: new Date(h.startedAt).toUTCString(), main_pid: null, restarts: String(h.restarts) };
@@ -778,7 +794,7 @@ async function applyScenario(h, patch) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new HttpErr(400, "body must be a JSON object");
   const known = [
     ...Object.keys(SCENARIO_VALUES), "pull_seconds", "ollama_key", "agent_token", "ollama_version", "agent_version",
-    "agent_http", "agent_tls", "agent_key",
+    "agent_http", "agent_tls", "agent_key", "ps_size_vram",
   ];
   for (const [k, v] of Object.entries(patch)) {
     if (!known.includes(k)) throw new HttpErr(400, `unknown field ${k}; known: ${known.join(", ")}`);
@@ -796,6 +812,7 @@ async function applyScenario(h, patch) {
   if (patch.ollama_version !== undefined) h.ollamaVersion = String(patch.ollama_version);
   if (patch.agent_version !== undefined) h.agentVersion = patch.agent_version ? String(patch.agent_version) : null;
   if (patch.agent_tls !== undefined) h.agentTls = !!patch.agent_tls;
+  if (patch.ps_size_vram !== undefined) h.psSizeVram = !!patch.ps_size_vram;
   if (patch.agent_http !== undefined) {
     if (!patch.agent_http && !h.agentTls) throw new HttpErr(400, "agent_http can't be off without agent_tls: the agents refuse to start then");
     h.agentHttp = !!patch.agent_http;
@@ -832,6 +849,7 @@ function hostView(h, full = false) {
     ollama_version: h.ollamaVersion,
     agent_version: h.agentVersion,
     scenario: { ...h.scenario },
+    ps_size_vram: h.psSizeVram,
   };
   if (!full) return view;
   return {

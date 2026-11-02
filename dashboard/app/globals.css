@@ -277,3 +277,16 @@ code { font-family: var(--mono); font-size: .92em; background: var(--panel2); pa
   .top { flex-wrap: wrap; padding: 10px 16px; justify-content: space-between; row-gap: 8px; }
   .instnav { order: 3; flex-basis: 100%; margin: 0 -4px; }
 }
+
+/* ---------- GPU/CPU split ---------- */
+/* cloud models: a dashed outline as well as the colour, so the badge stands apart from the split chips */
+.chip.cloud { color: var(--info); border-style: dashed; border-color: color-mix(in srgb, var(--info) 60%, var(--line)); }
+.chip.warn { border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+.split-label { font-size: 12px; color: var(--faint); margin-bottom: 4px; }
+.split-label.warn { color: var(--warn); }
+.split-hint { font-size: 12px; color: var(--muted); margin-top: 6px; max-width: 46ch; }
+.split-hint summary { color: var(--warn); cursor: pointer; }
+.split-hint[open] summary { margin-bottom: 4px; }
+.split-note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.split-note b { color: var(--warn); font-weight: 600; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

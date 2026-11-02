@@ -2,9 +2,13 @@
 
 A tour of the dashboard: monitor hosts and their history, manage models, edit Ollama's environment and read its logs.
 
+## Fleet overview
+
+The home page has one card per host: status, versions, CPU and RAM, and each GPU's utilization and VRAM. Each loaded model is a chip with its GPU/CPU split, such as `qwen3:32b · 62% GPU` (see [GPU/CPU split](#gpucpu-split)). A model that isn't fully on the GPU gets a warning chip and is named under the chips, and the **Models loaded** total counts how many models fleet-wide aren't fully on the GPU.
+
 ## Monitor
 
-The Monitor tab shows loaded models (context window, unload timer and an Unload button), one card per GPU (utilization, VRAM, temperature, power, clocks, PCIe link and per-process VRAM, with sparklines), and host CPU per core, RAM, disks including `OLLAMA_MODELS`, network, and Ollama's memory and runner count. The processor bar on each loaded model shows the GPU vs CPU split. A split below 100% GPU means some of the model is running on the CPU; check available VRAM, context length and GPU-offload settings.
+The Monitor tab shows loaded models (context window, unload timer and an Unload button), one card per GPU (utilization, VRAM, temperature, power, clocks, PCIe link and per-process VRAM, with sparklines), and host CPU per core, RAM, disks including `OLLAMA_MODELS`, network, and Ollama's memory and runner count. The Processor column on each loaded model shows its [GPU/CPU split](#gpucpu-split) in Ollama's own wording (`38% CPU / 62% GPU`) with a bar and the VRAM it holds. A model that isn't fully on the GPU has a **Not fully on the GPU: why?** note that opens to the likely causes.
 
 **History**, at the bottom of the tab, charts the last 1h, 6h, 24h, 7d or 30d: GPU utilization, memory, temperature and power (one line per GPU), CPU, RAM, network in/out, and the VRAM held by loaded models. Hover a chart for exact values. The 6h and 24h ranges show 1-minute averages and 7d and 30d 15-minute averages, and lines break where the host wasn't reachable. The chosen range is remembered in your browser.
 
@@ -15,6 +19,8 @@ The Monitor tab shows loaded models (context window, unload timer and an Unload 
 ## Models
 
 Pull by name (`qwen3:8b`, `gemma3:12b`, …). Progress shows in the Jobs drawer, and the list refreshes when a pull finishes.
+
+A loaded model shows a `loaded` chip with its [GPU/CPU split](#gpucpu-split), such as `loaded · 100% GPU`. Ollama cloud models (`gpt-oss:120b-cloud`, `gemma4:cloud`, …) get a dashed **cloud** badge, and no size, since they take no space on the host.
 
 ![Pulling a model](images/models-pull.png)
 
@@ -27,6 +33,29 @@ Pull by name (`qwen3:8b`, `gemma3:12b`, …). Progress shows in the Jobs drawer,
 Under the hood this calls Ollama's `POST /api/create` with `from` and `parameters`, the API equivalent of a `FROM` + `PARAMETER` Modelfile.
 
 ![Model editor](images/model-editor.png)
+
+## GPU/CPU split
+
+Ollama keeps as much of a loaded model as fits in VRAM and puts the rest in system RAM, where the CPU runs it, usually far slower. The dashboard works out the split from Ollama's `/api/ps` (`size_vram` out of `size`, which includes the KV cache for the model's context) the same way on every page:
+
+| Shown | Means |
+|---|---|
+| `100% GPU` | the whole model is in VRAM |
+| `62% GPU` (warning style) | 38% is in system RAM and runs on the CPU |
+| `100% CPU` (warning style) | nothing is in VRAM |
+| `split unknown` | Ollama didn't report usable sizes, so the dashboard doesn't guess |
+| `cloud` | an Ollama cloud model: it runs on Ollama's servers, not on the host |
+
+Warnings are a hint, not an error: a host without a supported GPU, or a model deliberately split to fit a large context, is a valid setup. When it isn't intended, the usual causes are:
+
+- **The context is too large.** The KV cache grows with `num_ctx`. Try a smaller context in the [model editor](#models), or a smaller quantization.
+- **Other models are holding VRAM.** Unload them on the Monitor tab, or lower `OLLAMA_MAX_LOADED_MODELS` on the [Environment](#environment) tab.
+- **`num_gpu` limits the GPU layers.** `num_gpu 0` keeps every layer on the CPU. Check the model's parameters in the model editor.
+- **Ollama didn't find the GPU.** Check the [Logs](#logs) tab for the GPU it detected at startup.
+
+**Cloud models** are marked wherever models are listed, since prompts sent to them leave your network. They take no local VRAM, so they never count towards a host's split.
+
+The [hosts API](api.md#hosts) returns the same result as a `split` object on each loaded model.
 
 ## Environment
 
