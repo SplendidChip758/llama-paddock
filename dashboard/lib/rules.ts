@@ -35,6 +35,10 @@ export const ALERT_KINDS: Record<AlertKind, KindInfo> = {
     label: "Ollama crashed or restarted", unit: null, threshold: null, for_s: 30,
     help: "Ollama's API is down while the agent answers, or the agent saw Ollama restart or a model's runner exit. Restarts and runner exits fire at once; restarts from the dashboard don't count. Needs the agent.",
   },
+  gpu_lost: {
+    label: "Ollama lost the GPU", unit: null, threshold: null, for_s: 60,
+    help: "nvidia-smi sees a GPU, but the loaded models run entirely on the CPU, or Ollama's log shows it found no GPU or hit GPU errors. Settings that ask for the CPU (CUDA_VISIBLE_DEVICES=-1, num_gpu 0) don't count. Needs the agent.",
+  },
 };
 
 export const isAlertKind = (k: unknown): k is AlertKind => typeof k === "string" && Object.hasOwn(ALERT_KINDS, k);
@@ -51,6 +55,7 @@ export const DEFAULT_RULES: AlertRule[] = (
     ["host-unreachable", "host_unreachable", true],
     ["agent-unreachable", "agent_unreachable", true],
     ["ollama-crash", "ollama_crash", true],
+    ["gpu-lost", "gpu_lost", true],
   ] as const
 ).map(([id, kind, enabled]) => ({
   id, name: ALERT_KINDS[kind].label, kind, enabled,

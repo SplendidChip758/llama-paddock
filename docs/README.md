@@ -23,6 +23,7 @@ group named after it. Keep that format. -->
 ## Use
 
 - [Using the dashboard](usage.md): fleet overview, Monitor and History, Models, the GPU/CPU split, Environment, Logs and jobs
+- [GPU check](gpu-check.md): when Ollama falls back to the CPU while the GPU is there, why, and how to fix it
 - [Alerts](alerts.md): alert rules, durations, flapping and what happens when data is missing
 - [Operations](operations.md): updates, backups, prereleases, uninstalling and troubleshooting
 

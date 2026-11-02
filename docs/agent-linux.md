@@ -1,6 +1,6 @@
 # Linux agent
 
-The Linux agent runs next to Ollama as a systemd service and adds GPU and host stats, environment editing, restarts and logs.
+The Linux agent runs next to Ollama as a systemd service and adds GPU and host stats, environment editing, restarts, logs and the [GPU check](gpu-check.md).
 
 Run as root **on the Proxmox host** or **inside the Ollama LXC/VM**:
 

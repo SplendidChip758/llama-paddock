@@ -57,6 +57,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-pa
 | "The agent's key has changed" | The agent presented a different key than the pinned one, and the dashboard stopped calling it. If you replaced the key or reinstalled the agent, compare the presented fingerprint with the installer's output and accept it. See [encrypted agent connections](security.md#encrypted-agent-connections). |
 | Windows host disappears after signing out | Both the Ollama desktop app and agent logon task need the user's session. |
 | No GPU process memory on Windows | Consumer GPUs in WDDM mode do not expose per-process VRAM through `nvidia-smi`, so the process table can be empty. |
+| Models run on the CPU although `nvidia-smi` shows the GPU | See the **GPU check** on the host's Monitor tab and [its causes and fixes](gpu-check.md#causes-and-fixes). A suspend and resume, or a driver update without a reboot, are the usual reasons. |
 | No AMD or Apple GPU cards | GPU collection currently uses `nvidia-smi`; AMD and Apple support are planned. |
 | History disappears after restarting | Check write permissions and free space in the data directory. If SQLite cannot open, the dashboard logs a warning and falls back to in-memory history. |
 | Password changed in `.env` but login is unchanged | Environment credentials apply only before `auth.json` exists. Follow [password recovery](configuration.md#login). |

@@ -1,6 +1,6 @@
 # Windows agent
 
-The Windows agent runs in your session next to the Ollama desktop app and adds GPU and host stats, environment editing, restarts and logs.
+The Windows agent runs in your session next to the Ollama desktop app and adds GPU and host stats, environment editing, restarts, logs and the [GPU check](gpu-check.md).
 
 Prerequisite: Node.js 18.15 or newer (`winget install OpenJS.NodeJS.LTS`).
 

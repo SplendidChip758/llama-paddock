@@ -8,7 +8,7 @@ The home page has one card per host: status, versions, CPU and RAM, and each GPU
 
 ## Monitor
 
-The Monitor tab shows loaded models (context window, unload timer and an Unload button), one card per GPU (utilization, VRAM, temperature, power, clocks, PCIe link and per-process VRAM, with sparklines), and host CPU per core, RAM, disks including `OLLAMA_MODELS`, network, and Ollama's memory and runner count. The Processor column on each loaded model shows its [GPU/CPU split](#gpucpu-split) in Ollama's own wording (`38% CPU / 62% GPU`) with a bar and the VRAM it holds. A model that isn't fully on the GPU has a **Not fully on the GPU: why?** note that opens to the likely causes.
+The Monitor tab shows loaded models (context window, unload timer and an Unload button), one card per GPU (utilization, VRAM, temperature, power, clocks, PCIe link and per-process VRAM, with sparklines), and host CPU per core, RAM, disks including `OLLAMA_MODELS`, network, and Ollama's memory and runner count. The Processor column on each loaded model shows its [GPU/CPU split](#gpucpu-split) in Ollama's own wording (`38% CPU / 62% GPU`) with a bar and the VRAM it holds. A model that isn't fully on the GPU has a **Not fully on the GPU: why?** note that opens to the likely causes. Above the GPU cards, the [GPU check](gpu-check.md) says whether Ollama uses the GPU, and when it has lost it, why and how to fix it.
 
 **History**, at the bottom of the tab, charts the last 1h, 6h, 24h, 7d or 30d: GPU utilization, memory, temperature and power (one line per GPU), CPU, RAM, network in/out, and the VRAM held by loaded models. Hover a chart for exact values. The 6h and 24h ranges show 1-minute averages and 7d and 30d 15-minute averages, and lines break where the host wasn't reachable. The chosen range is remembered in your browser.
 
@@ -51,7 +51,7 @@ Warnings are a hint, not an error: a host without a supported GPU, or a model de
 - **The context is too large.** The KV cache grows with `num_ctx`. Try a smaller context in the [model editor](#models), or a smaller quantization.
 - **Other models are holding VRAM.** Unload them on the Monitor tab, or lower `OLLAMA_MAX_LOADED_MODELS` on the [Environment](#environment) tab.
 - **`num_gpu` limits the GPU layers.** `num_gpu 0` keeps every layer on the CPU. Check the model's parameters in the model editor.
-- **Ollama didn't find the GPU.** Check the [Logs](#logs) tab for the GPU it detected at startup.
+- **Ollama didn't find the GPU.** The [GPU check](gpu-check.md) on the Monitor tab reads Ollama's log for this, and suggests a fix.
 
 **Cloud models** are marked wherever models are listed, since prompts sent to them leave your network. They take no local VRAM, so they never count towards a host's split.
 

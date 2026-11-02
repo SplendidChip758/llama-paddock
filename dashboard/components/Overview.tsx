@@ -80,6 +80,7 @@ function InstCard({ st }: { st: InstanceSnapshot }) {
         </div>
         <div className="chips">
           <AgentPlainChip st={st} />
+          {st.gpu_check?.state === "lost" && <span className="chip bad" title={st.gpu_check.summary}>GPU lost</span>}
           <span className={`chip ${c === "ok" ? "ok" : c === "bad" ? "bad" : ""}`}>{label}</span>
         </div>
       </div>
