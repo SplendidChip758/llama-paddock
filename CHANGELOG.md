@@ -1,3 +1,9 @@
+## [0.8.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.3...v0.8.0-dev.4) (2026-11-02)
+
+### Features
+
+* **dashboard:** send alerts to webhook, Discord, Slack and email ([#107](https://github.com/SplendidChip758/llama-paddock/issues/107)) ([d8ac501](https://github.com/SplendidChip758/llama-paddock/commit/d8ac5014645aaa74394596c133ccbfab8c7172f5)), closes [#8](https://github.com/SplendidChip758/llama-paddock/issues/8)
+
 ## [0.8.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.2...v0.8.0-dev.3) (2026-11-02)
 
 ### Features
