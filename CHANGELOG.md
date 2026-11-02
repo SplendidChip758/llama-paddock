@@ -1,3 +1,9 @@
+## [0.8.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.1...v0.8.0-dev.2) (2026-11-02)
+
+### Features
+
+* **dashboard:** add alert rules engine ([#106](https://github.com/SplendidChip758/llama-paddock/issues/106)) ([3197a41](https://github.com/SplendidChip758/llama-paddock/commit/3197a41d2200486e823879bf072a65a73514f602)), closes [#28](https://github.com/SplendidChip758/llama-paddock/issues/28) [#8](https://github.com/SplendidChip758/llama-paddock/issues/8) [#9](https://github.com/SplendidChip758/llama-paddock/issues/9) [#7](https://github.com/SplendidChip758/llama-paddock/issues/7)
+
 ## [0.8.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0...v0.8.0-dev.1) (2026-11-02)
 
 ### Features
