@@ -1,3 +1,9 @@
+## [0.8.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0...v0.8.0-dev.1) (2026-11-02)
+
+### Features
+
+* **dashboard:** show GPU/CPU split on fleet overview and models tab ([#105](https://github.com/SplendidChip758/llama-paddock/issues/105)) ([ca71d99](https://github.com/SplendidChip758/llama-paddock/commit/ca71d994cae8696c8f50140e2efe8a044ca7b4a4)), closes [#28](https://github.com/SplendidChip758/llama-paddock/issues/28)
+
 ## [0.7.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.6.0...v0.7.0) (2026-11-01)
 
 ### Features
