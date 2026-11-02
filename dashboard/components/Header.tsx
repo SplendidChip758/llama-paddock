@@ -10,12 +10,13 @@ import { api } from "@/lib/format";
 
 export function Header({ version }: { version: string }) {
   const pre = version.includes("-");
-  const { instances, jobs, setJobsOpen, me } = usePaddock();
+  const { instances, jobs, setJobsOpen, me, alerts } = usePaddock();
   const path = usePathname();
   const m = path.match(/^\/i\/([^/]+)(?:\/([^/]+))?/);
   const currentId = m ? decodeURIComponent(m[1]) : null;
   const tab = m?.[2] ?? "monitor";
   const running = jobs.filter((j) => j.state === "running").length;
+  const firing = alerts.filter((a) => a.state === "firing").length;
 
   return (
     <>
@@ -36,6 +37,11 @@ export function Header({ version }: { version: string }) {
             );
           })}
         </nav>
+        <Link href="/alerts" className={`jobsbtn ${path === "/alerts" ? "active" : ""}`}
+          title={firing ? `${firing} alert${firing === 1 ? "" : "s"} firing` : "Alert rules"}>
+          <span>Alerts</span>
+          {firing > 0 && <span className="pill alert">{firing}</span>}
+        </Link>
         <button className="jobsbtn" onClick={() => setJobsOpen(true)} title="Pull / create jobs">
           <span>Jobs</span>
           <span className={`pill ${running ? "live" : ""}`}>{running || jobs.length}</span>

@@ -45,6 +45,14 @@
  *        agent_tls:   false = no HTTPS and no fingerprint, like agents before 0.7.0
  *        agent_key:   "new" = replace the agent's key, as the installer's PADDOCK_AGENT_NEW_KEY does
  *        ps_size_vram: false = leave size_vram out of /api/ps, so the dashboard can't tell the split
+ *        gpu_temp:    °C every GPU reports instead of the simulated curve (null: back to the curve)
+ *        vram_pct:    share of each GPU's memory in use, 0-100 (null: what the loaded models take)
+ *        disk_pct:    how full the root filesystem is, 0-100 (null: what the models take)
+ *        models_disk_pct:  report OLLAMA_MODELS (or /srv/ollama/models) as a filesystem of its own,
+ *                     this full (null: no separate filesystem, as before)
+ *        crash:       "ollama" = Ollama's process dies and systemd starts a new one (new pid, models
+ *                     unloaded); "runner" = the runner of the first loaded model exits while
+ *                     /api/ps still lists the model, until it's loaded or unloaded again
  *
  * Models: loading with a num_ctx whose KV cache doesn't fit in the GPUs puts the rest in system RAM
  * (a partial GPU/CPU split), as does a host without GPUs or options.num_gpu 0 (all on the CPU).
@@ -245,6 +253,13 @@ function makeHost(n, o) {
     agentTls: true,
     agentHttp: true,
     psSizeVram: true,
+    /** runtime-switchable readings for the alert scenarios; null = simulated */
+    gpuTemp: null,
+    vramPct: null,
+    diskPct: null,
+    modelsDiskPct: null,
+    /** loaded models whose runner process has exited */
+    deadRunners: new Set(),
   };
   // the first host has something loaded, so the dashboard shows VRAM in use right away
   if (n === 1) h.loaded.set("llama3.2:3b", { until: Infinity, ctx: 4096 });
@@ -268,6 +283,7 @@ function psModels(h) {
     const m = h.models.get(name);
     if (!m || l.until <= now) {
       h.loaded.delete(name);
+      h.deadRunners.delete(name);
       continue;
     }
     // file size plus KV cache for the context; spills into system RAM once the GPUs are full
@@ -422,6 +438,8 @@ async function generate(h, body, res) {
   const m = needModel(h, body.model);
   const ka = keepAliveMs(body.keep_alive, h.env.OLLAMA_KEEP_ALIVE);
   const base = { model: m.name, created_at: new Date().toISOString(), response: "", done: true };
+  // a new load (or unload) replaces a runner that exited
+  h.deadRunners.delete(m.name);
   if (ka === 0) {
     h.loaded.delete(m.name);
     logLine(h, `unloaded ${m.name}`);
@@ -621,9 +639,10 @@ function agentStats(h) {
     const util = busy ? Math.round(20 + 75 * wave(t, 23, g.index * 0.3 + h.n * 0.17)) : Math.round(3 * wave(t, 7, g.index));
     return {
       index: g.index, uuid: g.uuid, name: GPU_MODEL.name, driver: "570.124.06", pstate: busy ? "P2" : "P8",
-      temp_c: Math.round(34 + util * 0.42), fan_pct: Math.round(30 + util * 0.5), util_pct: util,
+      temp_c: h.gpuTemp ?? Math.round(34 + util * 0.42), fan_pct: Math.round(30 + util * 0.5), util_pct: util,
       mem_util_pct: busy ? Math.round(util * 0.6) : 0,
-      mem_used_mib: Math.round(Math.min(GPU_MODEL.mem, 310 + vramPerGpu)), mem_total_mib: GPU_MODEL.mem,
+      mem_used_mib: h.vramPct != null ? Math.round((GPU_MODEL.mem * h.vramPct) / 100) : Math.round(Math.min(GPU_MODEL.mem, 310 + vramPerGpu)),
+      mem_total_mib: GPU_MODEL.mem,
       power_w: Math.round((22 + util * 3.1) * 100) / 100, power_limit_w: GPU_MODEL.power,
       sm_clock_mhz: busy ? Math.round(1600 + 300 * wave(t, 11, g.index)) : 210, sm_clock_max_mhz: GPU_MODEL.smMax,
       mem_clock_mhz: busy ? 9751 : 405, pcie_gen: busy ? 4 : 1, pcie_width: 16,
@@ -635,7 +654,10 @@ function agentStats(h) {
   const memTotal = 64 * GiB;
   const memUsed = Math.round(6 * GiB + ps.reduce((s, m) => s + (m.size - m.size_vram), 0) + 0.5 * GiB * wave(t, 60));
   const diskTotal = 500 * GiB;
-  const diskUsed = 40 * GiB + [...h.models.values()].reduce((s, m) => s + (m.remote_host ? 0 : m.size), 0) + [...h.partial.values()].reduce((s, b) => s + b, 0);
+  const modelBytes = [...h.models.values()].reduce((s, m) => s + (m.remote_host ? 0 : m.size), 0) + [...h.partial.values()].reduce((s, b) => s + b, 0);
+  const disk = (path, total, used) => ({ path, total, used, free: total - used, pct: Math.round((used / total) * 1000) / 10 });
+  const disks = [disk("/", diskTotal, h.diskPct != null ? Math.round((diskTotal * h.diskPct) / 100) : 40 * GiB + modelBytes)];
+  if (h.modelsDiskPct != null) disks.push(disk(h.env.OLLAMA_MODELS || "/srv/ollama/models", 2000 * GiB, Math.round((2000 * GiB * h.modelsDiskPct) / 100)));
   const service = ollamaUp
     ? { active: "active", sub: "running", since: new Date(h.startedAt).toUTCString(), main_pid: h.pid, restarts: String(h.restarts) }
     : { active: "failed", sub: "failed", since: new Date(h.startedAt).toUTCString(), main_pid: null, restarts: String(h.restarts) };
@@ -653,10 +675,12 @@ function agentStats(h) {
       load: [cpu / 100 * cores, cpu / 100 * cores * 0.9, cpu / 100 * cores * 0.8].map((x) => Math.round(x * 100) / 100),
       mem: { total: memTotal, used: memUsed, available: memTotal - memUsed, pct: Math.round((memUsed / memTotal) * 1000) / 10 },
       swap: { total: 8 * GiB, used: 0, pct: 0 },
-      disks: [{ path: "/", total: diskTotal, used: diskUsed, free: diskTotal - diskUsed, pct: Math.round((diskUsed / diskTotal) * 1000) / 10 }],
+      disks,
       // a pull downloads at ~100 MB/s
       net: { rx_bps: Math.round(2e4 + 5e4 * wave(t, 17) + h.activePulls * 1e8), tx_bps: Math.round(1e4 + 3e4 * wave(t, 19)) },
-      ollama_process: ollamaUp ? { pid: h.pid, rss_total: 450 * MiB + ps.reduce((s, m) => s + (m.size - m.size_vram), 0), runners: ps.length } : null,
+      ollama_process: ollamaUp
+        ? { pid: h.pid, rss_total: 450 * MiB + ps.reduce((s, m) => s + (m.size - m.size_vram), 0), runners: ps.filter((m) => !h.deadRunners.has(m.name)).length }
+        : null,
     },
     nvidia: h.gpus.length ? { available: true, gpus, processes } : { available: false, error: "nvidia-smi not found", gpus: [], processes: [] },
     service,
@@ -671,15 +695,22 @@ const BASE_UNIT_ENV = { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 
 async function restartOllama(h) {
   logLine(h, "Stopping ollama.service...");
+  await newOllamaProcess(h);
+  return { ok: true, stderr: "" };
+}
+
+/** Ollama stops and starts again with a new process, as after systemctl restart or a crash that systemd recovers. */
+async function newOllamaProcess(h) {
   h.restarts++;
   h.loaded.clear();
+  h.deadRunners.clear();
   // a restart brings a crashed Ollama back, like systemctl restart would
   await setOllama(h, "down");
   await sleep(500);
   h.startedAt = Date.now();
+  h.pid += 2;
   await setOllama(h, "up");
   logLine(h, `Listening on [::]:11434 (version ${h.ollamaVersion})`);
-  return { ok: true, stderr: "" };
 }
 
 const agentRoutes = {
@@ -794,7 +825,7 @@ async function applyScenario(h, patch) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new HttpErr(400, "body must be a JSON object");
   const known = [
     ...Object.keys(SCENARIO_VALUES), "pull_seconds", "ollama_key", "agent_token", "ollama_version", "agent_version",
-    "agent_http", "agent_tls", "agent_key", "ps_size_vram",
+    "agent_http", "agent_tls", "agent_key", "ps_size_vram", "gpu_temp", "vram_pct", "disk_pct", "models_disk_pct", "crash",
   ];
   for (const [k, v] of Object.entries(patch)) {
     if (!known.includes(k)) throw new HttpErr(400, `unknown field ${k}; known: ${known.join(", ")}`);
@@ -824,6 +855,27 @@ async function applyScenario(h, patch) {
     // like an agent restart: connections made with the old key end
     h.servers.agent.closeAllConnections();
   }
+  const reading = (k, max) => {
+    const v = patch[k];
+    if (v === null) return null;
+    if (typeof v !== "number" || !(v >= 0 && v <= max)) throw new HttpErr(400, `${k} must be a number from 0 to ${max}, or null`);
+    return v;
+  };
+  if (patch.gpu_temp !== undefined) h.gpuTemp = reading("gpu_temp", 150);
+  if (patch.vram_pct !== undefined) h.vramPct = reading("vram_pct", 100);
+  if (patch.disk_pct !== undefined) h.diskPct = reading("disk_pct", 100);
+  if (patch.models_disk_pct !== undefined) h.modelsDiskPct = reading("models_disk_pct", 100);
+  if (patch.crash !== undefined) {
+    if (patch.crash === "ollama") {
+      logLine(h, "ollama.service: Main process exited, code=killed, status=9/KILL", "ERROR");
+      await newOllamaProcess(h);
+    } else if (patch.crash === "runner") {
+      const first = psModels(h)[0];
+      if (!first) throw new HttpErr(409, "no model is loaded, so there is no runner to exit");
+      h.deadRunners.add(first.name);
+      logLine(h, `llama runner for ${first.name} terminated: signal: segmentation fault`, "ERROR");
+    } else throw new HttpErr(400, 'crash must be "ollama" or "runner"');
+  }
   if (patch.pull) h.scenario.pull = patch.pull;
   if (patch.create) h.scenario.create = patch.create;
   if (patch.ollama) await setOllama(h, patch.ollama);
@@ -850,6 +902,7 @@ function hostView(h, full = false) {
     agent_version: h.agentVersion,
     scenario: { ...h.scenario },
     ps_size_vram: h.psSizeVram,
+    readings: { gpu_temp: h.gpuTemp, vram_pct: h.vramPct, disk_pct: h.diskPct, models_disk_pct: h.modelsDiskPct },
   };
   if (!full) return view;
   return {
@@ -859,6 +912,8 @@ function hostView(h, full = false) {
     partial: Object.fromEntries(h.partial),
     pulls: h.pulls,
     restarts: h.restarts,
+    pid: h.pid,
+    dead_runners: [...h.deadRunners],
     requests: h.requests,
   };
 }

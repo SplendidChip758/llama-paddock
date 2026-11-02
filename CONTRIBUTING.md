@@ -59,6 +59,8 @@ The control API changes a host's behavior while everything runs:
 | `ollama_key`, `agent_token` | require a different key (or `null` for none) or token, like a rotated credential |
 | `pull_seconds`, `ollama_version`, `agent_version` | download speed; versions to report (`agent_version: null` leaves it out of `/stats`, like agents before 0.6.0) |
 | `ps_size_vram` | `false` leaves `size_vram` out of `/api/ps`, so the GPU/CPU split is unknown |
+| `gpu_temp`, `vram_pct`, `disk_pct`, `models_disk_pct` | readings for the alert rules: every GPU's °C, each GPU's memory in use (%), the root filesystem (%), and a separate filesystem for `OLLAMA_MODELS` (%). `null` goes back to the simulated values |
+| `crash` | `ollama`: the Ollama process dies and a new one starts (new pid, models unloaded); `runner`: the first loaded model's runner exits while `/api/ps` still lists the model |
 
 Loading a model with a `num_ctx` too large for the GPUs' free memory gives it a partial GPU/CPU split, and `options.num_gpu: 0` or a host without GPUs puts it all on the CPU. Pulling a name ending in `-cloud` or `:cloud` adds an Ollama cloud model, listed with `remote_host` and never shown as loaded.
 
@@ -71,7 +73,7 @@ A pull that is cut off keeps its partial download in the simulator, and the next
 
 ### Scenario tests
 
-`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, availability and model load events (including the gap a restart leaves), and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
+`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, availability and model load events (including the gap a restart leaves), alert rules (durations, firing and resolving, flapping, unreachable hosts, crashes, missing observations and restarts), and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
 
 ```bash
 cd dashboard

@@ -178,6 +178,61 @@ export interface HostEvent {
   size_vram?: number;
 }
 
+/** What an alert rule watches; see lib/rules.ts for each kind's unit and defaults. */
+export type AlertKind = "gpu_temp" | "vram" | "disk" | "host_unreachable" | "agent_unreachable" | "ollama_crash";
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  kind: AlertKind;
+  enabled: boolean;
+  /** °C for gpu_temp, percent for vram and disk; null for the kinds without one */
+  threshold: number | null;
+  /** seconds the condition must be observed without a break before the alert fires */
+  for_s: number;
+  /** seconds the condition must be observed clear without a break before a firing alert resolves */
+  clear_s: number;
+  /** host ids, or null for every host, including ones added later */
+  hosts: string[] | null;
+}
+
+/**
+ * One rule's alert on one host. `subject` tells apart several on a host: "gpu0" for a GPU, the path
+ * for a disk, "" for the host itself.
+ */
+export interface ActiveAlert {
+  rule: string;
+  name: string;
+  kind: AlertKind;
+  instance: string;
+  subject: string;
+  /** pending: the condition holds, but not yet for the rule's for_s */
+  state: "pending" | "firing";
+  since: number;
+  fired_at: number | null;
+  value: number | null;
+  detail: string;
+  /** the last poll had no data for it (agent down, GPU gone, …), so it can neither fire nor resolve */
+  unknown: boolean;
+  /** fired repeatedly in a short time; it now has to stay clear longer before it resolves */
+  flapping: boolean;
+}
+
+/** An alert starting or ending. Rule name and kind are copied, since rules can change later. */
+export interface AlertTransition {
+  id: number;
+  t: number;
+  rule: string;
+  name: string;
+  kind: AlertKind;
+  instance: string;
+  subject: string;
+  state: "firing" | "resolved";
+  value: number | null;
+  detail: string;
+  flapping: boolean;
+}
+
 export type JobState ="running" | "done" | "error" | "cancelled";
 
 export interface JobInfo {
