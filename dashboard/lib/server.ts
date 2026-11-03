@@ -7,16 +7,20 @@ import {
   type Instance, type InstanceInput, type Settings,
 } from "./config";
 import {
-  deleteHistory, deleteJobs, loadJobs, maintainHistory, recordObservations, recordSamples, saveJob, type ObservedSpan,
+  deleteHistory, deleteJobs, loadJobs, maintainHistory, modelEvents, recordObservations, recordSamples, saveJob, type ObservedSpan,
 } from "./db";
 import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
 import { diagnoseGpu, isGpuLogLine, modelKey, ollamaRun, onCpu, readLog, type GpuEvidence } from "./gpucheck";
 import { HttpError } from "./http-error";
-import { parseParameters } from "./params";
+import {
+  RELOAD_WINDOW_S, contextCheck, loadStats, reloadChurn, unseenLoads, type LoadStats, type ModelInfo,
+} from "./modelcheck";
+import { nativeContext, parseParameters } from "./params";
 import { startNotifications } from "./notify";
-import { withSplit } from "./split";
+import { isCloudModel, withSplit } from "./split";
 import type {
-  AgentGpuCheck, AgentStats, EnvState, GpuCheck, GpuFixAction, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, PsModel,
+  AgentGpuCheck, AgentStats, EnvState, GpuCheck, GpuFixAction, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, LoadedModel, PsModel,
+  ReloadChurn,
 } from "./types";
 
 // ============================================================================ errors
@@ -74,11 +78,47 @@ class InstanceState {
   gpu_evidence: GpuEvidence | null = null;
   gpu_reading: Promise<void> | null = null;
   gpu_read_at = 0;
+  /** /api/show of each loaded model by digest, for the context check; see refreshModelState() */
+  model_info = new Map<string, ModelInfo>();
+  model_info_reading = new Set<string>();
+  model_info_failed = new Map<string, number>();
+  /** Ollama's environment as the agent reported it, read once per run of Ollama */
+  ollama_env: { run: string; env: Record<string, string> } | null = null;
+  env_reading = false;
+  env_failed_at = 0;
+  /** load and unload events of about the last hour; null until read from paddock.db */
+  model_events: HostEvent[] | null = null;
+  /** every model seen loaded since the dashboard started, so an alert about one can resolve after it unloads */
+  seen_models = new Set<string>();
+  /** model runner starts in Ollama's log (agents from 0.8.0), on the dashboard's clock; null: not read, or the agent can't */
+  runner_log: { t: number; starts: number[] } | null = null;
+  runner_log_reading = false;
+  runner_log_next = 0;
 
   constructor(public inst: Instance) {}
 
   gpuCheck(): GpuCheck | null {
     return diagnoseGpu(this, this.gpu_evidence);
+  }
+
+  env(): Record<string, string> | null {
+    return this.ollama_env?.env ?? null;
+  }
+
+  loadedModels(): LoadedModel[] {
+    return this.ps.map((m) => ({ ...withSplit(m), context: contextCheck(m, this.model_info.get(m.digest), this.env()) }));
+  }
+
+  loadStats(): LoadStats[] {
+    return loadStats(this.model_events ?? [], this.seen_models, Date.now() / 1000);
+  }
+
+  unseenLoads(): number | null {
+    return this.runner_log && unseenLoads(this.runner_log.starts, this.model_events ?? [], this.runner_log.t);
+  }
+
+  reloadChurn(): ReloadChurn[] {
+    return reloadChurn(this.loadStats(), this.unseenLoads(), this.env());
   }
 
   snapshot(): InstanceSnapshot {
@@ -89,7 +129,8 @@ class InstanceState {
       agent_key_changed: this.agent_key_changed, agent_https_fingerprint: this.agent_https_fingerprint,
       has_ollama_proxy_key: !!i.ollama_proxy_key, source: i.source,
       ollama_ok: this.ollama_ok, ollama_error: this.ollama_error, agent_ok: this.agent_ok,
-      agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.ps.map(withSplit), stats: this.stats, gpu_check: this.gpuCheck(), updated: this.updated,
+      agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.loadedModels(), stats: this.stats, gpu_check: this.gpuCheck(),
+      reload_churn: this.reloadChurn(), updated: this.updated,
     };
   }
 }
@@ -637,6 +678,7 @@ const polledHost = (st: InstanceState): PolledHost => ({
   id: st.inst.id, t: st.updated!, has_agent: !!st.inst.agent_url,
   ollama_ok: st.ollama_ok, ollama_error: st.ollama_error, agent_ok: st.agent_ok, agent_error: st.agent_error,
   stats: st.stats, ps: st.ps, restart_expected: st.restarting > 0 || Date.now() < st.restart_settled, gpu_check: st.gpuCheck(),
+  models: { loaded: st.loadedModels(), stats: st.loadStats(), unseen: st.unseenLoads(), env: st.env() },
 });
 
 const MAINTAIN_EVERY_MS = 60_000;
@@ -659,7 +701,11 @@ async function pollLoop(p: Paddock) {
     // a poll that is late by a few intervals (plus slack for hosts that time out) is a gap in observation
     const gapAfter = 3 * p.settings.poll_interval + 30;
     const changes = observed.map((st) => observe(st, gapAfter));
-    for (const st of observed) if (wantsGpuEvidence(st)) void refreshGpuEvidence(st);
+    observed.forEach((st, i) => trackModels(st, changes[i].events));
+    for (const st of observed) {
+      if (wantsGpuEvidence(st)) void refreshGpuEvidence(st);
+      refreshModelState(st, p.settings.poll_interval);
+    }
     try {
       evaluateAlerts(observed.map(polledHost), [...p.instances.keys()], gapAfter);
     } catch (e) {
@@ -770,6 +816,100 @@ export async function fixGpu(id: string, action: GpuFixAction) {
   if (!inst.agent_url) throw new HttpError(400, `${inst.name} has no agent`);
   const path = action === "reload_uvm" ? "/gpu/reload-uvm" : "/service/restart";
   return expectedRestart(id, () => agent<{ ok: boolean; stderr?: string }>(inst, "POST", path, undefined, 240_000));
+}
+
+// ============================================================================ context and reload warnings
+/** A failed /api/show for a model is tried again after this long. */
+const MODEL_INFO_RETRY_MS = 60_000;
+/** Ollama's log is read for runner starts once per this many polls: only what's new since the last read. */
+const RUNNER_LOG_EVERY_POLLS = 20;
+/** Agents before 0.8.0 have no /runner-starts; ask again this often, in case one is updated. */
+const RUNNER_LOG_UNSUPPORTED_RETRY_MS = 3600_000;
+
+/** Keep the load and unload events of the reload window (and a little more, for the log's lag). */
+function trackModels(st: InstanceState, events: HostEvent[]) {
+  const now = st.updated!;
+  if (st.model_events === null) {
+    try {
+      // this poll's events aren't stored yet, so they aren't read twice
+      st.model_events = modelEvents(st.inst.id, now - 2 * RELOAD_WINDOW_S);
+    } catch (e) {
+      console.error(`[llama-paddock] ${st.inst.id}: reading model events failed:`, e);
+      st.model_events = [];
+    }
+    for (const e of st.model_events) if (e.kind === "load") st.seen_models.add(e.model!);
+  }
+  for (const e of events) if (e.kind === "load" || e.kind === "unload") st.model_events.push(e);
+  for (const m of st.ps) st.seen_models.add(m.name);
+  const old = st.model_events.findIndex((e) => e.t >= now - 2 * RELOAD_WINDOW_S);
+  st.model_events.splice(0, old < 0 ? st.model_events.length : old);
+}
+
+/** Read what the context and reload warnings need and don't have yet. Each read runs in the background. */
+function refreshModelState(st: InstanceState, pollInterval: number) {
+  if (!st.ollama_ok) return;
+  for (const m of st.ps) {
+    const d = m.digest;
+    if (!d || isCloudModel(m) || st.model_info.has(d) || st.model_info_reading.has(d)) continue;
+    if (Date.now() - (st.model_info_failed.get(d) ?? 0) < MODEL_INFO_RETRY_MS) continue;
+    st.model_info_reading.add(d);
+    ollama<{ parameters?: string; model_info?: Record<string, unknown> }>(st.inst, "POST", "/api/show", { model: m.name }, 10_000)
+      .then((show) => {
+        const n = parseParameters(show.parameters).num_ctx;
+        st.model_info.set(d, { max: nativeContext(show.model_info), num_ctx: typeof n === "number" && n > 0 ? n : null });
+      })
+      .catch(() => st.model_info_failed.set(d, Date.now()))
+      .finally(() => st.model_info_reading.delete(d));
+  }
+
+  if (!st.agent_ok || !st.stats) return;
+  const run = ollamaRun(st.stats);
+  if (!st.env_reading && st.ollama_env?.run !== run && Date.now() - st.env_failed_at >= MODEL_INFO_RETRY_MS) {
+    st.env_reading = true;
+    agent<EnvState>(st.inst, "GET", "/env", undefined, 15_000)
+      .then((env) => {
+        // on Linux, effective is what the unit runs with; on Windows, the user's variables over the machine's
+        st.ollama_env = { run, env: { ...env.managed, ...env.effective } };
+      })
+      .catch(() => {
+        st.env_failed_at = Date.now();
+      })
+      .finally(() => {
+        st.env_reading = false;
+      });
+  }
+  if (!st.runner_log_reading && Date.now() >= st.runner_log_next) {
+    st.runner_log_reading = true;
+    void readRunnerLog(st).finally(() => {
+      st.runner_log_reading = false;
+    });
+    st.runner_log_next = Date.now() + RUNNER_LOG_EVERY_POLLS * pollInterval * 1000;
+  }
+}
+
+async function readRunnerLog(st: InstanceState) {
+  const now = Date.now() / 1000;
+  const prev = st.runner_log;
+  // after the first read, only what's new, overlapping the last read for lines logged while it ran
+  const since = prev ? Math.max(prev.t - 60, now - RELOAD_WINDOW_S) : now - RELOAD_WINDOW_S;
+  try {
+    const r = await agent<{ ts: number; starts?: number[]; error?: string }>(
+      st.inst, "GET", `/runner-starts?since=${Math.floor(since)}`, undefined, 40_000,
+    );
+    if (r.error || !Array.isArray(r.starts)) {
+      // the agent can't read Ollama's log (dry run, no journal access): counts stay a minimum
+      st.runner_log = null;
+      return;
+    }
+    // the agent's clock may be off from the dashboard's, which the poll events use
+    const skew = Date.now() / 1000 - r.ts;
+    const fresh = r.starts.map((t) => t + skew).filter((t) => t >= since);
+    const kept = (prev?.starts ?? []).filter((t) => t < since && t >= now - 2 * RELOAD_WINDOW_S);
+    st.runner_log = { t: r.ts + skew, starts: [...kept, ...fresh] };
+  } catch (e) {
+    st.runner_log = null;
+    if (e instanceof HttpError && e.status === 404) st.runner_log_next = Date.now() + RUNNER_LOG_UNSUPPORTED_RETRY_MS;
+  }
 }
 
 // ============================================================================ jobs (pull / create)

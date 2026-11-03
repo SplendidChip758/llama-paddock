@@ -4,8 +4,10 @@ import type { AlertKind, AlertRule } from "./types";
 export interface KindInfo {
   label: string;
   /** the threshold's unit; null: the kind has no threshold */
-  unit: "°C" | "%" | null;
+  unit: "°C" | "%" | "loads/h" | null;
   threshold: number | null;
+  /** the highest threshold allowed; default 100 for percentages and 150 otherwise */
+  max?: number;
   for_s: number;
   help: string;
 }
@@ -39,6 +41,14 @@ export const ALERT_KINDS: Record<AlertKind, KindInfo> = {
     label: "Ollama lost the GPU", unit: null, threshold: null, for_s: 60,
     help: "nvidia-smi sees a GPU, but the loaded models run entirely on the CPU, or Ollama's log shows it found no GPU or hit GPU errors. Settings that ask for the CPU (CUDA_VISIBLE_DEVICES=-1, num_gpu 0) don't count. Needs the agent.",
   },
+  context_short: {
+    label: "Context cut short", unit: null, threshold: null, for_s: 60,
+    help: "A loaded model runs with less context than the host sets (num_ctx in its Modelfile, or OLLAMA_CONTEXT_LENGTH), so a client probably asked for less and longer prompts lose their start. Each model has its own alert. OLLAMA_CONTEXT_LENGTH needs the agent.",
+  },
+  reload_churn: {
+    label: "Model reloading constantly", unit: "loads/h", threshold: 10, max: 10000, for_s: 0,
+    help: "A model was loaded more often than the threshold in the last hour. Each model has its own alert. With the agent, loads too short for a poll to see are counted from Ollama's log as well.",
+  },
 };
 
 export const isAlertKind = (k: unknown): k is AlertKind => typeof k === "string" && Object.hasOwn(ALERT_KINDS, k);
@@ -56,6 +66,9 @@ export const DEFAULT_RULES: AlertRule[] = (
     ["agent-unreachable", "agent_unreachable", true],
     ["ollama-crash", "ollama_crash", true],
     ["gpu-lost", "gpu_lost", true],
+    // off by default: a client may ask for a small context on purpose
+    ["context-short", "context_short", false],
+    ["reload-churn", "reload_churn", true],
   ] as const
 ).map(([id, kind, enabled]) => ({
   id, name: ALERT_KINDS[kind].label, kind, enabled,
@@ -82,5 +95,8 @@ export function parseDur(text: string): number | null {
   return rest ? null : Math.round(total);
 }
 
-/** "GPU0", a disk's path, or "" for the host itself. */
+/** "85°C", "90%", "10 loads/h". */
+export const thresholdText = (value: number | null, unit: KindInfo["unit"]) => `${value}${unit && /^[a-z]/i.test(unit) ? " " : ""}${unit ?? ""}`;
+
+/** "GPU0", a disk's path, a model's name, or "" for the host itself. */
 export const subjectText = (subject: string) => subject.replace(/^gpu(\d+)$/, "GPU$1");

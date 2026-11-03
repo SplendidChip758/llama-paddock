@@ -322,6 +322,12 @@ function toEvent(r: EventRow): HostEvent {
   return e;
 }
 
+/** A host's model load and unload events since `since`, in time order: what the reload warnings count. */
+export function modelEvents(instance: string, since: number): HostEvent[] {
+  return (db().prepare("SELECT * FROM events WHERE instance = ? AND t >= ? AND kind IN ('load', 'unload') ORDER BY t, id")
+    .all(instance, since) as unknown as EventRow[]).map(toEvent);
+}
+
 /** What a host looked like at some point in an observed span: null = not known yet in that span. */
 export interface HostState {
   ollama: boolean | null;

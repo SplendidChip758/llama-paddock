@@ -23,6 +23,7 @@ export function MonitorTab({ st }: { st: InstanceSnapshot }) {
       <h2 style={{ marginBottom: 12 }}>
         Loaded models <span className="faint" style={{ textTransform: "none", letterSpacing: 0 }}>· ollama ps</span>
       </h2>
+      <ReloadNotice st={st} />
       <div className="card">
         <PsTable st={st} />
       </div>
@@ -90,7 +91,7 @@ function PsTable({ st }: { st: InstanceSnapshot }) {
               </td>
               <td>{m.details?.parameter_size ?? "–"}</td>
               <td>{m.details?.quantization_level ?? "–"}</td>
-              <td className="r num">{fmtNum(m.context_length)}</td>
+              <td className="r num"><ContextCell m={m} /></td>
               <td className="r num">{fmtBytes(m.size)}</td>
               <td>
                 <Processor m={m} />
@@ -104,6 +105,40 @@ function PsTable({ st }: { st: InstanceSnapshot }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/** The context a model runs with, the most it supports, and why a short one matters. */
+function ContextCell({ m }: { m: LoadedModel }) {
+  const c = m.context;
+  const warn = c?.state === "short" || c?.state === "default";
+  return (
+    <>
+      <span className={c?.state === "short" ? "warn-text" : undefined}>{fmtNum(m.context_length)}</span>
+      {c?.max != null && <span className="faint"> / {fmtNum(c.max)}</span>}
+      {warn && (
+        <details className="split-hint ctx-hint">
+          <summary>{c!.state === "short" ? "Less than the host sets: why?" : "Ollama's default: enough?"}</summary>
+          {c!.hint}
+        </details>
+      )}
+    </>
+  );
+}
+
+/** Models that load again and again, with the likely causes and what to change. */
+function ReloadNotice({ st }: { st: InstanceSnapshot }) {
+  if (!st.reload_churn.length) return null;
+  return (
+    <div className="notice warn reload-notice">
+      {st.reload_churn.map((x) => (
+        <div key={x.model ?? ""}>
+          <b>{x.summary}</b> Each load makes requests wait.
+          {x.causes.length > 0 && <ul>{x.causes.map((y) => <li key={y}>{y}</li>)}</ul>}
+          {x.fixes.length > 0 && <div className="hint">{x.fixes.join(" ")}</div>}
+        </div>
+      ))}
     </div>
   );
 }

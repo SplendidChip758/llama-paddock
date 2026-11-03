@@ -11,6 +11,7 @@
  *   - the Ollama systemd environment (read + edit the drop-in override)
  *   - service restart / status and recent journal logs
  *   - the GPU check: GPU lines from Ollama's log since it started, the nvidia_uvm module, and reloading it
+ *   - when Ollama started model runners, for the dashboard's reload warnings
  *
  * Every endpoint except /health needs `Authorization: Bearer <PADDOCK_AGENT_TOKEN>`.
  * The port serves HTTPS with the agent's own key, and plain HTTP unless PADDOCK_AGENT_HTTP=off.
@@ -441,6 +442,21 @@ async function reloadUvm() {
   return { ok: removed && loaded && started, steps, stderr: steps.filter((s) => !s.ok).map((s) => `${s.cmd}: ${s.stderr}`).join("\n") };
 }
 
+// ------------------------------------------------------------------ model loads
+// Ollama logs "llama runner started in N seconds" once per model load. The dashboard only sees
+// loads that last until a poll, so these times tell it about models that load and unload between
+// polls, such as when a client sends keep_alive 0. Keep RUNNER_STARTED_RE the same in both agents.
+const RUNNER_STARTED_RE = /llama runner started in/;
+
+async function runnerStarts(since) {
+  if (DRY_RUN) return { starts: [], error: "dry run: journalctl disabled" };
+  const r = await run("journalctl", ["-u", UNIT, "--since", `@${Math.floor(since)}`, "-o", "short-unix", "--no-pager"], 30_000);
+  if (r.code !== 0 && !r.truncated) return { starts: [], error: r.stderr.trim() || `journalctl exited with ${r.code}` };
+  // short-unix lines start with the time in seconds
+  const starts = r.stdout.split("\n").filter((l) => RUNNER_STARTED_RE.test(l)).map((l) => parseFloat(l)).filter((t) => t >= since);
+  return r.truncated ? { starts, partial: true } : { starts };
+}
+
 // ------------------------------------------------------------------ TLS
 // The agent makes its own ECDSA key and a self-signed certificate for it. Node can't write X.509
 // certificates, and Windows has no openssl, so a minimal DER encoder builds one. The dashboard pins
@@ -590,6 +606,11 @@ const routes = {
     return { ts: Date.now() / 1000, platform: "linux", log, nvidia_uvm };
   },
   "POST /gpu/reload-uvm": async () => reloadUvm(),
+  "GET /runner-starts": async (_req, url) => {
+    const now = Date.now() / 1000;
+    const since = Math.max(now - 86400, Math.min(Number(url.searchParams.get("since")) || now - 3600, now));
+    return { ts: now, ...(await runnerStarts(since)) };
+  },
 };
 
 async function onRequest(req, res) {

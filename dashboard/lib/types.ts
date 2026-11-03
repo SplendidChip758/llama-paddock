@@ -98,6 +98,35 @@ export interface ModelSplit {
 /** An /api/ps entry as the dashboard serves it. */
 export interface LoadedModel extends PsModel {
   split: ModelSplit;
+  /** missing until the dashboard has read the model's /api/show */
+  context?: ContextCheck;
+}
+
+/** The context a loaded model runs with against what the host sets; see contextCheck() in lib/modelcheck.ts. */
+export interface ContextCheck {
+  /** tokens, from /api/ps */
+  running: number | null;
+  /** the most the model supports, from /api/show */
+  max: number | null;
+  /** what the host sets when a client doesn't: num_ctx in the Modelfile, else OLLAMA_CONTEXT_LENGTH */
+  configured: number | null;
+  configured_by: "modelfile" | "env" | null;
+  /** short: below what the host sets, so a client probably asked for less · default: nothing sets more,
+   *  and the model supports far more · ok · unknown: Ollama doesn't report the running context */
+  state: "ok" | "short" | "default" | "unknown";
+  /** what it means and what to change; null when ok */
+  hint: string | null;
+}
+
+/** A model loaded again and again; see reloadChurn() in lib/modelcheck.ts. */
+export interface ReloadChurn {
+  /** null: loads Ollama's log shows that the polls never saw, so their model isn't known */
+  model: string | null;
+  /** in the last hour */
+  loads: number;
+  summary: string;
+  causes: string[];
+  fixes: string[];
 }
 
 export interface TagModel {
@@ -144,6 +173,8 @@ export interface InstanceSnapshot {
   stats: AgentStats | null;
   /** whether Ollama uses the GPU nvidia-smi sees; null without an agent, an NVIDIA GPU or Ollama answering */
   gpu_check: GpuCheck | null;
+  /** models loaded at least RELOAD_WARN_LOADS times in the last hour */
+  reload_churn: ReloadChurn[];
   updated: number | null;
 }
 
@@ -220,7 +251,7 @@ export interface HostEvent {
 }
 
 /** What an alert rule watches; see lib/rules.ts for each kind's unit and defaults. */
-export type AlertKind = "gpu_temp" | "vram" | "disk" | "host_unreachable" | "agent_unreachable" | "ollama_crash" | "gpu_lost";
+export type AlertKind = "gpu_temp" | "vram" | "disk" | "host_unreachable" | "agent_unreachable" | "ollama_crash" | "gpu_lost" | "context_short" | "reload_churn";
 
 export interface AlertRule {
   id: string;
