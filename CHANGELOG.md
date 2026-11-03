@@ -1,3 +1,9 @@
+## [0.8.0-dev.5](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.4...v0.8.0-dev.5) (2026-11-03)
+
+### Features
+
+* detect when Ollama loses the GPU ([#109](https://github.com/SplendidChip758/llama-paddock/issues/109)) ([4dc2795](https://github.com/SplendidChip758/llama-paddock/commit/4dc279534f5947d4fd58d099fb798dffe4532bc4)), closes [#71](https://github.com/SplendidChip758/llama-paddock/issues/71)
+
 ## [0.8.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.3...v0.8.0-dev.4) (2026-11-02)
 
 ### Features
