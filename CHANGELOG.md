@@ -1,3 +1,9 @@
+## [0.8.0-dev.6](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.5...v0.8.0-dev.6) (2026-11-03)
+
+### Features
+
+* warn about cut-off context and constant model reloads ([#110](https://github.com/SplendidChip758/llama-paddock/issues/110)) ([604ffc1](https://github.com/SplendidChip758/llama-paddock/commit/604ffc101eb225eb7aa0fbab8d4e07d355df17fe)), closes [#71](https://github.com/SplendidChip758/llama-paddock/issues/71) [#72](https://github.com/SplendidChip758/llama-paddock/issues/72)
+
 ## [0.8.0-dev.5](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.4...v0.8.0-dev.5) (2026-11-03)
 
 ### Features
