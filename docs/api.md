@@ -30,6 +30,9 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 | GET | `/api/instances` | `{poll_interval, instances}` with latest status, stats, loaded models, the Ollama `version` and the `agent_version` (`null` if unknown). Each loaded model has `split` and, once its `/api/show` has been read, `context`; each host has `gpu_check` and `reload_churn`. See [Context and reloads](context-and-reloads.md) |
 | GET | `/api/instances/{id}/history` | Recent samples or a requested range; see [History](#history) |
 | GET | `/api/instances/{id}/events` | Availability and model load events over a range; see [Events](#events) |
+| GET | `/api/instances/{id}/requests?range=…` | The host's requests from Ollama's log; see [Requests](#requests) |
+| GET | `/api/request-clients` | `{names}`: names given to client addresses, `{"192.168.30.20": "open-webui"}` |
+| PUT | `/api/request-clients` | `{names}` → `{names}`; replaces them all, and a blank name removes one |
 | GET | `/api/instances/{id}/uptime?range=…` | Ollama's and the agent's availability as timelines and outages; see [Uptime](#uptime) |
 | GET | `/api/uptime?range=…` | `{range, hosts}`: every host's `coverage` and, for `ollama` and `agent`, `up_pct` and the number of `outages` |
 | POST | `/api/instances` | Host fields below → `{id}` (201) |
@@ -65,6 +68,22 @@ Add `?range=…` for `{range, resolution, points}` over a longer interval:
 | `30d` | `900` |
 
 Available points depend on how long the dashboard has collected data and the [retention setting](configuration.md#dashboard-settings). An unsupported range returns 400.
+
+## Requests
+
+`GET /api/instances/{id}/requests?range=1h|24h|7d|30d` (default `24h`) returns the host's [request log](usage.md#requests):
+
+| Field | Meaning |
+|---|---|
+| `total` | `{count, errors, avg_ms, max_ms}` over the range; `errors` counts statuses of 400 and above |
+| `buckets`, `bucket_s` | `[{t, count, errors}]` per `bucket_s` seconds (60, 900, 10800 or 43200 by range); empty buckets are left out |
+| `clients` | The 50 busiest clients: `{client, name, last}` plus the counts. `name` is from `/api/request-clients`, or `null` |
+| `endpoints` | The 50 busiest `{method, path}` plus the counts |
+| `models` | Requests matched to a model (the one loaded at the time), plus the counts |
+| `slowest`, `recent` | The 10 slowest and 50 latest requests: `{t, status, duration_ms, client, method, path, model}` |
+| `sync` | `{last_ok, error, unsupported, skipped}`: the last successful read of the agent's log, the last error, whether the agent is too old to read it, and lines skipped in an unknown format |
+
+Times are unix seconds. Monitoring calls (`GET /api/ps`, `/api/version`, `/`) aren't stored.
 
 ## Uptime
 
@@ -220,5 +239,6 @@ The agent listens separately, normally on port 11435, for HTTPS and (unless `PAD
 | GET | `/gpu-check` | `{ts, platform, log, nvidia_uvm?}`: the GPU-related lines of Ollama's log since it last started (`log.lines`, and `log.error` when it can't be read), and on Linux the `nvidia_uvm` state (agents from 0.8.0) |
 | GET | `/runner-starts?since=…` | `{ts, starts}`: the times (unix seconds, the agent's clock) Ollama logged a model runner starting since `since` (at most a day back; default an hour), and `error` when the log can't be read (agents from 0.8.0) |
 | POST | `/gpu/reload-uvm` | Linux, as root, outside a container: stops Ollama, reloads `nvidia_uvm` and starts Ollama → `{ok, steps, stderr}`; 409 where it can't. The Windows agent answers 400 (agents from 0.8.0) |
+| GET | `/requests?since=…` | `{requests, until, more, skipped}`: the request lines in Ollama's log after `since` (unix seconds), at most 5000. Ask again from `until` while `more` is true; `skipped` counts lines in an unknown format (agents from 0.8.0) |
 
 Both agents implement these routes. Installation and configuration: [Linux](agent-linux.md) · [Windows](agent-windows.md).

@@ -133,6 +133,13 @@ h3 { font-size: 15px; }
 .seg button { border: 0; background: none; padding: 4px 12px; border-radius: 999px; color: var(--muted); cursor: pointer; font-family: var(--mono); font-size: 12px; }
 .seg button:hover { color: var(--text); }
 .seg button.on { background: var(--panel2); color: var(--text); box-shadow: 0 0 0 1px var(--line); }
+/* request log: bars per time bucket, the errors' share of each in red */
+.reqbars { display: flex; align-items: flex-end; gap: 2px; height: 90px; }
+.reqbar { flex: 1 1 0; min-width: 0; height: 100%; display: flex; align-items: flex-end; }
+.reqbar i { display: flex; flex-direction: column; justify-content: flex-end; width: 100%; min-height: 0; background: color-mix(in srgb, var(--accent) 75%, transparent); border-radius: 2px 2px 0 0; overflow: hidden; }
+.reqbar em { display: block; width: 100%; background: var(--bad); }
+.bad-text { color: var(--bad); }
+td.num, th.num { text-align: right; }
 /* availability timelines: hatched where the dashboard wasn't watching; outages keep a visible minimum width */
 .tl-row { display: grid; grid-template-columns: 120px 1fr; gap: 12px; align-items: center; margin-bottom: 8px; }
 .tl-label { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; color: var(--muted); }
