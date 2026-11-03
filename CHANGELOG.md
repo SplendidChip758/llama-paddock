@@ -1,3 +1,9 @@
+## [0.8.0-dev.7](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.6...v0.8.0-dev.7) (2026-11-03)
+
+### Features
+
+* add a request log for each host ([#111](https://github.com/SplendidChip758/llama-paddock/issues/111)) ([4794d5e](https://github.com/SplendidChip758/llama-paddock/commit/4794d5e0994528b057f57db4420e09c2c56373dc)), closes [#73](https://github.com/SplendidChip758/llama-paddock/issues/73)
+
 ## [0.8.0-dev.6](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.5...v0.8.0-dev.6) (2026-11-03)
 
 ### Features
