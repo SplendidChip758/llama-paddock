@@ -82,6 +82,16 @@ Only variables Ollama and its GPU runtimes read can be set from the dashboard: `
 
 The Logs tab tails `journalctl -u ollama` on Linux, `server.log` on Windows, with optional auto-refresh. Errors and warnings are highlighted.
 
+## Requests
+
+The Requests tab shows the calls made to Ollama on the host over the last hour, day, week or month: how many over time, with the errors in red; per client and per endpoint with their error rates and durations; per model; and the slowest and latest requests. **Name** next to a client address gives it a name, such as `open-webui`, shown wherever that address appears, on every host.
+
+The agent reads the requests from Ollama's own log (the journal on Linux, `server.log` on Windows), and the dashboard collects them every 10 polls and keeps them for `history_retention_days`. Each line has the time, status, duration, client address, method and endpoint. **No prompts or answers are collected:** Ollama doesn't log them. Monitoring calls (`/api/ps`, `/api/version`) aren't kept, since the dashboard itself makes one every few seconds. The dashboard's other calls, such as the [context check](context-and-reloads.md)'s `/api/show` for a newly loaded model and actions from the Models tab, are kept under the dashboard's address.
+
+Ollama's log doesn't name the model either. A request that runs a model (`/api/generate`, `/api/chat`, `/api/embed`, the `/v1` equivalents) is counted for a model when exactly one model was loaded at the time and the request succeeded; otherwise its model is left blank. The client address is what Ollama saw: behind a proxy, that's the proxy's.
+
+Agents before 0.8.0 don't read the request log; the tab says so until the agent is updated. A line that looks like a request in a format this version doesn't know, as a newer Ollama might write, is skipped and counted at the bottom of the tab.
+
 ## History and jobs
 
 Metric history and job state are stored in `paddock.db` in the [data directory](configuration.md#data-directory). The Monitor tab's sparklines show the last `history_points` polls and its History charts the longer ranges; the same data is available through the [history API](api.md#history). The dashboard also records when Ollama and the agent go down or come back and when models are loaded or unloaded, along with the times it wasn't watching, through the [events API](api.md#events).

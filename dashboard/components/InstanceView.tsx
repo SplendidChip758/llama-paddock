@@ -9,6 +9,7 @@ import { MonitorTab } from "./MonitorTab";
 import { ModelsTab } from "./ModelsTab";
 import { EnvTab } from "./EnvTab";
 import { LogsTab } from "./LogsTab";
+import { RequestsTab } from "./RequestsTab";
 import { TABS, type Tab } from "@/lib/tabs";
 import { HostEditor } from "./HostEditor";
 import { AgentKeyNotice, AgentPlainChip, HttpsOffer, agentEncrypted } from "./AgentTls";
@@ -93,6 +94,7 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
       {tab === "models" && <ModelsTab st={st} />}
       {tab === "env" && <EnvTab st={st} key={id} />}
       {tab === "logs" && <LogsTab st={st} key={id} />}
+      {tab === "requests" && <RequestsTab st={st} key={id} />}
     </>
   );
 }

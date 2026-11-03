@@ -17,6 +17,7 @@ import {
 } from "./modelcheck";
 import { nativeContext, parseParameters } from "./params";
 import { startNotifications } from "./notify";
+import { forgetRequests, syncRequests } from "./requests";
 import { isCloudModel, withSplit } from "./split";
 import type {
   AgentGpuCheck, AgentStats, EnvState, GpuCheck, GpuFixAction, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, LoadedModel, PsModel,
@@ -269,6 +270,7 @@ export function updateInstance(id: string, body: InstanceInput): Instance {
     p.instances.set(id, new InstanceState(inst));
     deleteHistory(id);
     forgetAlerts(id, "the host's address or token was changed");
+    forgetRequests(id);
   } else if (
     inst.ollama_proxy_key !== prev.ollama_proxy_key || inst.agent_url !== prev.agent_url || inst.agent_fingerprint !== prev.agent_fingerprint
   ) {
@@ -290,6 +292,7 @@ export function removeInstance(id: string) {
   persistHosts(p);
   deleteHistory(id);
   forgetAlerts(id, "the host was removed");
+  forgetRequests(id);
 }
 
 /** Accept the key an https:// agent presents now, e.g. after its key was replaced. */
@@ -682,10 +685,23 @@ const polledHost = (st: InstanceState): PolledHost => ({
 });
 
 const MAINTAIN_EVERY_MS = 60_000;
+/** Every this many polls, read the new lines of each host's request log (every 30 s at the default interval). */
+const REQUESTS_EVERY_POLLS = 10;
+
+/** Read each reachable agent's new request lines, in the background: a slow agent mustn't hold up polling. */
+function syncAllRequests(p: Paddock) {
+  // a request's model is loaded by the poll after it, or the one after that
+  const lag = 2 * p.settings.poll_interval + 1;
+  for (const st of p.instances.values()) {
+    const inst = st.inst;
+    if (!inst.agent_url || !st.agent_ok || st.agent_key_changed) continue;
+    void syncRequests(inst.id, async (path) => (await agentCall(inst, "GET", path, undefined, 30_000)).data, lag);
+  }
+}
 
 async function pollLoop(p: Paddock) {
   let maintained = 0;
-  for (;;) {
+  for (let round = 0; ; round++) {
     const started = Date.now();
     const polled = [...p.instances.values()];
     const results = await Promise.allSettled(polled.map(pollOne));
@@ -706,6 +722,7 @@ async function pollLoop(p: Paddock) {
       if (wantsGpuEvidence(st)) void refreshGpuEvidence(st);
       refreshModelState(st, p.settings.poll_interval);
     }
+    if (round % REQUESTS_EVERY_POLLS === REQUESTS_EVERY_POLLS - 1) syncAllRequests(p);
     try {
       evaluateAlerts(observed.map(polledHost), [...p.instances.keys()], gapAfter);
     } catch (e) {

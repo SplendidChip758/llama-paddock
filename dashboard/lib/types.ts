@@ -358,6 +358,54 @@ export interface AlertTransition {
   flapping: boolean;
 }
 
+/** One request from Ollama's log, as the agents' GET /requests returns it. */
+export interface AgentRequest {
+  /** when it finished, unix seconds */
+  t: number;
+  status: number;
+  duration_ms: number;
+  /** the client's IP address, as Ollama saw it */
+  client: string;
+  method: string;
+  /** without the query string */
+  path: string;
+}
+
+export interface RequestCount {
+  count: number;
+  /** answered with status 400 or above */
+  errors: number;
+  avg_ms: number;
+  max_ms: number;
+}
+
+/** A host's request log over a range, from GET /api/instances/{id}/requests. */
+export interface RequestSummary {
+  range: string;
+  from: number;
+  to: number;
+  /** seconds per bucket in `buckets` */
+  bucket_s: number;
+  total: RequestCount;
+  buckets: { t: number; count: number; errors: number }[];
+  /** `name`: what the client's address has been named, or null */
+  clients: (RequestCount & { client: string; name: string | null; last: number })[];
+  endpoints: (RequestCount & { method: string; path: string })[];
+  /** requests matched to the one model that was loaded then; the rest are left out */
+  models: (RequestCount & { model: string })[];
+  slowest: (AgentRequest & { model: string | null })[];
+  recent: (AgentRequest & { model: string | null })[];
+  /** how collecting goes for this host: the last successful read, and the last error */
+  sync: {
+    last_ok: number | null;
+    error: string | null;
+    /** the agent is older than 0.8.0 and has no request log */
+    unsupported: boolean;
+    /** lines that looked like requests but couldn't be read, since the dashboard started */
+    skipped: number;
+  };
+}
+
 export type ChannelType = "webhook" | "discord" | "slack" | "email";
 
 /** A notification channel as the API returns it. Secrets (URLs, tokens, passwords) never leave the server. */

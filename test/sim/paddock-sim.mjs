@@ -68,6 +68,11 @@
  * remote_host/remote_model, answering /api/generate, but never in /api/ps since it runs remotely.
  *   GET  /_sim/config.yaml              the same config.yaml as --write-config
  *
+ * Request log: the simulated Ollama records each request it answers, as Ollama's log would (time,
+ * status, duration, client, method, path), and the agent serves them on GET /requests?since=…
+ * A request with an X-Sim-Client header is recorded as coming from that address, so tests can
+ * play several client machines from one.
+ *
  * Webhook receiver, for the dashboard's notification channels (any name; point a Webhook, Discord
  * or Slack channel at http://<bind>:<base-port>/_sim/webhook/<name>):
  *   POST   /_sim/webhook/<name>         records the message (and logs its summary); 204
@@ -263,6 +268,8 @@ function makeHost(n, o) {
     pulls: [],
     activePulls: 0,
     requests: {},
+    /** what Ollama's log would say about each request it answered: {t, status, duration_ms, client, method, path} */
+    requestLog: [],
     restarts: 0,
     startedAt: Date.now(),
     pid: 1000 + n * 37,
@@ -560,10 +567,23 @@ function ollamaAuthorized(h, req) {
   return a.toLowerCase().startsWith("bearer ") && a.slice(7).trim() === h.ollamaKey;
 }
 
+/** Requests the simulated log keeps per host. */
+const REQUEST_LOG_MAX = 20_000;
+
 async function handleOllama(h, req, res) {
   const url = new URL(req.url, "http://ollama");
   const key = `${req.method} ${url.pathname}`;
   h.requests[`ollama ${key}`] = (h.requests[`ollama ${key}`] ?? 0) + 1;
+  const started = performance.now();
+  const client = String(req.headers["x-sim-client"] || req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+  // logged when the answer is done, as gin does (a request cut off midway is still logged)
+  res.once("close", () => {
+    h.requestLog.push({
+      t: Date.now() / 1000, status: res.statusCode, duration_ms: Math.round((performance.now() - started) * 1000) / 1000,
+      client, method: req.method, path: url.pathname,
+    });
+    if (h.requestLog.length > REQUEST_LOG_MAX) h.requestLog.splice(0, h.requestLog.length - REQUEST_LOG_MAX);
+  });
   if (h.scenario.ollama === "hang") return void h.hung.add(res);
   if (h.scenario.ollama === "error") return sendJson(res, 500, { error: "simulated internal server error" });
   // like a reverse proxy in front of Ollama: plain 401, before Ollama sees the request
@@ -816,6 +836,15 @@ const agentRoutes = {
     const since = Math.max(now - 86400, Math.min(Number(url.searchParams.get("since")) || now - 3600, now));
     const starts = h.log.filter((l) => /llama runner started in/.test(l)).map((l) => Date.parse(/time=(\S+)/.exec(l)[1]) / 1000).filter((t) => t >= since);
     return { ts: now, starts };
+  },
+  // the agents' answer shape; the simulated log has no lines in an unknown format, so nothing is skipped
+  "GET /requests": (h, _req, url) => {
+    const now = Date.now() / 1000;
+    const s = Number(url.searchParams.get("since"));
+    const since = Number.isFinite(s) && s > 0 ? s : now - 3600;
+    const requests = h.requestLog.filter((x) => x.t > since && x.t <= now).slice(0, 5000);
+    const more = requests.length === 5000;
+    return { requests, until: more ? requests[requests.length - 1].t : now, more, skipped: 0 };
   },
 };
 
