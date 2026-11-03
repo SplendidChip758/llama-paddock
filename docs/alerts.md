@@ -1,6 +1,6 @@
 # Alerts
 
-The dashboard checks alert rules against every poll of every host: GPU temperature, VRAM usage, disk space, unreachable hosts and agents, and Ollama crashing. Open **Alerts** in the header to see what is firing and to edit the rules. The header shows how many alerts are firing.
+The dashboard checks alert rules against every poll of every host: GPU temperature, VRAM usage, disk space, unreachable hosts and agents, Ollama crashing, and Ollama losing the GPU. Open **Alerts** in the header to see what is firing and to edit the rules. The header shows how many alerts are firing.
 
 Alerts are shown in the dashboard, logged, recorded in `paddock.db`, and sent to the [notification channels](#notifications) you set up: Discord, Slack, email or any webhook.
 
@@ -14,10 +14,11 @@ Alerts are shown in the dashboard, logged, recorded in `paddock.db`, and sent to
 | **Host unreachable** | Neither Ollama nor the agent answers. For a host without an agent, Ollama not answering | | for 1 minute |
 | **Agent unreachable** | The agent doesn't answer, or turns down the token or key, while Ollama answers | | for 2 minutes |
 | **Ollama crashed or restarted** | Ollama's API is down while the agent answers; or the agent sees a new Ollama server process, the process gone, or fewer runner processes than loaded models | | for 30 seconds; a restart, an exited process or runner fires at once |
+| **Ollama lost the GPU** | The [GPU check](gpu-check.md) says the GPU is lost: `nvidia-smi` sees a GPU, but the loaded models run entirely on the CPU, or Ollama's log shows it found no GPU or hit GPU errors. Settings that ask for the CPU don't count | | for 1 minute |
 
-The GPU, disk and Ollama crash rules need the agent. The first poll after the dashboard starts sees no restart: a new Ollama process only counts when the previous one was seen in the polls just before. On Windows, the agent can't tell the server process from the runners, so a restart there is noticed when Ollama's processes or API go away, or a runner is missing, rather than by a new process ID. Restarts started from the dashboard (**Restart Ollama**, or saving the environment) don't count as crashes.
+The GPU, disk, Ollama crash and lost GPU rules need the agent. The first poll after the dashboard starts sees no restart: a new Ollama process only counts when the previous one was seen in the polls just before. On Windows, the agent can't tell the server process from the runners, so a restart there is noticed when Ollama's processes or API go away, or a runner is missing, rather than by a new process ID. Restarts started from the dashboard (**Restart Ollama**, or saving the environment) don't count as crashes.
 
-A new installation starts with these six rules for every host. Each rule has:
+A new installation starts with these seven rules for every host. An installation that saved its rules before the **Ollama lost the GPU** rule existed keeps its saved list: add the rule on the Alerts page. Each rule has:
 
 - **For:** how long the condition has to hold before the alert fires. Until then it shows as *pending*. `0` fires on the first poll that sees it.
 - **Clear for:** how long the condition has to be gone before a firing alert resolves (default 1 minute), so a value hovering around the threshold doesn't fire and resolve on every poll.

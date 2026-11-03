@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { api, fmtBytes, fmtDur, fmtMiB, fmtNum, instPath, level, pct, untilText } from "@/lib/format";
 import { isOffloaded, splitHint, splitText } from "@/lib/split";
 import type { GpuProcess, GpuStats, HistoryPoint, InstanceSnapshot, LoadedModel, ServiceStatus, SystemStats } from "@/lib/types";
+import { GpuCheckCard } from "./GpuCheck";
 import { Availability } from "./Availability";
 import { HistoryCharts } from "./HistoryCharts";
 import { usePaddock } from "./PaddockProvider";
@@ -34,9 +35,12 @@ export function MonitorTab({ st }: { st: InstanceSnapshot }) {
         ) : nv && !nv.available ? (
           <div className="notice warn">nvidia-smi: {nv.error}</div>
         ) : nv ? (
-          <div className="grid g2">
-            {nv.gpus.map((g, i) => <GpuCard key={g.uuid} g={g} gi={i} hist={hist} procs={nv.processes} />)}
-          </div>
+          <>
+            <GpuCheckCard st={st} />
+            <div className="grid g2">
+              {nv.gpus.map((g, i) => <GpuCard key={g.uuid} g={g} gi={i} hist={hist} procs={nv.processes} />)}
+            </div>
+          </>
         ) : null}
       </div>
       {sys && st.stats && (

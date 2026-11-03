@@ -56,7 +56,7 @@ test("a new install has default rules; rules are saved with mode 600", async () 
   const r = await c.get("/api/alerts/rules");
   assert.equal(r.status, 200);
   const kinds = r.data.rules.map((x) => x.kind).sort();
-  assert.deepEqual(kinds, ["agent_unreachable", "disk", "gpu_temp", "host_unreachable", "ollama_crash", "vram"]);
+  assert.deepEqual(kinds, ["agent_unreachable", "disk", "gpu_lost", "gpu_temp", "host_unreachable", "ollama_crash", "vram"]);
   assert.equal(r.data.rules.find((x) => x.kind === "vram").enabled, false);
 
   const put = await c.put("/api/alerts/rules", { rules: RULES });

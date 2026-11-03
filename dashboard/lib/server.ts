@@ -10,10 +10,14 @@ import {
   deleteHistory, deleteJobs, loadJobs, maintainHistory, recordObservations, recordSamples, saveJob, type ObservedSpan,
 } from "./db";
 import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
+import { diagnoseGpu, isGpuLogLine, modelKey, ollamaRun, onCpu, readLog, type GpuEvidence } from "./gpucheck";
 import { HttpError } from "./http-error";
+import { parseParameters } from "./params";
 import { startNotifications } from "./notify";
 import { withSplit } from "./split";
-import type { AgentStats, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, PsModel } from "./types";
+import type {
+  AgentGpuCheck, AgentStats, EnvState, GpuCheck, GpuFixAction, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, PsModel,
+} from "./types";
 
 // ============================================================================ errors
 export { HttpError };
@@ -66,8 +70,16 @@ class InstanceState {
   /** Ollama restarts started from the dashboard that are still running, and when the last one's effects should be over (ms) */
   restarting = 0;
   restart_settled = 0;
+  /** what the GPU check last read from the agent; see refreshGpuEvidence() */
+  gpu_evidence: GpuEvidence | null = null;
+  gpu_reading: Promise<void> | null = null;
+  gpu_read_at = 0;
 
   constructor(public inst: Instance) {}
+
+  gpuCheck(): GpuCheck | null {
+    return diagnoseGpu(this, this.gpu_evidence);
+  }
 
   snapshot(): InstanceSnapshot {
     const i = this.inst;
@@ -77,7 +89,7 @@ class InstanceState {
       agent_key_changed: this.agent_key_changed, agent_https_fingerprint: this.agent_https_fingerprint,
       has_ollama_proxy_key: !!i.ollama_proxy_key, source: i.source,
       ollama_ok: this.ollama_ok, ollama_error: this.ollama_error, agent_ok: this.agent_ok,
-      agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.ps.map(withSplit), stats: this.stats, updated: this.updated,
+      agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.ps.map(withSplit), stats: this.stats, gpu_check: this.gpuCheck(), updated: this.updated,
     };
   }
 }
@@ -624,7 +636,7 @@ function observe(st: InstanceState, gapAfter: number): { span: ObservedSpan; eve
 const polledHost = (st: InstanceState): PolledHost => ({
   id: st.inst.id, t: st.updated!, has_agent: !!st.inst.agent_url,
   ollama_ok: st.ollama_ok, ollama_error: st.ollama_error, agent_ok: st.agent_ok, agent_error: st.agent_error,
-  stats: st.stats, ps: st.ps, restart_expected: st.restarting > 0 || Date.now() < st.restart_settled,
+  stats: st.stats, ps: st.ps, restart_expected: st.restarting > 0 || Date.now() < st.restart_settled, gpu_check: st.gpuCheck(),
 });
 
 const MAINTAIN_EVERY_MS = 60_000;
@@ -647,6 +659,7 @@ async function pollLoop(p: Paddock) {
     // a poll that is late by a few intervals (plus slack for hosts that time out) is a gap in observation
     const gapAfter = 3 * p.settings.poll_interval + 30;
     const changes = observed.map((st) => observe(st, gapAfter));
+    for (const st of observed) if (wantsGpuEvidence(st)) void refreshGpuEvidence(st);
     try {
       evaluateAlerts(observed.map(polledHost), [...p.instances.keys()], gapAfter);
     } catch (e) {
@@ -671,6 +684,92 @@ async function pollLoop(p: Paddock) {
     const wait = Math.max(500, p.settings.poll_interval * 1000 - (Date.now() - started));
     await new Promise((r) => setTimeout(r, wait));
   }
+}
+
+// ============================================================================ GPU check
+/** At most one read of a host's GPU evidence per this many polls, whatever triggers it. */
+const GPU_READ_MIN_POLLS = 5;
+/** While the GPU looks lost, read again this often, so the causes follow what changes on the host. */
+const GPU_READ_LOST_EVERY_S = 10 * 60;
+
+/**
+ * Whether to read the GPU evidence again. It only changes when Ollama restarts (a new log and a new
+ * GPU discovery) or a model loads on the CPU (its Modelfile may ask for that), so a healthy host
+ * costs one read per run of Ollama.
+ */
+function wantsGpuEvidence(st: InstanceState): boolean {
+  const stats = st.stats;
+  if (!st.agent_ok || !st.ollama_ok || !stats?.nvidia.available || !stats.nvidia.gpus.length) return false;
+  if (st.gpu_reading || Date.now() - st.gpu_read_at < GPU_READ_MIN_POLLS * paddock().settings.poll_interval * 1000) return false;
+  const ev = st.gpu_evidence;
+  if (!ev || ev.run !== ollamaRun(stats)) return true;
+  if (onCpu(st.ps).some((m) => !(modelKey(m) in ev.models))) return true;
+  return st.gpuCheck()?.state === "lost" && Date.now() / 1000 - ev.t > GPU_READ_LOST_EVERY_S;
+}
+
+async function readGpuEvidence(inst: Instance, stats: AgentStats, ps: PsModel[]): Promise<GpuEvidence> {
+  const cpu = onCpu(ps);
+  const [check, env, models] = await Promise.all([
+    agent<AgentGpuCheck>(inst, "GET", "/gpu-check", undefined, 70_000).catch((e: unknown) => e as Error),
+    agent<EnvState>(inst, "GET", "/env", undefined, 15_000).catch(() => null),
+    Promise.all(cpu.map(async (m) => {
+      const show = await ollama<{ parameters?: string }>(inst, "POST", "/api/show", { model: m.name }, 10_000).catch(() => null);
+      return [modelKey(m), parseParameters(show?.parameters).num_gpu === 0] as const;
+    })),
+  ]);
+  let lines: string[] = [], log_error: string | null = null, log_partial = false;
+  if (!(check instanceof Error)) {
+    lines = check.log?.lines ?? [];
+    log_error = check.log?.error ?? null;
+  } else if (check instanceof HttpError && check.status === 404) {
+    // agents before 0.8.0: the end of the log is all they serve
+    log_partial = true;
+    try {
+      lines = (await agent<{ lines: string[] }>(inst, "GET", "/logs?lines=2000", undefined, 20_000)).lines.filter(isGpuLogLine);
+    } catch (e) {
+      log_error = errText(e);
+    }
+  } else log_error = errText(check);
+  return {
+    t: Date.now() / 1000, run: ollamaRun(stats), platform: stats.platform ?? "linux", facts: readLog(lines), log_error, log_partial,
+    uvm: check instanceof Error ? null : check.nvidia_uvm ?? null,
+    // on Linux, effective is what the unit runs with; on Windows, the user's variables over the machine's
+    env: env ? { ...env.managed, ...env.effective } : {},
+    models: Object.fromEntries(models),
+  };
+}
+
+function refreshGpuEvidence(st: InstanceState): Promise<void> {
+  if (st.gpu_reading) return st.gpu_reading;
+  const stats = st.stats;
+  if (!stats) return Promise.resolve();
+  st.gpu_read_at = Date.now();
+  st.gpu_reading = readGpuEvidence(st.inst, stats, st.ps)
+    .then((ev) => {
+      st.gpu_evidence = ev;
+    })
+    .catch((e) => console.error(`[llama-paddock] ${st.inst.id}: reading the GPU check's evidence failed:`, e))
+    .finally(() => {
+      st.gpu_reading = null;
+    });
+  return st.gpu_reading;
+}
+
+/** Read the evidence now, as the Monitor tab's "Check again" asks. */
+export async function checkGpu(id: string): Promise<GpuCheck | null> {
+  const st = getState(id);
+  if (!st.inst.agent_url) throw new HttpError(400, `${st.inst.name} has no agent, which the GPU check needs`);
+  await st.gpu_reading;
+  await refreshGpuEvidence(st);
+  return st.gpuCheck();
+}
+
+/** Run one of the GPU check's fixes. Either restarts Ollama, so the next poll reads the evidence of its new run. */
+export async function fixGpu(id: string, action: GpuFixAction) {
+  const inst = getInstance(id);
+  if (!inst.agent_url) throw new HttpError(400, `${inst.name} has no agent`);
+  const path = action === "reload_uvm" ? "/gpu/reload-uvm" : "/service/restart";
+  return expectedRestart(id, () => agent<{ ok: boolean; stderr?: string }>(inst, "POST", path, undefined, 240_000));
 }
 
 // ============================================================================ jobs (pull / create)

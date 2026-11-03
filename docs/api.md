@@ -37,6 +37,9 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 | DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history, events and alert transitions; its firing alerts resolve |
 | POST | `/api/test-connection` | Host fields plus optional existing `id` → separate `ollama` and `agent` results; `agent.fingerprint` is the key the agent presented (`https://`) or reports (`http://`) |
 | POST | `/api/instances/{id}/agent-key` | `{fingerprint}` → pins that key for an `https://` agent, e.g. after its key was replaced; 409 when `config.yaml` sets it |
+| GET | `/api/instances/{id}/gpu-check` | `{check}`: the [GPU check](gpu-check.md) as of the last poll, the same as `gpu_check` in `/api/instances`; `null` without an agent, an NVIDIA GPU or Ollama answering |
+| POST | `/api/instances/{id}/gpu-check` | Reads Ollama's log and settings again → `{check}` |
+| POST | `/api/instances/{id}/gpu-check/fix` | `{action}`: `restart` or `reload_uvm` (Linux agents from 0.8.0, as root, outside a container) → the agent's `{ok, stderr}` |
 | POST | `/api/instances/{id}/agent-https` | Switches a UI host's `http://` agent URL to `https://`, pinning the key the agent reports → `{id, agent_url, agent_fingerprint}`; 409 for `config.yaml` hosts or agents that don't report a key |
 
 Host fields are `name`, `ollama_url`, `ollama_proxy_key`, `agent_url`, `agent_token`, `agent_fingerprint` and `tags`. `agent_fingerprint` applies to `https://` agent URLs: `SHA256:<base64>` as the agent installer prints it (bare base64 and hex are accepted too). Blank pins the key the agent presents on the first connection; omitted keeps the stored pin. `ollama_url` is required. `tags` accepts an array or comma-separated string. Use the ID returned by creation or listed in `/api/instances` in later requests.
@@ -129,7 +132,7 @@ A rule is `{id, name, kind, enabled, threshold, for_s, clear_s, hosts, channels}
 | Field | Meaning |
 |---|---|
 | `id` | Letters, digits, `_`, `.` or `-`. Omit it for a new rule to get one made from the name. Keep it when editing: alerts belong to the rule's ID |
-| `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable` or `ollama_crash`; see [Alerts](alerts.md#rules) |
+| `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable`, `ollama_crash` or `gpu_lost`; see [Alerts](alerts.md#rules) |
 | `threshold` | Above 0, at most 150 for `gpu_temp` and 100 for the percentages; `null` for the kinds without one |
 | `for_s`, `clear_s` | Whole seconds, 0 to 86400: how long the condition has to hold before firing, and be gone before resolving |
 | `hosts` | Host IDs, or `null` for every host including ones added later |
@@ -214,5 +217,7 @@ The agent listens separately, normally on port 11435, for HTTPS and (unless `PAD
 | PUT | `/env` | `{vars, restart?}`; replace managed variables on the allowlist, removing omitted ones; preserve variables outside the list. Restarts unless `restart` is `false`. See [preserving settings](#preserve-existing-environment-settings) |
 | POST | `/service/restart` | Restart Ollama |
 | GET | `/logs?lines=500` | Ollama log tail |
+| GET | `/gpu-check` | `{ts, platform, log, nvidia_uvm?}`: the GPU-related lines of Ollama's log since it last started (`log.lines`, and `log.error` when it can't be read), and on Linux the `nvidia_uvm` state (agents from 0.8.0) |
+| POST | `/gpu/reload-uvm` | Linux, as root, outside a container: stops Ollama, reloads `nvidia_uvm` and starts Ollama → `{ok, steps, stderr}`; 409 where it can't. The Windows agent answers 400 (agents from 0.8.0) |
 
 Both agents implement these routes. Installation and configuration: [Linux](agent-linux.md) · [Windows](agent-windows.md).

@@ -142,7 +142,48 @@ export interface InstanceSnapshot {
   agent_version: string | null;
   ps: LoadedModel[];
   stats: AgentStats | null;
+  /** whether Ollama uses the GPU nvidia-smi sees; null without an agent, an NVIDIA GPU or Ollama answering */
+  gpu_check: GpuCheck | null;
   updated: number | null;
+}
+
+/** The agent's GET /gpu-check (agents from 0.8.0): evidence for the GPU check, read when the dashboard asks. */
+export interface AgentGpuCheck {
+  ts: number;
+  platform?: Platform;
+  /** GPU-related lines from Ollama's log since it last started */
+  log: { source: "journal" | "server.log"; lines: string[]; error?: string };
+  /** Linux: the NVIDIA kernel modules. In a container they belong to the host, so can_reload is false there. */
+  nvidia_uvm?: { driver: boolean; module: boolean; device: boolean; container: boolean; can_reload: boolean };
+}
+
+export type GpuFixAction = "restart" | "reload_uvm";
+
+export interface GpuFix {
+  /** a fix the dashboard runs through the agent; null for a command to run by hand */
+  action: GpuFixAction | null;
+  label: string;
+  detail: string;
+  command?: string;
+}
+
+/** See diagnoseGpu() in lib/gpucheck.ts. */
+export interface GpuCheck {
+  /** ok: Ollama uses the GPU · lost: a GPU is present, but Ollama runs on the CPU or failed to use it ·
+   *  cpu_intended: on the CPU because a setting says so · unknown: nothing loaded, and the log doesn't tell */
+  state: "ok" | "lost" | "cpu_intended" | "unknown";
+  summary: string;
+  /** likely causes, the likeliest first; lost only */
+  causes: string[];
+  fixes: GpuFix[];
+  /** what the result rests on, as sentences */
+  evidence: string[];
+  /** the lines of Ollama's log since its last start that the result rests on */
+  log_lines: string[];
+  /** when Ollama's log and settings were read; null: not yet in this run of Ollama, so only /api/ps counts */
+  checked_at: number | null;
+  /** what limited the check, such as an older agent or an unreadable log */
+  notes: string[];
 }
 
 export interface HistoryPoint {
@@ -179,7 +220,7 @@ export interface HostEvent {
 }
 
 /** What an alert rule watches; see lib/rules.ts for each kind's unit and defaults. */
-export type AlertKind = "gpu_temp" | "vram" | "disk" | "host_unreachable" | "agent_unreachable" | "ollama_crash";
+export type AlertKind = "gpu_temp" | "vram" | "disk" | "host_unreachable" | "agent_unreachable" | "ollama_crash" | "gpu_lost";
 
 export interface AlertRule {
   id: string;

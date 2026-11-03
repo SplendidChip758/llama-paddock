@@ -9,7 +9,7 @@
  * Each simulated host gets two ports, because the dashboard addresses hosts by
  * URL: one serves Ollama's HTTP API (the parts the dashboard uses), the other the
  * agent API of agent/linux/paddock-agent.mjs (/health, /stats, /env, /logs,
- * /service/restart, with the same bearer-token rule). Like the agents, the agent
+ * /service/restart, /gpu-check, /gpu/reload-uvm, with the same bearer-token rule). Like the agents, the agent
  * port serves HTTPS with a self-signed certificate (a new key per host and run)
  * and plain HTTP. A third port serves the control API, which switches failure
  * scenarios at runtime.
@@ -40,7 +40,8 @@
  *                 | "drop" (connection cut mid-stream)
  *        create:  "normal" | "stall" | "fail"
  *        pull_seconds, ollama_key (string or null), agent_token,
- *        ollama_version, agent_version (null: /stats leaves the version out, like agents before 0.6.0)
+ *        ollama_version, agent_version (null: /stats leaves the version out, like agents before 0.6.0;
+ *                     below 0.8.0 there is no /gpu-check or /gpu/reload-uvm either, as in those agents)
  *        agent_http:  false = HTTPS only (PADDOCK_AGENT_HTTP=off), true = both (default)
  *        agent_tls:   false = no HTTPS and no fingerprint, like agents before 0.7.0
  *        agent_key:   "new" = replace the agent's key, as the installer's PADDOCK_AGENT_NEW_KEY does
@@ -53,9 +54,14 @@
  *        crash:       "ollama" = Ollama's process dies and systemd starts a new one (new pid, models
  *                     unloaded); "runner" = the runner of the first loaded model exits while
  *                     /api/ps still lists the model, until it's loaded or unloaded again
+ *        gpu_lost:    Ollama loses the GPU, as after a suspend and resume: it logs CUDA error 999, and
+ *                     loaded and newly loaded models run on the CPU while nvidia-smi still sees the
+ *                     GPUs. The value is what brings the GPU back: "restart" (restarting Ollama) or
+ *                     "uvm" (only POST /gpu/reload-uvm). false: the GPU is back at once
  *
  * Models: loading with a num_ctx whose KV cache doesn't fit in the GPUs puts the rest in system RAM
- * (a partial GPU/CPU split), as does a host without GPUs or options.num_gpu 0 (all on the CPU).
+ * (a partial GPU/CPU split), as does a host without GPUs or num_gpu 0 in the request's options or the
+ * Modelfile (all on the CPU).
  * Pulling a name ending in "-cloud" or ":cloud" adds an Ollama cloud model: listed with
  * remote_host/remote_model, answering /api/generate, but never in /api/ps since it runs remotely.
  *   GET  /_sim/config.yaml              the same config.yaml as --write-config
@@ -250,6 +256,8 @@ function makeHost(n, o) {
     partial: new Map(),
     env: { OLLAMA_HOST: "0.0.0.0:11434", OLLAMA_KEEP_ALIVE: "5m" },
     log: [],
+    /** the log since Ollama last started, as the agent's /gpu-check reads it from the journal */
+    runLog: [],
     pulls: [],
     activePulls: 0,
     requests: {},
@@ -268,17 +276,36 @@ function makeHost(n, o) {
     modelsDiskPct: null,
     /** loaded models whose runner process has exited */
     deadRunners: new Set(),
+    /** false, or what brings the GPU back: "restart" or "uvm" */
+    gpuLost: false,
   };
   // the first host has something loaded, so the dashboard shows VRAM in use right away
   if (n === 1) h.loaded.set("llama3.2:3b", { until: Infinity, ctx: 4096 });
-  logLine(h, `Listening on [::]:11434 (version ${h.ollamaVersion})`);
+  ollamaStarted(h);
   return h;
 }
 
-function logLine(h, msg, level = "INFO") {
+function logLine(h, msg, level = "INFO", attrs = "") {
   const ts = new Date().toISOString().replace(/\.\d+Z$/, "+0000");
-  h.log.push(`${ts} ${h.hostname} ollama[${h.pid}]: time=${new Date().toISOString()} level=${level} msg="${msg.replace(/"/g, "'")}"`);
-  if (h.log.length > 2000) h.log.splice(0, h.log.length - 2000);
+  const line = `${ts} ${h.hostname} ollama[${h.pid}]: time=${new Date().toISOString()} level=${level} msg="${msg.replace(/"/g, "'")}"${attrs}`;
+  for (const log of [h.log, h.runLog]) {
+    log.push(line);
+    if (log.length > 2000) log.splice(0, log.length - 2000);
+  }
+}
+
+/** What Ollama logs when it starts, including its GPU discovery (in the wording of Ollama 0.12). */
+function ollamaStarted(h) {
+  h.runLog = [];
+  logLine(h, `Listening on [::]:11434 (version ${h.ollamaVersion})`);
+  if (h.gpuLost || !h.gpus.length) {
+    logLine(h, "no compatible GPUs were discovered");
+    logLine(h, "inference compute", "INFO", ' id=cpu library=cpu compute="" name=cpu description=cpu total="62.7 GiB" available="58.1 GiB"');
+    return;
+  }
+  for (const g of h.gpus) {
+    logLine(h, "inference compute", "INFO", ` id=${g.uuid} library=CUDA compute=8.6 name=CUDA${g.index} description="${GPU_MODEL.name}" driver=12.8 total="24.0 GiB" available="23.5 GiB"`);
+  }
 }
 
 /** Loaded models as /api/ps reports them; drops the ones whose keep_alive ran out. */
@@ -296,7 +323,7 @@ function psModels(h) {
     }
     // file size plus KV cache for the context; spills into system RAM once the GPUs are full
     const size = m.size + l.ctx * 128 * 1024;
-    const size_vram = l.cpuOnly ? 0 : Math.max(0, Math.min(size, vramFree));
+    const size_vram = l.cpuOnly || h.gpuLost ? 0 : Math.max(0, Math.min(size, vramFree));
     vramFree -= size_vram;
     out.push({
       name, model: name, size, digest: m.digest, details: m.details, size_vram, context_length: l.ctx,
@@ -453,12 +480,14 @@ async function generate(h, body, res) {
     logLine(h, `unloaded ${m.name}`);
     return sendJson(res, 200, { ...base, done_reason: "unload" });
   }
+  const cpuOnly = body.options?.num_gpu === 0 || /^num_gpu\s+"?0"?$/m.test(m.parameters ?? "");
   if (!h.loaded.has(m.name) && !m.remote_host) {
     await sleep(300);
+    if (cpuOnly || h.gpuLost || !h.gpus.length) logLine(h, "load_tensors: offloaded 0/29 layers to GPU");
     logLine(h, `loaded ${m.name}`);
   }
   // cloud models run remotely: Ollama forwards the request and loads nothing
-  if (!m.remote_host) h.loaded.set(m.name, { until: Date.now() + ka, ctx: Number(body.options?.num_ctx) || 4096, cpuOnly: body.options?.num_gpu === 0 });
+  if (!m.remote_host) h.loaded.set(m.name, { until: Date.now() + ka, ctx: Number(body.options?.num_ctx) || 4096, cpuOnly });
   if (!body.prompt) return sendJson(res, 200, { ...base, done_reason: "load" });
   const text = "This is a simulated response from llama-paddock's test host.";
   if (body.stream === false) return sendJson(res, 200, { ...base, response: text, done_reason: "stop", eval_count: 12 });
@@ -703,8 +732,19 @@ const BASE_UNIT_ENV = { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 
 async function restartOllama(h) {
   logLine(h, "Stopping ollama.service...");
+  if (h.gpuLost === "restart") h.gpuLost = false;
   await newOllamaProcess(h);
   return { ok: true, stderr: "" };
+}
+
+/** The real agent's POST /gpu/reload-uvm on a bare-metal host: Ollama stops, nvidia_uvm reloads, Ollama starts. */
+async function reloadUvm(h) {
+  if (!h.gpus.length) throw new HttpErr(409, "the NVIDIA kernel driver isn't loaded on this host");
+  logLine(h, "Stopping ollama.service...");
+  h.gpuLost = false;
+  await newOllamaProcess(h);
+  const steps = ["systemctl stop ollama.service", "modprobe -r nvidia_uvm", "modprobe nvidia_uvm", "systemctl start ollama.service"];
+  return { ok: true, steps: steps.map((cmd) => ({ cmd, ok: true, stderr: "" })), stderr: "" };
 }
 
 /** Ollama stops and starts again with a new process, as after systemctl restart or a crash that systemd recovers. */
@@ -718,7 +758,7 @@ async function newOllamaProcess(h) {
   h.startedAt = Date.now();
   h.pid += 2;
   await setOllama(h, "up");
-  logLine(h, `Listening on [::]:11434 (version ${h.ollamaVersion})`);
+  ollamaStarted(h);
 }
 
 const agentRoutes = {
@@ -752,6 +792,13 @@ const agentRoutes = {
     const lines = Math.max(10, Math.min(Number(url.searchParams.get("lines")) || 200, 2000));
     return { lines: h.log.slice(-lines) };
   },
+  "GET /gpu-check": (h) => ({
+    ts: Date.now() / 1000, platform: "linux",
+    // the agents' GPU_LOG_RE
+    log: { source: "journal", lines: h.runLog.filter((l) => /cuda|cudart|nvcuda|nvml|nvidia|rocm|\bhip\b|amdgpu|gpu|vram|inference compute|offload|library=/i.test(l)) },
+    nvidia_uvm: { driver: h.gpus.length > 0, module: h.gpus.length > 0, device: h.gpus.length > 0, container: false, can_reload: h.gpus.length > 0 },
+  }),
+  "POST /gpu/reload-uvm": (h) => reloadUvm(h),
 };
 
 const agentFingerprint = (h) => (h.agentTls ? h.tls.fingerprint : null);
@@ -774,7 +821,8 @@ async function handleAgent(h, req, res) {
     return sendJson(res, 426, { detail: "this agent only accepts HTTPS: use https:// in the agent URL", fingerprint: agentFingerprint(h) });
   }
   const route = agentRoutes[key];
-  if (!route) return sendJson(res, 404, { detail: "not found" });
+  const before080 = !h.agentVersion || /^0\.[0-7]\./.test(h.agentVersion);
+  if (!route || (before080 && url.pathname.startsWith("/gpu"))) return sendJson(res, 404, { detail: "not found" });
   if (url.pathname !== "/health" && !agentAuthorized(h, req)) return sendJson(res, 401, { detail: "invalid agent token" });
   try {
     sendJson(res, 200, await route(h, req, url));
@@ -833,7 +881,7 @@ async function applyScenario(h, patch) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new HttpErr(400, "body must be a JSON object");
   const known = [
     ...Object.keys(SCENARIO_VALUES), "pull_seconds", "ollama_key", "agent_token", "ollama_version", "agent_version",
-    "agent_http", "agent_tls", "agent_key", "ps_size_vram", "gpu_temp", "vram_pct", "disk_pct", "models_disk_pct", "crash",
+    "agent_http", "agent_tls", "agent_key", "ps_size_vram", "gpu_temp", "vram_pct", "disk_pct", "models_disk_pct", "crash", "gpu_lost",
   ];
   for (const [k, v] of Object.entries(patch)) {
     if (!known.includes(k)) throw new HttpErr(400, `unknown field ${k}; known: ${known.join(", ")}`);
@@ -884,6 +932,14 @@ async function applyScenario(h, patch) {
       logLine(h, `llama runner for ${first.name} terminated: signal: segmentation fault`, "ERROR");
     } else throw new HttpErr(400, 'crash must be "ollama" or "runner"');
   }
+  if (patch.gpu_lost !== undefined) {
+    if (![false, "restart", "uvm"].includes(patch.gpu_lost)) throw new HttpErr(400, 'gpu_lost must be false, "restart" or "uvm"');
+    if (patch.gpu_lost && !h.gpus.length) throw new HttpErr(409, "this host has no GPU to lose");
+    if (patch.gpu_lost && !h.gpuLost) {
+      logLine(h, "error looking up nvidia GPU memory", "WARN", ' error="cuda driver library failed to get device context 999"');
+    }
+    h.gpuLost = patch.gpu_lost;
+  }
   if (patch.pull) h.scenario.pull = patch.pull;
   if (patch.create) h.scenario.create = patch.create;
   if (patch.ollama) await setOllama(h, patch.ollama);
@@ -911,6 +967,7 @@ function hostView(h, full = false) {
     scenario: { ...h.scenario },
     ps_size_vram: h.psSizeVram,
     readings: { gpu_temp: h.gpuTemp, vram_pct: h.vramPct, disk_pct: h.diskPct, models_disk_pct: h.modelsDiskPct },
+    gpu_lost: h.gpuLost,
   };
   if (!full) return view;
   return {

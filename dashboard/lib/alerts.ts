@@ -9,7 +9,7 @@ import { deleteSilences, firingAlerts, insertSilence, loadSilences, recentFiring
 import { HttpError } from "./http-error";
 import { ALERT_KINDS, DEFAULT_CLEAR_S, DEFAULT_RULES, isAlertKind, subjectText } from "./rules";
 import { readJson, writeJson } from "./store";
-import type { ActiveAlert, AgentStats, AlertRule, AlertSilence, AlertTransition, PsModel } from "./types";
+import type { ActiveAlert, AgentStats, AlertRule, AlertSilence, AlertTransition, GpuCheck, PsModel } from "./types";
 
 const RULES_FILE = "alert-rules.json";
 
@@ -352,6 +352,8 @@ export interface PolledHost {
   ps: PsModel[];
   /** Ollama is being restarted from the dashboard, so it going away is expected */
   restart_expected: boolean;
+  /** see diagnoseGpu() in lib/gpucheck.ts */
+  gpu_check: GpuCheck | null;
 }
 
 /**
@@ -405,6 +407,13 @@ function observe(rule: AlertRule, h: PolledHost, crash: Observation | null): Obs
       }];
     case "ollama_crash":
       return crash ? [crash] : [];
+    case "gpu_lost": {
+      // no NVIDIA GPU, no agent, or nothing loaded and nothing in the log: no data rather than clear
+      const c = h.gpu_check;
+      if (!c || c.state === "unknown") return [];
+      const lost = c.state === "lost";
+      return [{ subject: "", cond: lost, value: null, detail: lost && c.causes[0] ? `${c.summary} Likely cause: ${c.causes[0]}` : c.summary }];
+    }
   }
 }
 

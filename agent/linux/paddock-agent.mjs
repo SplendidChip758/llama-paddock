@@ -10,6 +10,7 @@
  *   - nvidia-smi GPU metrics and per-process GPU memory
  *   - the Ollama systemd environment (read + edit the drop-in override)
  *   - service restart / status and recent journal logs
+ *   - the GPU check: GPU lines from Ollama's log since it started, the nvidia_uvm module, and reloading it
  *
  * Every endpoint except /health needs `Authorization: Bearer <PADDOCK_AGENT_TOKEN>`.
  * The port serves HTTPS with the agent's own key, and plain HTTP unless PADDOCK_AGENT_HTTP=off.
@@ -67,7 +68,11 @@ const envAllowed = (name) => ENV_ALLOW.some((p) => p.endsWith("*")
 function run(cmd, args, timeoutMs = 10_000) {
   return new Promise((resolve) => {
     execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-      resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, stdout: String(stdout), stderr: String(stderr || (err && !stdout ? err.message : "")) });
+      resolve({
+        code: err ? (typeof err.code === "number" ? err.code : 1) : 0, stdout: String(stdout), stderr: String(stderr || (err && !stdout ? err.message : "")),
+        // execFile keeps the start of the output and stops the command
+        truncated: err?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+      });
     });
   });
 }
@@ -360,6 +365,82 @@ async function putEnv(body) {
   return result;
 }
 
+// ------------------------------------------------------------------ GPU check
+// Ollama falls back to the CPU without an error when it can't use the GPU. The dashboard compares
+// where models are loaded with nvidia-smi, and these give it the evidence: the GPU lines from
+// Ollama's log since its last start (discovery at startup, CUDA/ROCm errors later), and on Linux the
+// nvidia_uvm module, which CUDA needs and which a suspend and resume can break. The dashboard
+// decides what the lines mean, so newer Ollama wording only needs a dashboard update.
+// Keep GPU_LOG_RE and gpuLogLines() the same in both agents.
+const GPU_LOG_RE = /cuda|cudart|nvcuda|nvml|nvidia|rocm|\bhip\b|amdgpu|gpu|vram|inference compute|offload|library=/i;
+const GPU_LOG_KEEP = 150;
+
+function gpuLogLines(lines) {
+  const hits = lines.filter((l) => GPU_LOG_RE.test(l) && !l.includes("[GIN]")).map((l) => (l.length > 500 ? `${l.slice(0, 500)}…` : l));
+  // the start of the run holds discovery, the end the latest errors
+  return hits.length > 2 * GPU_LOG_KEEP ? [...hits.slice(0, GPU_LOG_KEEP), ...hits.slice(-GPU_LOG_KEEP)] : hits;
+}
+
+async function gpuLog() {
+  if (DRY_RUN) return { source: "journal", lines: [], error: "dry run: journalctl disabled" };
+  const id = (await run("systemctl", ["show", UNIT, "-p", "InvocationID", "--value"])).stdout.trim();
+  // the current run of the service; systemd before 232 has no invocation id, so then since boot
+  const match = /^[0-9a-f]{32}$/.test(id) ? [`_SYSTEMD_INVOCATION_ID=${id}`] : ["-u", UNIT, "-b"];
+  const all = await run("journalctl", [...match, "-o", "short-iso", "--no-pager"], 30_000);
+  if (all.code !== 0 && !all.truncated) return { source: "journal", lines: [], error: all.stderr.trim() || `journalctl exited with ${all.code}` };
+  let lines = all.stdout.split("\n");
+  if (all.truncated) {
+    // a long run outgrows the buffer: its start is kept, so read the end separately
+    const tail = await run("journalctl", [...match, "-n", "20000", "-o", "short-iso", "--no-pager"], 30_000);
+    lines = [...new Set([...lines.slice(0, -1), ...tail.stdout.split("\n")])];
+  }
+  return { source: "journal", lines: gpuLogLines(lines) };
+}
+
+async function inContainer() {
+  const r = await run("systemd-detect-virt", ["--container", "--quiet"]);
+  if (!/ENOENT/.test(r.stderr)) return r.code === 0;
+  return ["/run/.containerenv", "/.dockerenv"].some((p) => fs.existsSync(p)) || !!readText("/run/systemd/container");
+}
+
+/** The NVIDIA kernel modules CUDA needs. In a container they belong to the host's kernel, so they can only be reloaded there. */
+async function nvidiaUvm() {
+  const driver = fs.existsSync("/sys/module/nvidia");
+  const container = await inContainer();
+  return {
+    driver,
+    module: fs.existsSync("/sys/module/nvidia_uvm"),
+    device: fs.existsSync("/dev/nvidia-uvm"),
+    container,
+    can_reload: driver && !container && process.getuid?.() === 0,
+  };
+}
+
+/** Stop Ollama, reload nvidia_uvm and start Ollama again: the usual fix when CUDA fails after a suspend and resume. */
+async function reloadUvm() {
+  const u = await nvidiaUvm();
+  if (!u.can_reload) {
+    throw httpError(409, u.container ? "nvidia_uvm belongs to the host's kernel: reload it on the host that runs this container"
+      : !u.driver ? "the NVIDIA kernel driver isn't loaded on this host" : "the agent needs to run as root to reload nvidia_uvm");
+  }
+  if (DRY_RUN) return { ok: true, dry_run: true };
+  const steps = [];
+  const step = async (cmd, args, timeoutMs = 30_000) => {
+    const r = await run(cmd, args, timeoutMs);
+    steps.push({ cmd: [cmd, ...args].join(" "), ok: r.code === 0, stderr: r.stderr.trim() });
+    return r.code === 0;
+  };
+  // Ollama's runners hold the module open
+  await step("systemctl", ["stop", UNIT], 90_000);
+  const removed = !u.module || (await step("modprobe", ["-r", "nvidia_uvm"]));
+  let loaded = await step("modprobe", ["nvidia_uvm"]);
+  // without udev rules for it, the device node only appears through nvidia-modprobe
+  if (loaded && !fs.existsSync("/dev/nvidia-uvm")) loaded = await step("nvidia-modprobe", ["-u", "-c=0"]);
+  // start Ollama again whatever happened above
+  const started = await step("systemctl", ["start", UNIT], 90_000);
+  return { ok: removed && loaded && started, steps, stderr: steps.filter((s) => !s.ok).map((s) => `${s.cmd}: ${s.stderr}`).join("\n") };
+}
+
 // ------------------------------------------------------------------ TLS
 // The agent makes its own ECDSA key and a self-signed certificate for it. Node can't write X.509
 // certificates, and Windows has no openssl, so a minimal DER encoder builds one. The dashboard pins
@@ -504,6 +585,11 @@ const routes = {
     const r = await run("journalctl", ["-u", UNIT, "-n", String(lines), "--no-pager", "-o", "short-iso"], 15_000);
     return { lines: r.code === 0 ? r.stdout.split("\n").filter((l) => l.length) : [r.stderr.trim()] };
   },
+  "GET /gpu-check": async () => {
+    const [log, nvidia_uvm] = await Promise.all([gpuLog(), nvidiaUvm()]);
+    return { ts: Date.now() / 1000, platform: "linux", log, nvidia_uvm };
+  },
+  "POST /gpu/reload-uvm": async () => reloadUvm(),
 };
 
 async function onRequest(req, res) {

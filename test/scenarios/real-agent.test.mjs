@@ -117,6 +117,15 @@ test("the simulated agent answers with the real agent's shapes", async () => {
 
   const [rl, sl] = await Promise.all([real("GET", "/logs?lines=10"), simulated("GET", "/logs?lines=10")]);
   assert.deepEqual(keys(sl.data), keys(rl.data), "/logs");
+
+  const [rg, sg] = await Promise.all([real("GET", "/gpu-check"), simulated("GET", "/gpu-check")]);
+  assert.deepEqual(keys(sg.data), keys(rg.data), "/gpu-check");
+  // dry run can't read the journal, so it reports why
+  assert.deepEqual(keys(sg.data.log), keys(rg.data.log).filter((k) => k !== "error"), "/gpu-check log");
+  assert.deepEqual(keys(sg.data.nvidia_uvm), keys(rg.data.nvidia_uvm), "/gpu-check nvidia_uvm");
+  // no NVIDIA driver on either, so neither reloads
+  const [rr, sr] = await Promise.all([real("POST", "/gpu/reload-uvm"), simulated("POST", "/gpu/reload-uvm")]);
+  assert.equal(sr.status, rr.status, JSON.stringify(rr.data));
 });
 
 test("simulated GPUs have the fields the agents read from nvidia-smi", async () => {
