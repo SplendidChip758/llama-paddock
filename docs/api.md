@@ -27,7 +27,7 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 
 | Method | Path | Body / result |
 |---|---|---|
-| GET | `/api/instances` | `{poll_interval, instances}` with latest status, stats, loaded models, the Ollama `version` and the `agent_version` (`null` if unknown) |
+| GET | `/api/instances` | `{poll_interval, instances}` with latest status, stats, loaded models, the Ollama `version` and the `agent_version` (`null` if unknown). Each loaded model has `split` and, once its `/api/show` has been read, `context`; each host has `gpu_check` and `reload_churn`. See [Context and reloads](context-and-reloads.md) |
 | GET | `/api/instances/{id}/history` | Recent samples or a requested range; see [History](#history) |
 | GET | `/api/instances/{id}/events` | Availability and model load events over a range; see [Events](#events) |
 | POST | `/api/instances` | Host fields below → `{id}` (201) |
@@ -109,7 +109,7 @@ A rule is `{id, name, kind, enabled, threshold, for_s, clear_s, hosts}`:
 | Field | Meaning |
 |---|---|
 | `id` | Letters, digits, `_`, `.` or `-`. Omit it for a new rule to get one made from the name. Keep it when editing: alerts belong to the rule's ID |
-| `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable`, `ollama_crash` or `gpu_lost`; see [Alerts](alerts.md#rules) |
+| `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable`, `ollama_crash`, `gpu_lost`, `context_short` or `reload_churn` (loads per hour, at most 10000); see [Alerts](alerts.md#rules) |
 | `threshold` | Above 0, at most 150 for `gpu_temp` and 100 for the percentages; `null` for the kinds without one |
 | `for_s`, `clear_s` | Whole seconds, 0 to 86400: how long the condition has to hold before firing, and be gone before resolving |
 | `hosts` | Host IDs, or `null` for every host including ones added later |
@@ -190,6 +190,7 @@ The agent listens separately, normally on port 11435, for HTTPS and (unless `PAD
 | POST | `/service/restart` | Restart Ollama |
 | GET | `/logs?lines=500` | Ollama log tail |
 | GET | `/gpu-check` | `{ts, platform, log, nvidia_uvm?}`: the GPU-related lines of Ollama's log since it last started (`log.lines`, and `log.error` when it can't be read), and on Linux the `nvidia_uvm` state (agents from 0.8.0) |
+| GET | `/runner-starts?since=…` | `{ts, starts}`: the times (unix seconds, the agent's clock) Ollama logged a model runner starting since `since` (at most a day back; default an hour), and `error` when the log can't be read (agents from 0.8.0) |
 | POST | `/gpu/reload-uvm` | Linux, as root, outside a container: stops Ollama, reloads `nvidia_uvm` and starts Ollama → `{ok, steps, stderr}`; 409 where it can't. The Windows agent answers 400 (agents from 0.8.0) |
 
 Both agents implement these routes. Installation and configuration: [Linux](agent-linux.md) · [Windows](agent-windows.md).

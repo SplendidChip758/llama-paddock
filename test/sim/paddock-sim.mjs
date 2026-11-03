@@ -9,7 +9,7 @@
  * Each simulated host gets two ports, because the dashboard addresses hosts by
  * URL: one serves Ollama's HTTP API (the parts the dashboard uses), the other the
  * agent API of agent/linux/paddock-agent.mjs (/health, /stats, /env, /logs,
- * /service/restart, /gpu-check, /gpu/reload-uvm, with the same bearer-token rule). Like the agents, the agent
+ * /service/restart, /gpu-check, /gpu/reload-uvm, /runner-starts, with the same bearer-token rule). Like the agents, the agent
  * port serves HTTPS with a self-signed certificate (a new key per host and run)
  * and plain HTTP. A third port serves the control API, which switches failure
  * scenarios at runtime.
@@ -41,7 +41,7 @@
  *        create:  "normal" | "stall" | "fail"
  *        pull_seconds, ollama_key (string or null), agent_token,
  *        ollama_version, agent_version (null: /stats leaves the version out, like agents before 0.6.0;
- *                     below 0.8.0 there is no /gpu-check or /gpu/reload-uvm either, as in those agents)
+ *                     below 0.8.0 there is no /gpu-check, /gpu/reload-uvm or /runner-starts either, as in those agents)
  *        agent_http:  false = HTTPS only (PADDOCK_AGENT_HTTP=off), true = both (default)
  *        agent_tls:   false = no HTTPS and no fingerprint, like agents before 0.7.0
  *        agent_key:   "new" = replace the agent's key, as the installer's PADDOCK_AGENT_NEW_KEY does
@@ -61,7 +61,9 @@
  *
  * Models: loading with a num_ctx whose KV cache doesn't fit in the GPUs puts the rest in system RAM
  * (a partial GPU/CPU split), as does a host without GPUs or num_gpu 0 in the request's options or the
- * Modelfile (all on the CPU).
+ * Modelfile (all on the CPU). A load's context is options.num_ctx, else num_ctx in the Modelfile, else
+ * OLLAMA_CONTEXT_LENGTH, else 4096; a new one reloads the model. Every load logs "llama runner started", and
+ * a prompt with keep_alive 0 loads, answers and unloads within the request, so no poll sees it loaded.
  * Pulling a name ending in "-cloud" or ":cloud" adds an Ollama cloud model: listed with
  * remote_host/remote_model, answering /api/generate, but never in /api/ps since it runs remotely.
  *   GET  /_sim/config.yaml              the same config.yaml as --write-config
@@ -467,19 +469,29 @@ async function generate(h, body, res) {
   const base = { model: m.name, created_at: new Date().toISOString(), response: "", done: true };
   // a new load (or unload) replaces a runner that exited
   h.deadRunners.delete(m.name);
-  if (ka === 0) {
+  if (ka === 0 && !body.prompt) {
     h.loaded.delete(m.name);
     logLine(h, `unloaded ${m.name}`);
     return sendJson(res, 200, { ...base, done_reason: "unload" });
   }
   const cpuOnly = body.options?.num_gpu === 0 || /^num_gpu\s+"?0"?$/m.test(m.parameters ?? "");
-  if (!h.loaded.has(m.name) && !m.remote_host) {
+  const ctx = Number(body.options?.num_ctx) || Number(/^num_ctx\s+"?(\d+)"?$/m.exec(m.parameters ?? "")?.[1]) ||
+    Number(h.env.OLLAMA_CONTEXT_LENGTH) || 4096;
+  // cloud models run remotely: Ollama forwards the request and loads nothing
+  if (!m.remote_host && h.loaded.get(m.name)?.ctx !== ctx) {
+    h.loaded.delete(m.name);
     await sleep(300);
     if (cpuOnly || h.gpuLost || !h.gpus.length) logLine(h, "load_tensors: offloaded 0/29 layers to GPU");
+    logLine(h, "llama runner started in 0.30 seconds");
     logLine(h, `loaded ${m.name}`);
   }
-  // cloud models run remotely: Ollama forwards the request and loads nothing
-  if (!m.remote_host) h.loaded.set(m.name, { until: Date.now() + ka, ctx: Number(body.options?.num_ctx) || 4096, cpuOnly });
+  if (ka === 0) {
+    // answered, then unloaded at once: only the log shows the load
+    h.loaded.delete(m.name);
+    logLine(h, `unloaded ${m.name}`);
+    return sendJson(res, 200, { ...base, response: "This is a simulated response from llama-paddock's test host.", done_reason: "stop", eval_count: 12 });
+  }
+  if (!m.remote_host) h.loaded.set(m.name, { until: Date.now() + ka, ctx, cpuOnly });
   if (!body.prompt) return sendJson(res, 200, { ...base, done_reason: "load" });
   const text = "This is a simulated response from llama-paddock's test host.";
   if (body.stream === false) return sendJson(res, 200, { ...base, response: text, done_reason: "stop", eval_count: 12 });
@@ -791,6 +803,12 @@ const agentRoutes = {
     nvidia_uvm: { driver: h.gpus.length > 0, module: h.gpus.length > 0, device: h.gpus.length > 0, container: false, can_reload: h.gpus.length > 0 },
   }),
   "POST /gpu/reload-uvm": (h) => reloadUvm(h),
+  "GET /runner-starts": (h, _req, url) => {
+    const now = Date.now() / 1000;
+    const since = Math.max(now - 86400, Math.min(Number(url.searchParams.get("since")) || now - 3600, now));
+    const starts = h.log.filter((l) => /llama runner started in/.test(l)).map((l) => Date.parse(/time=(\S+)/.exec(l)[1]) / 1000).filter((t) => t >= since);
+    return { ts: now, starts };
+  },
 };
 
 const agentFingerprint = (h) => (h.agentTls ? h.tls.fingerprint : null);
@@ -814,7 +832,7 @@ async function handleAgent(h, req, res) {
   }
   const route = agentRoutes[key];
   const before080 = !h.agentVersion || /^0\.[0-7]\./.test(h.agentVersion);
-  if (!route || (before080 && url.pathname.startsWith("/gpu"))) return sendJson(res, 404, { detail: "not found" });
+  if (!route || (before080 && /^\/(gpu|runner-starts)/.test(url.pathname))) return sendJson(res, 404, { detail: "not found" });
   if (url.pathname !== "/health" && !agentAuthorized(h, req)) return sendJson(res, 401, { detail: "invalid agent token" });
   try {
     sendJson(res, 200, await route(h, req, url));

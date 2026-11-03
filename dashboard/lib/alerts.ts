@@ -7,9 +7,10 @@
 import "server-only";
 import { firingAlerts, recentFirings, recordAlertTransitions } from "./db";
 import { HttpError } from "./http-error";
+import { reloadChurn, type LoadStats } from "./modelcheck";
 import { ALERT_KINDS, DEFAULT_CLEAR_S, DEFAULT_RULES, isAlertKind, subjectText } from "./rules";
 import { readJson, writeJson } from "./store";
-import type { ActiveAlert, AgentStats, AlertRule, AlertTransition, GpuCheck, PsModel } from "./types";
+import type { ActiveAlert, AgentStats, AlertRule, AlertTransition, GpuCheck, LoadedModel, PsModel } from "./types";
 
 const RULES_FILE = "alert-rules.json";
 
@@ -39,7 +40,7 @@ function validRule(raw: unknown, hostIds: Set<string> | null): Omit<AlertRule, "
   let threshold: number | null = null;
   if (info.unit) {
     threshold = Number(r.threshold ?? info.threshold);
-    const max = info.unit === "%" ? 100 : 150;
+    const max = info.max ?? (info.unit === "%" ? 100 : 150);
     if (!Number.isFinite(threshold) || threshold <= 0 || threshold > max) {
       throw new HttpError(400, `${name}: threshold must be above 0 and at most ${max}${info.unit}`);
     }
@@ -245,6 +246,8 @@ export interface PolledHost {
   restart_expected: boolean;
   /** see diagnoseGpu() in lib/gpucheck.ts */
   gpu_check: GpuCheck | null;
+  /** see lib/modelcheck.ts. stats lists every model seen loaded since the dashboard started. */
+  models: { loaded: LoadedModel[]; stats: LoadStats[]; unseen: number | null; env: Record<string, string> | null };
 }
 
 /**
@@ -304,6 +307,36 @@ function observe(rule: AlertRule, h: PolledHost, crash: Observation | null): Obs
       if (!c || c.state === "unknown") return [];
       const lost = c.state === "lost";
       return [{ subject: "", cond: lost, value: null, detail: lost && c.causes[0] ? `${c.summary} Likely cause: ${c.causes[0]}` : c.summary }];
+    }
+    case "context_short": {
+      if (!h.ollama_ok) return [];
+      const out: Observation[] = [];
+      for (const m of h.models.loaded) {
+        const c = m.context;
+        if (!c || c.state === "unknown") continue;
+        out.push({ subject: m.name, cond: c.state === "short", value: c.running, detail: c.hint ?? `${m.name} runs with the context the host sets` });
+      }
+      // a model that has unloaded no longer runs short
+      for (const s of h.models.stats) {
+        if (!h.models.loaded.some((m) => m.name === s.model)) out.push({ subject: s.model, cond: false, value: null, detail: `${s.model} isn't loaded` });
+      }
+      return out;
+    }
+    case "reload_churn": {
+      if (!h.ollama_ok) return [];
+      const churn = new Map(reloadChurn(h.models.stats, h.models.unseen, h.models.env, rule.threshold!).map((x) => [x.model ?? "", x]));
+      const detail = (subject: string, fallback: string) => {
+        const x = churn.get(subject);
+        return x ? `${x.summary}${x.causes[0] ? ` Likely cause: ${x.causes[0]}` : ""}` : fallback;
+      };
+      const out: Observation[] = h.models.stats.map((s) => ({
+        subject: s.model, cond: churn.has(s.model), value: s.loads, detail: detail(s.model, `${s.model} was loaded ${s.loads} times in the last hour`),
+      }));
+      // loads that no poll saw, counted from Ollama's log
+      if (h.models.unseen !== null) {
+        out.push({ subject: "", cond: churn.has(""), value: h.models.unseen, detail: detail("", `${h.models.unseen} loads in the last hour that no poll saw`) });
+      }
+      return out;
     }
   }
 }

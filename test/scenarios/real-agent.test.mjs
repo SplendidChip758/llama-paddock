@@ -123,6 +123,8 @@ test("the simulated agent answers with the real agent's shapes", async () => {
   // dry run can't read the journal, so it reports why
   assert.deepEqual(keys(sg.data.log), keys(rg.data.log).filter((k) => k !== "error"), "/gpu-check log");
   assert.deepEqual(keys(sg.data.nvidia_uvm), keys(rg.data.nvidia_uvm), "/gpu-check nvidia_uvm");
+  const [rrs, srs] = await Promise.all([real("GET", "/runner-starts?since=0"), simulated("GET", "/runner-starts?since=0")]);
+  assert.deepEqual(keys(srs.data), keys(rrs.data).filter((k) => k !== "error"), "/runner-starts");
   // no NVIDIA driver on either, so neither reloads
   const [rr, sr] = await Promise.all([real("POST", "/gpu/reload-uvm"), simulated("POST", "/gpu/reload-uvm")]);
   assert.equal(sr.status, rr.status, JSON.stringify(rr.data));

@@ -304,6 +304,12 @@ code { font-family: var(--mono); font-size: .92em; background: var(--panel2); pa
 .split-hint[open] summary { margin-bottom: 4px; }
 .split-note { font-size: 12px; color: var(--muted); margin-top: 8px; }
 .split-note b { color: var(--warn); font-weight: 600; }
+/* context and reloads */
+.warn-text { color: var(--warn); }
+.ctx-hint { text-align: left; font-family: var(--sans); margin-left: auto; }
+.reload-notice ul { margin: 4px 0; padding-left: 20px; }
+.reload-notice > div + div { margin-top: 10px; }
+
 /* GPU check */
 .gpucheck .chip { white-space: nowrap; }
 .gpucheck p { margin: 10px 0; }

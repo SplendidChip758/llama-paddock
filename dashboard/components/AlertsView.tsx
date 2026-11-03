@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { api, fmtDur } from "@/lib/format";
-import { ALERT_KINDS, DEFAULT_CLEAR_S, durText, parseDur, subjectText } from "@/lib/rules";
+import { ALERT_KINDS, DEFAULT_CLEAR_S, durText, parseDur, subjectText, thresholdText } from "@/lib/rules";
 import type { ActiveAlert, AlertKind, AlertRule } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
 import { Drawer } from "./ui";
@@ -142,7 +142,7 @@ export function AlertsView() {
 
 function conditionText(r: AlertRule) {
   const unit = ALERT_KINDS[r.kind].unit;
-  const what = unit ? `above ${r.threshold}${unit}` : "when it happens";
+  const what = unit ? `above ${thresholdText(r.threshold, unit)}` : "when it happens";
   return `${what}${r.for_s ? ` for ${durText(r.for_s)}` : ""} · clears after ${durText(r.clear_s)}`;
 }
 
@@ -237,7 +237,7 @@ function RuleEditor({ rule, busy, onClose, onSave, onDelete }: {
         {info.unit && (
           <label className="field">
             <span>Threshold ({info.unit})</span>
-            <input type="number" min={1} max={info.unit === "%" ? 100 : 150} step="any" value={threshold}
+            <input type="number" min={1} max={info.max ?? (info.unit === "%" ? 100 : 150)} step="any" value={threshold}
               onChange={(e) => setThreshold(e.target.value)} required />
             <div className="hint">Fires above this value.</div>
           </label>

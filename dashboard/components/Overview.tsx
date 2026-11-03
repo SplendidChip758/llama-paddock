@@ -81,6 +81,7 @@ function InstCard({ st }: { st: InstanceSnapshot }) {
         <div className="chips">
           <AgentPlainChip st={st} />
           {st.gpu_check?.state === "lost" && <span className="chip bad" title={st.gpu_check.summary}>GPU lost</span>}
+          {st.reload_churn.length > 0 && <span className="chip warn" title={st.reload_churn.map((x) => x.summary).join(" ")}>reloading</span>}
           <span className={`chip ${c === "ok" ? "ok" : c === "bad" ? "bad" : ""}`}>{label}</span>
         </div>
       </div>

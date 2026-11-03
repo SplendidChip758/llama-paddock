@@ -50,4 +50,11 @@ export function parseParameters(text: string | null | undefined): Record<string,
   return out;
 }
 
+/** The context a model was trained for, from /api/show's model_info (`<architecture>.context_length`). */
+export function nativeContext(info: Record<string, unknown> | null | undefined): number | null {
+  const key = Object.keys(info ?? {}).find((k) => k.endsWith(".context_length"));
+  const n = key ? Number(info![key]) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export const MODEL_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*(:[A-Za-z0-9._-]+)?$/;
