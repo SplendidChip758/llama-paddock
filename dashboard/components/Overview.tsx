@@ -1,18 +1,34 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { fmtDur, fmtMiB, pct } from "@/lib/format";
+import { useEffect, useState } from "react";
+import { api, fmtDur, fmtMiB, pct } from "@/lib/format";
 import type { InstanceSnapshot } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
 import { isOffloaded } from "@/lib/split";
 import { Meter, SplitChip, Stat, statusOf } from "./ui";
 import { HostEditor } from "./HostEditor";
 import { AgentPlainChip, FleetHttpsOffer } from "./AgentTls";
+import { loudAlerts } from "./AlertBits";
+
+interface UptimeBrief {
+  coverage: number;
+  ollama: { up_pct: number | null; outages: number };
+  agent: { up_pct: number | null; outages: number } | null;
+}
+
+const UPTIME_REFRESH_MS = 60_000;
 
 export function Overview() {
   const { instances, loaded, pollInterval } = usePaddock();
   const [adding, setAdding] = useState(false);
+  const [uptime, setUptime] = useState<Record<string, UptimeBrief>>({});
+  useEffect(() => {
+    const load = () => api<{ hosts: Record<string, UptimeBrief> }>("/api/uptime?range=30d").then((d) => setUptime(d.hosts)).catch(() => {});
+    load();
+    const t = setInterval(load, UPTIME_REFRESH_MS);
+    return () => clearInterval(t);
+  }, []);
   if (!loaded) return <div className="empty">Connecting…</div>;
 
   const editor = adding && <HostEditor onClose={() => setAdding(false)} />;
@@ -57,14 +73,18 @@ export function Overview() {
         <Stat k="Models loaded" v={instances.reduce((a, s) => a + s.ps.length, 0)} unit={offloaded ? `${offloaded} not fully on GPU` : undefined} />
       </div>
       <div className="grid g3">
-        {instances.map((st) => <InstCard key={st.id} st={st} />)}
+        {instances.map((st) => <InstCard key={st.id} st={st} uptime={uptime[st.id]} />)}
       </div>
     </>
   );
 }
 
-function InstCard({ st }: { st: InstanceSnapshot }) {
+const pctText = (p: number | null | undefined) => (p == null ? "–" : `${p >= 99.95 && p < 100 ? "99.9" : p.toFixed(p === 100 ? 0 : 1)}%`);
+
+function InstCard({ st, uptime }: { st: InstanceSnapshot; uptime?: UptimeBrief }) {
   const router = useRouter();
+  const { alerts } = usePaddock();
+  const firing = loudAlerts(alerts).filter((a) => a.instance === st.id).length;
   const [c, label] = statusOf(st);
   const sys = st.stats?.system;
   const gpus = st.stats?.nvidia?.gpus ?? [];
@@ -79,6 +99,12 @@ function InstCard({ st }: { st: InstanceSnapshot }) {
           <h3>{st.name}</h3>
         </div>
         <div className="chips">
+          {firing > 0 && (
+            <button className="chip bad" title="Open this host's alerts"
+              onClick={(e) => { e.stopPropagation(); router.push(`/alerts?host=${encodeURIComponent(st.id)}`); }}>
+              {firing} alert{firing === 1 ? "" : "s"}
+            </button>
+          )}
           <AgentPlainChip st={st} />
           {st.gpu_check?.state === "lost" && <span className="chip bad" title={st.gpu_check.summary}>GPU lost</span>}
           {st.reload_churn.length > 0 && <span className="chip warn" title={st.reload_churn.map((x) => x.summary).join(" ")}>reloading</span>}
@@ -92,6 +118,14 @@ function InstCard({ st }: { st: InstanceSnapshot }) {
         <dt>Endpoint</dt>
         <dd>{st.ollama_url.replace(/^https?:\/\//, "")}</dd>
         {platform && (<><dt>Platform</dt><dd>{platform}</dd></>)}
+        {uptime && uptime.ollama.up_pct != null && (
+          <>
+            <dt title="Share of the time the dashboard was watching over the last 30 days">Availability (30d)</dt>
+            <dd>
+              {pctText(uptime.ollama.up_pct)}{uptime.agent ? ` · agent ${pctText(uptime.agent.up_pct)}` : ""}
+            </dd>
+          </>
+        )}
         {sys && (
           <>
             <dt>CPU / RAM</dt>

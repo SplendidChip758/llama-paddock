@@ -266,6 +266,8 @@ export interface AlertRule {
   clear_s: number;
   /** host ids, or null for every host, including ones added later */
   hosts: string[] | null;
+  /** notification channel ids, or null for every channel, including ones added later. Missing before 0.8.0: every channel */
+  channels?: string[] | null;
 }
 
 /**
@@ -288,6 +290,57 @@ export interface ActiveAlert {
   unknown: boolean;
   /** fired repeatedly in a short time; it now has to stay clear longer before it resolves */
   flapping: boolean;
+  /** a silence or acknowledgement that matches it: it still shows and is recorded, but isn't counted or sent */
+  silence: AlertSilence | null;
+}
+
+/** One stretch of a timeline. unobserved: the dashboard wasn't polling; unknown: polled, but not yet seen either way. */
+export interface AvailabilitySegment {
+  start: number;
+  end: number;
+  state: "up" | "down" | "unknown" | "unobserved";
+  /** down: why, as the poll that saw it go down reported */
+  error?: string;
+}
+
+/** Ollama's or the agent's availability over a range. Only observed time counts: up_pct is up / (up + down). */
+export interface Availability {
+  up_pct: number | null;
+  up_s: number;
+  down_s: number;
+  unknown_s: number;
+  unobserved_s: number;
+  segments: AvailabilitySegment[];
+  /** the down segments, newest first; ongoing: still down at the last poll */
+  outages: { start: number; end: number; error: string | null; ongoing: boolean }[];
+}
+
+export interface HostAvailability {
+  range: string;
+  from: number;
+  to: number;
+  /** share of the range the dashboard was polling the host */
+  coverage: number;
+  ollama: Availability;
+  /** null for a host without an agent */
+  agent: Availability | null;
+}
+
+/**
+ * Alerts muted for a while. rule, instance and subject say what it matches; null matches anything,
+ * so a silence with only `instance` covers a whole host (maintenance).
+ */
+export interface AlertSilence {
+  id: number;
+  created: number;
+  rule: string | null;
+  instance: string | null;
+  subject: string | null;
+  /** unix seconds; null for an acknowledgement */
+  until: number | null;
+  /** an acknowledgement: lasts until its alert resolves */
+  until_resolved: boolean;
+  note: string;
 }
 
 /** An alert starting or ending. Rule name and kind are copied, since rules can change later. */
@@ -303,6 +356,41 @@ export interface AlertTransition {
   value: number | null;
   detail: string;
   flapping: boolean;
+}
+
+export type ChannelType = "webhook" | "discord" | "slack" | "email";
+
+/** A notification channel as the API returns it. Secrets (URLs, tokens, passwords) never leave the server. */
+export interface NotifyChannel {
+  id: string;
+  name: string;
+  type: ChannelType;
+  enabled: boolean;
+  /** also send a message when an alert resolves */
+  send_resolved: boolean;
+  /** webhook, discord, slack: the URL with everything after the host hidden */
+  url_hint: string | null;
+  /** webhook: a bearer token is set */
+  has_token: boolean;
+  email: {
+    host: string;
+    port: number;
+    security: "tls" | "starttls" | "none";
+    username: string | null;
+    has_password: boolean;
+    from: string;
+    to: string[];
+  } | null;
+  status: ChannelStatus;
+}
+
+/** How deliveries to a channel have gone since the dashboard started. */
+export interface ChannelStatus {
+  last_ok: number | null;
+  last_error: string | null;
+  last_error_at: number | null;
+  /** messages waiting to be sent, retries included */
+  queued: number;
 }
 
 export type JobState ="running" | "done" | "error" | "cancelled";

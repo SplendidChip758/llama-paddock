@@ -5,6 +5,7 @@ import { api, fmtBytes, fmtDur, fmtMiB, fmtNum, instPath, level, pct, untilText 
 import { isOffloaded, splitHint, splitText } from "@/lib/split";
 import type { GpuProcess, GpuStats, HistoryPoint, InstanceSnapshot, LoadedModel, ServiceStatus, SystemStats } from "@/lib/types";
 import { GpuCheckCard } from "./GpuCheck";
+import { Availability } from "./Availability";
 import { HistoryCharts } from "./HistoryCharts";
 import { usePaddock } from "./PaddockProvider";
 import { CloudBadge, Meter, SparkCell, SplitHint, Stat } from "./ui";
@@ -50,6 +51,7 @@ export function MonitorTab({ st }: { st: InstanceSnapshot }) {
         </div>
       )}
       <HistoryCharts st={st} />
+      <Availability st={st} />
     </>
   );
 }

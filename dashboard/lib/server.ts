@@ -16,6 +16,7 @@ import {
   RELOAD_WINDOW_S, contextCheck, loadStats, reloadChurn, unseenLoads, type LoadStats, type ModelInfo,
 } from "./modelcheck";
 import { nativeContext, parseParameters } from "./params";
+import { startNotifications } from "./notify";
 import { isCloudModel, withSplit } from "./split";
 import type {
   AgentGpuCheck, AgentStats, EnvState, GpuCheck, GpuFixAction, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, LoadedModel, PsModel,
@@ -171,6 +172,7 @@ export function paddock(): Paddock {
       pollerStarted: false,
     };
     restoreJobs(g.__paddock);
+    startNotifications((id) => g.__paddock?.instances.get(id)?.inst.name ?? id);
   }
   const p = g.__paddock;
   if (!p.pollerStarted) {

@@ -1,16 +1,18 @@
 "use client";
 
-import Link from "next/link";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, fmtDur } from "@/lib/format";
 import { ALERT_KINDS, DEFAULT_CLEAR_S, durText, parseDur, subjectText, thresholdText } from "@/lib/rules";
-import type { ActiveAlert, AlertKind, AlertRule } from "@/lib/types";
+import type { AlertKind, AlertRule, AlertSilence, AlertTransition, NotifyChannel } from "@/lib/types";
+import { AlertLine, silenceChip, useSilences, whenText } from "./AlertBits";
+import { ChannelsSection } from "./ChannelsSection";
 import { usePaddock } from "./PaddockProvider";
 import { Drawer } from "./ui";
 
-export function AlertsView() {
+export function AlertsView({ host: hostFilter }: { host?: string }) {
   const { alerts, alertsStoreError, instances, toast } = usePaddock();
   const [rules, setRules] = useState<AlertRule[] | null>(null);
+  const [channels, setChannels] = useState<NotifyChannel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   // index into rules, or "new"
   const [editing, setEditing] = useState<number | "new" | null>(null);
@@ -18,7 +20,12 @@ export function AlertsView() {
 
   const load = useCallback(async () => {
     try {
-      setRules((await api<{ rules: AlertRule[] }>("/api/alerts/rules")).rules);
+      const [r, c] = await Promise.all([
+        api<{ rules: AlertRule[] }>("/api/alerts/rules"),
+        api<{ channels: NotifyChannel[] }>("/api/alerts/channels"),
+      ]);
+      setRules(r.rules);
+      setChannels(c.channels);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -45,6 +52,11 @@ export function AlertsView() {
   };
 
   const hostName = (id: string) => instances.find((i) => i.id === id)?.name ?? id;
+  const notifyText = (r: AlertRule) => {
+    if (r.channels == null) return channels?.length ? <span className="faint">all channels</span> : <span className="faint">no channels yet</span>;
+    if (!r.channels.length) return <span className="faint">dashboard only</span>;
+    return r.channels.map((id) => channels?.find((c) => c.id === id)?.name ?? `${id} (deleted)`).join(", ");
+  };
   const firing = alerts.filter((a) => a.state === "firing");
   const pending = alerts.filter((a) => a.state === "pending");
 
@@ -70,7 +82,7 @@ export function AlertsView() {
       <div className="card">
         {alerts.length ? (
           <div className="alertlist">
-            {alerts.map((a) => <AlertLine key={`${a.rule}/${a.instance}/${a.subject}`} a={a} host={hostName(a.instance)} />)}
+            {alerts.map((a) => <AlertLine key={`${a.rule}/${a.instance}/${a.subject}`} a={a} host={hostName(a.instance)} actions />)}
           </div>
         ) : (
           <div className="empty">No alerts. Hosts that match a rule show up here, first as pending until the rule&apos;s duration has passed.</div>
@@ -89,7 +101,7 @@ export function AlertsView() {
             <div className="tablewrap">
               <table>
                 <thead>
-                  <tr><th>On</th><th>Rule</th><th>Condition</th><th>Hosts</th><th /></tr>
+                  <tr><th>On</th><th>Rule</th><th>Condition</th><th>Hosts</th><th>Notify</th><th /></tr>
                 </thead>
                 <tbody>
                   {rules.map((r, i) => (
@@ -102,6 +114,7 @@ export function AlertsView() {
                       <td><b>{r.name}</b><div className="faint" style={{ fontSize: 12 }}>{ALERT_KINDS[r.kind].label}</div></td>
                       <td>{conditionText(r)}</td>
                       <td>{r.hosts ? r.hosts.map(hostName).join(", ") : <span className="faint">all hosts</span>}</td>
+                      <td>{notifyText(r)}</td>
                       <td>
                         <div className="actions">
                           <button className="btn sm" onClick={() => setEditing(i)}>Edit</button>
@@ -120,9 +133,14 @@ export function AlertsView() {
         </div>
       </div>
 
+      <ChannelsSection channels={channels} onSaved={setChannels} />
+      <Silences rules={rules ?? []} hostName={hostName} />
+      <History hostName={hostName} initialHost={hostFilter} />
+
       {editing !== null && rules && (
         <RuleEditor
           rule={editing === "new" ? undefined : rules[editing]}
+          channels={channels ?? []}
           busy={busy}
           onClose={() => setEditing(null)}
           onSave={async (r) => {
@@ -140,39 +158,144 @@ export function AlertsView() {
   );
 }
 
+/** Silences and acknowledgements in force, with what each one covers. */
+function Silences({ rules, hostName }: { rules: AlertRule[]; hostName: (id: string) => string }) {
+  const { alerts } = usePaddock();
+  const [list, setList] = useState<AlertSilence[] | null>(null);
+  const { busy, end } = useSilences();
+  // refetch whenever the alert list changes: silences come and go with it
+  useEffect(() => {
+    api<{ silences: AlertSilence[] }>("/api/alerts/silences").then((d) => setList(d.silences)).catch(() => setList([]));
+  }, [alerts]);
+  if (!list?.length) return null;
+  const ruleName = (id: string) => rules.find((r) => r.id === id)?.name ?? id;
+  return (
+    <div className="section">
+      <h2>Silences</h2>
+      <div className="card">
+        <div className="alertlist">
+          {list.map((s) => (
+            <div key={s.id} className="alertline">
+              <div className="grow">
+                <div>
+                  <b>{s.rule ? ruleName(s.rule) : "Every rule"}</b> <span className="faint">on</span> {s.instance ? hostName(s.instance) : "every host"}
+                  {s.subject && <span className="faint"> · {subjectText(s.subject)}</span>}
+                </div>
+                {s.note && <div className="hint" style={{ marginTop: 2 }}>{s.note}</div>}
+              </div>
+              <div className="chips" style={{ justifyContent: "flex-end", alignItems: "center" }}>
+                <span className="chip">{silenceChip(s).text}</span>
+                <button className="btn sm" disabled={busy} onClick={() => end(s.id, "Silence ended")}>End</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface Episode {
+  key: string;
+  rule: string;
+  name: string;
+  instance: string;
+  subject: string;
+  /** null: it fired before the oldest transition kept */
+  fired: number | null;
+  /** null: still firing */
+  resolved: number | null;
+  detail: string;
+  flapping: boolean;
+}
+
+/** Pair firing and resolved transitions into episodes, newest first. */
+function episodes(list: AlertTransition[]): Episode[] {
+  const open = new Map<string, Episode>();
+  const out: Episode[] = [];
+  for (const t of list) {
+    const key = `${t.rule}/${t.instance}/${t.subject}`;
+    if (t.state === "firing") {
+      const e: Episode = { key: `${key}/${t.id}`, rule: t.rule, name: t.name, instance: t.instance, subject: t.subject, fired: t.t, resolved: null, detail: t.detail, flapping: t.flapping };
+      open.set(key, e);
+      out.push(e);
+    } else {
+      const e = open.get(key);
+      if (e) {
+        e.resolved = t.t;
+        open.delete(key);
+      } else out.push({ key: `${key}/${t.id}`, rule: t.rule, name: t.name, instance: t.instance, subject: t.subject, fired: null, resolved: t.t, detail: t.detail, flapping: t.flapping });
+    }
+  }
+  return out.sort((a, b) => (b.fired ?? b.resolved!) - (a.fired ?? a.resolved!));
+}
+
+const HISTORY_SHOWN = 100;
+
+/** Alerts that fired and resolved, from the stored transitions. */
+function History({ hostName, initialHost }: { hostName: (id: string) => string; initialHost?: string }) {
+  const { instances, alerts } = usePaddock();
+  const [list, setList] = useState<AlertTransition[] | null>(null);
+  const [host, setHost] = useState(initialHost ?? "");
+  useEffect(() => {
+    api<{ transitions: AlertTransition[] }>("/api/alerts/transitions?limit=1000").then((d) => setList(d.transitions)).catch(() => setList([]));
+  }, [alerts]);
+  const all = useMemo(() => (list ? episodes(list) : []), [list]);
+  const shown = all.filter((e) => !host || e.instance === host);
+  return (
+    <div className="section">
+      <div className="card-head">
+        <h2>History</h2>
+        <select value={host} onChange={(e) => setHost(e.target.value)} aria-label="Host" style={{ width: "auto", maxWidth: 240 }}>
+          <option value="">All hosts</option>
+          {instances.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+          {host && !instances.some((i) => i.id === host) && <option value={host}>{host}</option>}
+        </select>
+      </div>
+      <div className="card">
+        {list === null ? (
+          <div className="empty">Loading…</div>
+        ) : !shown.length ? (
+          <div className="empty">No alerts have fired{host ? ` on ${hostName(host)}` : ""} in the kept history.</div>
+        ) : (
+          <div className="tablewrap">
+            <table>
+              <thead>
+                <tr><th>Alert</th><th>Fired</th><th>Resolved</th><th>Lasted</th></tr>
+              </thead>
+              <tbody>
+                {shown.slice(0, HISTORY_SHOWN).map((e) => (
+                  <tr key={e.key}>
+                    <td>
+                      <b>{e.name}</b> <span className="faint">on</span> {hostName(e.instance)}
+                      {e.subject && <span className="faint"> · {subjectText(e.subject)}</span>}
+                      {e.flapping && <span className="chip warn" style={{ marginLeft: 6 }}>flapping</span>}
+                      <div className="hint" style={{ marginTop: 2 }}>{e.detail}</div>
+                    </td>
+                    <td className="mono">{e.fired ? whenText(e.fired) : "earlier"}</td>
+                    <td className="mono">{e.resolved ? whenText(e.resolved) : <span className="chip bad">firing</span>}</td>
+                    <td className="mono">{e.fired ? fmtDur((e.resolved ?? Date.now() / 1000) - e.fired) : "–"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {shown.length > HISTORY_SHOWN && <div className="hint" style={{ marginTop: 8 }}>The latest {HISTORY_SHOWN} are shown; the API has them all.</div>}
+    </div>
+  );
+}
+
 function conditionText(r: AlertRule) {
   const unit = ALERT_KINDS[r.kind].unit;
   const what = unit ? `above ${thresholdText(r.threshold, unit)}` : "when it happens";
   return `${what}${r.for_s ? ` for ${durText(r.for_s)}` : ""} · clears after ${durText(r.clear_s)}`;
 }
 
-function AlertLine({ a, host }: { a: ActiveAlert; host: string }) {
-  const now = Date.now() / 1000;
-  const cls = a.state === "firing" ? "bad" : "warn";
-  return (
-    <div className="alertline">
-      <span className={`dot ${a.unknown ? "" : cls}`} />
-      <div className="grow">
-        <div>
-          <b>{a.name}</b> <span className="faint">on</span>{" "}
-          <Link href={`/i/${encodeURIComponent(a.instance)}/monitor`}>{host}</Link>
-          {a.subject && <span className="faint"> · {subjectText(a.subject)}</span>}
-        </div>
-        <div className="hint" style={{ marginTop: 2 }}>{a.detail}</div>
-      </div>
-      <div className="chips" style={{ justifyContent: "flex-end" }}>
-        {a.unknown && <span className="chip" title="The last poll had no data for this alert, so it can't resolve yet">no data</span>}
-        {a.flapping && <span className="chip warn" title="Fired repeatedly in a short time; it has to stay clear longer before it resolves">flapping</span>}
-        <span className={`chip ${cls}`} title={new Date((a.fired_at ?? a.since) * 1000).toLocaleString()}>
-          {a.state} {fmtDur(now - (a.fired_at ?? a.since))}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function RuleEditor({ rule, busy, onClose, onSave, onDelete }: {
+function RuleEditor({ rule, channels, busy, onClose, onSave, onDelete }: {
   rule?: AlertRule;
+  channels: NotifyChannel[];
   busy: boolean;
   onClose: () => void;
   onSave: (r: AlertRule) => void;
@@ -188,6 +311,8 @@ function RuleEditor({ rule, busy, onClose, onSave, onDelete }: {
   const [allHosts, setAllHosts] = useState(!rule?.hosts);
   const [hosts, setHosts] = useState<string[]>(rule?.hosts ?? []);
   const [enabled, setEnabled] = useState(rule?.enabled ?? true);
+  const [allChannels, setAllChannels] = useState(rule?.channels == null);
+  const [chosen, setChosen] = useState<string[]>(rule?.channels ?? []);
   const forS = parseDur(forText);
   const clearS = parseDur(clearText);
 
@@ -210,6 +335,7 @@ function RuleEditor({ rule, busy, onClose, onSave, onDelete }: {
       threshold: info.unit ? Number(threshold) : null,
       for_s: forS ?? -1, clear_s: clearS ?? -1,
       hosts: allHosts ? null : hosts,
+      channels: allChannels ? null : chosen,
     });
   };
 
@@ -277,6 +403,26 @@ function RuleEditor({ rule, busy, onClose, onSave, onDelete }: {
               {!choices.length && <div className="hint">No hosts yet.</div>}
             </div>
           )}
+        </div>
+
+        <div className="field">
+          <span className="fieldlabel">Notify</span>
+          <label className="row hint" style={{ gap: 6, marginTop: 0 }}>
+            <input type="checkbox" checked={allChannels} onChange={(e) => setAllChannels(e.target.checked)} /> Every channel, including ones added later
+          </label>
+          {!allChannels && (
+            <div className="hostpick">
+              {[...channels.map((c) => ({ id: c.id, name: c.name })), ...chosen.filter((id) => !channels.some((c) => c.id === id)).map((id) => ({ id, name: `${id} (deleted)` }))].map((c) => (
+                <label key={c.id} className="row" style={{ gap: 6 }}>
+                  <input type="checkbox" checked={chosen.includes(c.id)}
+                    onChange={(e) => setChosen(e.target.checked ? [...chosen, c.id] : chosen.filter((x) => x !== c.id))} />
+                  {c.name}
+                </label>
+              ))}
+              <div className="hint">{chosen.length ? "" : "None chosen: the alert only shows in the dashboard."}</div>
+            </div>
+          )}
+          {!channels.length && <div className="hint">No channels yet: add one under Notifications on this page.</div>}
         </div>
 
         <label className="row hint" style={{ gap: 6, marginBottom: 14 }}>
