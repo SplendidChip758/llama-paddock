@@ -131,6 +131,8 @@ export async function startSim({ hosts = 1, gpus = "1", ollamaKey = "", agentTok
 
   return {
     child,
+    /** the control API, e.g. for the webhook receiver at `${control}/webhook/<name>` */
+    control,
     hosts: list,
     host: (id) => list.find((h) => h.id === id),
     async state(id) {

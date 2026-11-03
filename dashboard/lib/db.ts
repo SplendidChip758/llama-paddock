@@ -4,7 +4,7 @@ import "server-only";
 import fs from "node:fs";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { dataDir, dataFile } from "./store";
-import type { AlertKind, AlertTransition, HistoryPoint, HostEvent, JobInfo } from "./types";
+import type { AlertKind, AlertSilence, AlertTransition, HistoryPoint, HostEvent, JobInfo } from "./types";
 
 const DB_FILE = "paddock.db";
 
@@ -62,6 +62,14 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX alert_transitions_key ON alert_transitions (rule, instance, subject, id);
   CREATE INDEX alert_transitions_t ON alert_transitions (t);
+  `,
+  `
+  -- alert_silences: alerts muted for a while. rule, instance, subject: what it matches, null = anything.
+  -- until_resolved = 1: an acknowledgement, removed when its alert resolves; until is then null.
+  CREATE TABLE alert_silences (
+    id INTEGER PRIMARY KEY, created REAL NOT NULL, rule TEXT, instance TEXT, subject TEXT,
+    until REAL, until_resolved INTEGER NOT NULL, note TEXT NOT NULL
+  );
   `,
 ];
 
@@ -223,6 +231,7 @@ export function deleteHistory(instance: string) {
     d.prepare("DELETE FROM observed WHERE instance = ?").run(instance);
     d.prepare("DELETE FROM events WHERE instance = ?").run(instance);
     d.prepare("DELETE FROM alert_transitions WHERE instance = ?").run(instance);
+    d.prepare("DELETE FROM alert_silences WHERE instance = ?").run(instance);
   });
 }
 
@@ -485,6 +494,34 @@ function trimAlertTransitions(d: DatabaseSync, cutoff: number) {
     JOIN (SELECT max(id) AS id FROM alert_transitions GROUP BY rule, instance, subject) l ON l.id = a.id
     WHERE a.state = 'firing'
   )`).run(cutoff);
+}
+
+// ============================================================================ alert silences
+interface SilenceRow {
+  id: number; created: number; rule: string | null; instance: string | null; subject: string | null;
+  until: number | null; until_resolved: number; note: string;
+}
+
+const toSilence = (r: SilenceRow): AlertSilence => ({
+  id: r.id, created: r.created, rule: r.rule, instance: r.instance, subject: r.subject,
+  until: r.until, until_resolved: !!r.until_resolved, note: r.note,
+});
+
+export const loadSilences = (): AlertSilence[] =>
+  (db().prepare("SELECT * FROM alert_silences ORDER BY id").all() as unknown as SilenceRow[]).map(toSilence);
+
+/** Store a silence; it gets its id here. */
+export function insertSilence(x: AlertSilence) {
+  x.id = Number(db().prepare("INSERT INTO alert_silences (created, rule, instance, subject, until, until_resolved, note) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(x.created, x.rule, x.instance, x.subject, x.until, x.until_resolved ? 1 : 0, x.note).lastInsertRowid);
+}
+
+export function deleteSilences(ids: number[]) {
+  if (!ids.length) return;
+  tx((d) => {
+    const del = d.prepare("DELETE FROM alert_silences WHERE id = ?");
+    for (const id of ids) del.run(id);
+  });
 }
 
 // ============================================================================ jobs

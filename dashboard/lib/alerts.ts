@@ -5,11 +5,11 @@
 // directory; firing and resolved transitions go to paddock.db, so a firing alert is still firing
 // after a restart.
 import "server-only";
-import { firingAlerts, recentFirings, recordAlertTransitions } from "./db";
+import { deleteSilences, firingAlerts, insertSilence, loadSilences, recentFirings, recordAlertTransitions } from "./db";
 import { HttpError } from "./http-error";
 import { ALERT_KINDS, DEFAULT_CLEAR_S, DEFAULT_RULES, isAlertKind, subjectText } from "./rules";
 import { readJson, writeJson } from "./store";
-import type { ActiveAlert, AgentStats, AlertRule, AlertTransition, GpuCheck, PsModel } from "./types";
+import type { ActiveAlert, AgentStats, AlertRule, AlertSilence, AlertTransition, GpuCheck, PsModel } from "./types";
 
 const RULES_FILE = "alert-rules.json";
 
@@ -26,8 +26,8 @@ const RUNNER_MISSING_POLLS = 2;
 // ============================================================================ rules
 const ID_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 
-/** hostIds: the hosts a rule may name, or null to accept any (rules read back from the file). */
-function validRule(raw: unknown, hostIds: Set<string> | null): Omit<AlertRule, "id"> & { id: string | null } {
+/** hostIds, channelIds: the hosts and channels a rule may name, or null to accept any (rules read back from the file). */
+function validRule(raw: unknown, hostIds: Set<string> | null, channelIds: Set<string> | null): Omit<AlertRule, "id"> & { id: string | null } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, "each rule must be an object");
   const r = raw as Record<string, unknown>;
   if (!isAlertKind(r.kind)) throw new HttpError(400, `kind must be one of ${Object.keys(ALERT_KINDS).join(", ")}`);
@@ -58,9 +58,18 @@ function validRule(raw: unknown, hostIds: Set<string> | null): Omit<AlertRule, "
     if (unknown.length) throw new HttpError(400, `${name}: unknown host ${unknown.join(", ")}`);
   }
 
+  // an empty list is allowed: the alert shows in the dashboard and isn't sent anywhere
+  let channels: string[] | null = null;
+  if (r.channels != null) {
+    if (!Array.isArray(r.channels)) throw new HttpError(400, `${name}: channels must be a list of channel ids, or null for every channel`);
+    channels = [...new Set(r.channels.map(String))];
+    const unknown = channelIds ? channels.filter((c) => !channelIds.has(c)) : [];
+    if (unknown.length) throw new HttpError(400, `${name}: unknown channel ${unknown.join(", ")}`);
+  }
+
   return {
     id, name, kind: r.kind, enabled: r.enabled !== false, threshold,
-    for_s: seconds(r.for_s, info.for_s, "for_s"), clear_s: seconds(r.clear_s, DEFAULT_CLEAR_S, "clear_s"), hosts,
+    for_s: seconds(r.for_s, info.for_s, "for_s"), clear_s: seconds(r.clear_s, DEFAULT_CLEAR_S, "clear_s"), hosts, channels,
   };
 }
 
@@ -79,7 +88,7 @@ function readRules(): AlertRule[] {
   const ids = new Set<string>();
   for (const raw of stored.rules) {
     try {
-      const r = validRule(raw, null);
+      const r = validRule(raw, null, null);
       if (r.id === null || ids.has(r.id)) throw new HttpError(400, `missing or repeated id ${r.id}`);
       ids.add(r.id);
       rules.push(r as AlertRule);
@@ -90,18 +99,21 @@ function readRules(): AlertRule[] {
   return rules;
 }
 
-export const listRules = (): AlertRule[] => alerts().rules.map((r) => ({ ...r, hosts: r.hosts && [...r.hosts] }));
+export const listRules = (): AlertRule[] =>
+  alerts().rules.map((r) => ({ ...r, hosts: r.hosts && [...r.hosts], channels: r.channels ? [...r.channels] : null }));
 
 /** Validate and store a complete rule list. A rule without an id gets one from its name. */
-export function saveRules(raw: unknown, hostIds: string[]): AlertRule[] {
+export function saveRules(raw: unknown, hostIds: string[], channelIds: string[]): AlertRule[] {
   if (!Array.isArray(raw)) throw new HttpError(400, "rules must be a list");
   if (raw.length > 200) throw new HttpError(400, "at most 200 rules");
   const previous = new Map(alerts().rules.map((r) => [r.id, r]));
   const parsed = raw.map((r) => {
-    // a host the rule already named may have been removed since, or be gone from config.yaml for now: keep it
+    // a host or channel the rule already named may have been removed since, or be gone from config.yaml for now: keep it
     const id = (r as AlertRule | null)?.id;
-    const known = new Set([...hostIds, ...((typeof id === "string" && previous.get(id)?.hosts) || [])]);
-    return validRule(r, known);
+    const before = typeof id === "string" ? previous.get(id) : undefined;
+    const knownHosts = new Set([...hostIds, ...(before?.hosts ?? [])]);
+    const knownChannels = new Set([...channelIds, ...(before?.channels ?? [])]);
+    return validRule(r, knownHosts, knownChannels);
   });
   const taken = new Set<string>();
   for (const r of parsed) {
@@ -127,7 +139,7 @@ export function saveRules(raw: unknown, hostIds: string[]): AlertRule[] {
 const applies = (rule: AlertRule, instance: string) => rule.enabled && (!rule.hosts || rule.hosts.includes(instance));
 
 // ============================================================================ state
-interface Tracker extends ActiveAlert {
+interface Tracker extends Omit<ActiveAlert, "silence"> {
   /** firing: when the current run of clear observations started; null while the condition holds or is unknown */
   clear_since: number | null;
   /** the last poll that had data for this alert, to tell a gap in observation */
@@ -153,6 +165,9 @@ interface AlertsState {
   reconcile: boolean;
   /** the last error saving transitions, so the UI can say alerts may not survive a restart */
   store_error: string | null;
+  silences: AlertSilence[];
+  /** alerts whose firing was silenced, so that their resolving is kept quiet too */
+  muted: Set<string>;
   listeners: Set<(t: AlertTransition) => void>;
 }
 
@@ -163,7 +178,7 @@ function alerts(): AlertsState {
   if (!g.__paddockAlerts) {
     g.__paddockAlerts = {
       rules: readRules(), trackers: new Map(), firings: new Map(), baselines: new Map(),
-      reconcile: true, store_error: null, listeners: new Set(),
+      reconcile: true, store_error: null, silences: [], muted: new Set(), listeners: new Set(),
     };
     restore(g.__paddockAlerts);
   }
@@ -184,6 +199,7 @@ function restore(a: AlertsState) {
       const key = keyOf(x.rule, x.instance, x.subject);
       a.firings.set(key, [...(a.firings.get(key) ?? []), x.t]);
     }
+    a.silences = loadSilences();
   } catch (e) {
     a.store_error = e instanceof Error ? e.message : String(e);
     console.error("[llama-paddock] loading firing alerts failed:", e);
@@ -193,8 +209,9 @@ function restore(a: AlertsState) {
 const keyOf = (rule: string, instance: string, subject: string) => `${rule}\u0000${instance}\u0000${subject}`;
 
 /**
- * Notification channels (#8) and alert history (#9) hook in here: `fn` gets every firing and
- * resolved transition once it has been stored. Returns a function that unsubscribes.
+ * Notification channels (#8) hook in here: `fn` gets each firing and resolved transition once it
+ * has been stored, except silenced ones (see `audible`). Every transition is still recorded and
+ * listed. Returns a function that unsubscribes.
  */
 export function onAlertTransition(fn: (t: AlertTransition) => void): () => void {
   const a = alerts();
@@ -204,9 +221,99 @@ export function onAlertTransition(fn: (t: AlertTransition) => void): () => void 
 
 export function activeAlerts(): { active: ActiveAlert[]; store_error: string | null } {
   const a = alerts();
-  const active = [...a.trackers.values()].map(({ clear_since: _c, seen: _s, ...x }) => x)
+  const now = Date.now() / 1000;
+  const active = [...a.trackers.values()].map(({ clear_since: _c, seen: _s, ...x }) => ({ ...x, silence: silenceOf(x.rule, x.instance, x.subject, now) }))
     .sort((x, y) => (x.state === y.state ? x.since - y.since : x.state === "firing" ? -1 : 1));
   return { active, store_error: a.store_error };
+}
+
+// ============================================================================ silences
+const MAX_SILENCE_S = 30 * 24 * 3600;
+const MAX_SILENCES = 500;
+
+const silenceMatches = (x: AlertSilence, rule: string, instance: string, subject: string) =>
+  (x.rule === null || x.rule === rule) && (x.instance === null || x.instance === instance) && (x.subject === null || x.subject === subject);
+
+/** Drop the silences whose time is up. */
+function pruneSilences(a: AlertsState, now: number) {
+  const over = a.silences.filter((x) => x.until !== null && x.until <= now);
+  if (!over.length) return;
+  a.silences = a.silences.filter((x) => !over.includes(x));
+  try {
+    deleteSilences(over.map((x) => x.id));
+  } catch (e) {
+    // they no longer match either way; the next start drops them again
+    console.error("[llama-paddock] removing expired silences failed:", e);
+  }
+}
+
+/** The silence or acknowledgement covering an alert now, if any. Notification channels (#8) check this too. */
+export function silenceOf(rule: string, instance: string, subject: string, now = Date.now() / 1000): AlertSilence | null {
+  const a = alerts();
+  pruneSilences(a, now);
+  // an acknowledgement is the more specific answer when both match
+  const all = a.silences.filter((x) => silenceMatches(x, rule, instance, subject));
+  return all.find((x) => x.until_resolved) ?? all[0] ?? null;
+}
+
+export function listSilences(): AlertSilence[] {
+  const a = alerts();
+  pruneSilences(a, Date.now() / 1000);
+  return a.silences.map((x) => ({ ...x }));
+}
+
+/**
+ * Silence alerts for `duration_s`, or acknowledge one (`until_resolved: true`) until it resolves.
+ * rule, instance and subject say what is silenced; null or absent matches anything, but a silence
+ * needs at least a host or a rule, and an acknowledgement names one active alert exactly.
+ */
+export function addSilence(raw: unknown, hostIds: string[]): AlertSilence {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, "body must be an object");
+  const r = raw as Record<string, unknown>;
+  const a = alerts();
+  const opt = (v: unknown) => (v == null || v === "" ? null : String(v));
+  const rule = opt(r.rule), instance = opt(r.instance), subject = opt(r.subject);
+  if (rule !== null && !a.rules.some((x) => x.id === rule)) throw new HttpError(400, `unknown rule ${rule}`);
+  if (instance !== null && !hostIds.includes(instance)) throw new HttpError(400, `unknown host ${instance}`);
+  if (subject !== null && subject.length > 512) throw new HttpError(400, "subject is too long");
+  if (rule === null && instance === null) throw new HttpError(400, "a silence needs a host, a rule, or both");
+  const note = String(r.note ?? "").trim().slice(0, 200);
+  if (a.silences.length >= MAX_SILENCES) throw new HttpError(400, `at most ${MAX_SILENCES} silences`);
+
+  const now = Date.now() / 1000;
+  let until: number | null = null;
+  const untilResolved = r.until_resolved === true;
+  if (untilResolved) {
+    if (rule === null || instance === null || subject === null) throw new HttpError(400, "an acknowledgement names one alert: rule, instance and subject");
+    if (!a.trackers.has(keyOf(rule, instance, subject))) throw new HttpError(409, "that alert isn't active; it may have resolved");
+  } else {
+    const d = Number(r.duration_s);
+    if (!Number.isInteger(d) || d < 60 || d > MAX_SILENCE_S) throw new HttpError(400, `duration_s must be whole seconds from 60 to ${MAX_SILENCE_S}`);
+    until = now + d;
+  }
+  const x: AlertSilence = { id: 0, created: now, rule, instance, subject, until, until_resolved: untilResolved, note };
+  insertSilence(x);
+  a.silences.push(x);
+  return { ...x };
+}
+
+export function removeSilence(id: number) {
+  const a = alerts();
+  if (!a.silences.some((x) => x.id === id)) throw new HttpError(404, "no such silence; it may have ended");
+  deleteSilences([id]);
+  a.silences = a.silences.filter((x) => x.id !== id);
+}
+
+/** An acknowledgement ends with its alert. */
+function endAcknowledgements(a: AlertsState, out: AlertTransition[]) {
+  const done = a.silences.filter((x) => x.until_resolved && out.some((t) => t.state === "resolved" && silenceMatches(x, t.rule, t.instance, t.subject)));
+  if (!done.length) return;
+  a.silences = a.silences.filter((x) => !done.includes(x));
+  try {
+    deleteSilences(done.map((x) => x.id));
+  } catch (e) {
+    console.error("[llama-paddock] removing acknowledgements failed:", e);
+  }
 }
 
 /**
@@ -224,6 +331,8 @@ export function forgetAlerts(instance: string, why: string) {
   }
   for (const k of a.firings.keys()) if (k.split("\u0000")[1] === instance) a.firings.delete(k);
   a.baselines.delete(instance);
+  // deleteHistory() removed them from paddock.db
+  a.silences = a.silences.filter((x) => x.instance !== instance);
   notify(a, out);
 }
 
@@ -476,8 +585,36 @@ export function evaluateAlerts(polled: PolledHost[], hostIds: string[], gapAfter
 }
 
 function notify(a: AlertsState, out: AlertTransition[]) {
+  try {
+    notifyListeners(a, out);
+  } finally {
+    // after the listeners, so they still see the acknowledgement of an alert that just resolved
+    endAcknowledgements(a, out);
+  }
+}
+
+/**
+ * Whether listeners hear a transition. A silenced alert's firing is kept quiet, and so is its
+ * resolving, even once the silence has ended. An alert acknowledged after it fired still reports
+ * resolving, so whoever heard it fire hears it end; one under a timed silence doesn't.
+ */
+function audible(a: AlertsState, x: AlertTransition): boolean {
+  const key = keyOf(x.rule, x.instance, x.subject);
+  const s = silenceOf(x.rule, x.instance, x.subject, x.t);
+  if (x.state === "firing") {
+    if (!s) return true;
+    a.muted.add(key);
+    return false;
+  }
+  if (a.muted.delete(key)) return false;
+  return !s || s.until_resolved;
+}
+
+function notifyListeners(a: AlertsState, out: AlertTransition[]) {
   for (const x of out) {
-    console.log(`[llama-paddock] alert ${x.state}: ${x.name} on ${x.instance}${x.subject ? ` ${subjectText(x.subject)}` : ""}: ${x.detail}`);
+    const loud = audible(a, x);
+    console.log(`[llama-paddock] alert ${x.state}${loud ? "" : " (silenced)"}: ${x.name} on ${x.instance}${x.subject ? ` ${subjectText(x.subject)}` : ""}: ${x.detail}`);
+    if (!loud) continue;
     for (const fn of a.listeners) {
       try {
         fn(x);

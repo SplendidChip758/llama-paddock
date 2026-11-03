@@ -13,6 +13,7 @@ import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
 import { diagnoseGpu, isGpuLogLine, modelKey, ollamaRun, onCpu, readLog, type GpuEvidence } from "./gpucheck";
 import { HttpError } from "./http-error";
 import { parseParameters } from "./params";
+import { startNotifications } from "./notify";
 import { withSplit } from "./split";
 import type {
   AgentGpuCheck, AgentStats, EnvState, GpuCheck, GpuFixAction, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, PsModel,
@@ -130,6 +131,7 @@ export function paddock(): Paddock {
       pollerStarted: false,
     };
     restoreJobs(g.__paddock);
+    startNotifications((id) => g.__paddock?.instances.get(id)?.inst.name ?? id);
   }
   const p = g.__paddock;
   if (!p.pollerStarted) {

@@ -65,6 +65,14 @@
  * Pulling a name ending in "-cloud" or ":cloud" adds an Ollama cloud model: listed with
  * remote_host/remote_model, answering /api/generate, but never in /api/ps since it runs remotely.
  *   GET  /_sim/config.yaml              the same config.yaml as --write-config
+ *
+ * Webhook receiver, for the dashboard's notification channels (any name; point a Webhook, Discord
+ * or Slack channel at http://<bind>:<base-port>/_sim/webhook/<name>):
+ *   POST   /_sim/webhook/<name>         records the message (and logs its summary); 204
+ *   GET    /_sim/webhook/<name>         {received: [{t, headers, body}]}
+ *   POST   /_sim/webhook/<name>/fail    {status, times = 1, retry_after?}: answer the next `times`
+ *                                       messages with that status (and a Retry-After header)
+ *   DELETE /_sim/webhook/<name>         forget what was received and any failures still set
  */
 import http from "node:http";
 import https from "node:https";
@@ -991,9 +999,51 @@ function configYaml() {
   return lines.join("\n") + "\n";
 }
 
+// ------------------------------------------------------------------ webhook receiver
+/** name → { received: [{t, headers, body}], fail: [{status, retry_after}] } */
+const webhooks = new Map();
+const webhook = (name) => {
+  if (!webhooks.has(name)) webhooks.set(name, { received: [], fail: [] });
+  return webhooks.get(name);
+};
+
+async function handleWebhook(req, res, name, action) {
+  const w = webhook(name);
+  if (req.method === "GET" && !action) return sendJson(res, 200, { received: w.received });
+  if (req.method === "DELETE" && !action) {
+    webhooks.delete(name);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (req.method === "POST" && action === "fail") {
+    const b = await readBody(req);
+    const status = Number(b.status), times = Number(b.times ?? 1);
+    if (!Number.isInteger(status) || status < 400 || status > 599) throw new HttpErr(400, "status must be an HTTP error status");
+    for (let i = 0; i < times; i++) w.fail.push({ status, retry_after: b.retry_after ?? null });
+    return sendJson(res, 200, { failing: w.fail.length });
+  }
+  if (req.method === "POST" && !action) {
+    const f = w.fail.shift();
+    if (f) {
+      console.log(`paddock-sim: webhook ${name}: answered ${f.status}`);
+      res.writeHead(f.status, { "Content-Type": "application/json", ...(f.retry_after != null ? { "Retry-After": String(f.retry_after) } : {}) });
+      return res.end(JSON.stringify({ message: "simulated failure" }));
+    }
+    const body = await readBody(req);
+    const { authorization, "content-type": contentType, "user-agent": userAgent } = req.headers;
+    w.received.push({ t: Date.now() / 1000, headers: { authorization, "content-type": contentType, "user-agent": userAgent }, body });
+    // Discord sends embeds, Slack text, the generic webhook a summary
+    console.log(`paddock-sim: webhook ${name}: ${body.summary ?? body.embeds?.[0]?.title ?? body.text ?? "(message)"}`);
+    res.writeHead(204);
+    return res.end();
+  }
+  throw new HttpErr(405, "see the header of test/sim/paddock-sim.mjs");
+}
+
 async function handleControl(req, res) {
   const url = new URL(req.url, "http://control");
   try {
+    const wh = /^\/_sim\/webhook\/([A-Za-z0-9_.-]+)(?:\/(fail))?$/.exec(url.pathname);
+    if (wh) return await handleWebhook(req, res, wh[1], wh[2]);
     if (req.method === "GET" && (url.pathname === "/_sim" || url.pathname === "/_sim/hosts")) {
       return sendJson(res, 200, { hosts: [...hosts.values()].map((h) => hostView(h)) });
     }
