@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtNum, instPath } from "@/lib/format";
-import type { InstanceSnapshot, RequestSummary } from "@/lib/types";
+import type { InstanceSnapshot, RequestLogPage, RequestSummary } from "@/lib/types";
 import { whenText } from "./AlertBits";
 import { usePaddock } from "./PaddockProvider";
 import { Stat } from "./ui";
@@ -11,6 +11,12 @@ const RANGES = ["1h", "24h", "7d", "30d"] as const;
 type Range = (typeof RANGES)[number];
 /** The dashboard reads request logs every 10 polls; refetching more often shows nothing new. */
 const REFRESH_MS = 30_000;
+/** Rows the clients, endpoints and models tables show until "Show all": the page stays about a screen long. */
+const TOP = 10;
+/** The most the API lists per table. */
+const API_TOP = 50;
+const PAGE = 25;
+type Table = "clients" | "endpoints" | "models";
 
 function fmtMs(ms: number): string {
   if (ms < 1) return `${Math.round(ms * 1000)} µs`;
@@ -29,6 +35,7 @@ export function RequestsTab({ st }: { st: InstanceSnapshot }) {
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const [naming, setNaming] = useState<{ client: string; name: string } | null>(null);
+  const [all, setAll] = useState<Partial<Record<Table, boolean>>>({});
 
   useEffect(() => {
     const t = setInterval(() => setTick((x) => x + 1), REFRESH_MS);
@@ -64,6 +71,12 @@ export function RequestsTab({ st }: { st: InstanceSnapshot }) {
   }
   const label = (client: string, name: string | null) => (name ? <><b>{name}</b> <span className="faint mono">{client}</span></> : <span className="mono">{client}</span>);
   const nameOf = (client: string) => data?.clients.find((x) => x.client === client)?.name ?? null;
+  const top = <T,>(t: Table, rows: T[]) => (all[t] ? rows : rows.slice(0, TOP));
+  const more = (t: Table, n: number) => n > TOP && (
+    <button className="btn sm" style={{ marginTop: 8 }} onClick={() => setAll({ ...all, [t]: !all[t] })}>
+      {all[t] ? `Show the top ${TOP}` : n >= API_TOP ? `Show the ${API_TOP} busiest` : `Show all ${n}`}
+    </button>
+  );
 
   return (
     <>
@@ -106,7 +119,7 @@ export function RequestsTab({ st }: { st: InstanceSnapshot }) {
                   <table>
                     <thead><tr><th>Client</th><th className="num">Requests</th><th className="num">Errors</th><th className="num">Average</th><th className="num">Slowest</th><th>Last</th><th /></tr></thead>
                     <tbody>
-                      {data.clients.map((x) => (
+                      {top("clients", data.clients).map((x) => (
                         <tr key={x.client}>
                           <td>
                             {naming?.client === x.client ? (
@@ -131,6 +144,7 @@ export function RequestsTab({ st }: { st: InstanceSnapshot }) {
                     </tbody>
                   </table>
                 </div>
+                {more("clients", data.clients.length)}
               </div>
 
               <div className="grid g2 section">
@@ -140,7 +154,7 @@ export function RequestsTab({ st }: { st: InstanceSnapshot }) {
                     <table>
                       <thead><tr><th>Endpoint</th><th className="num">Requests</th><th className="num">Errors</th><th className="num">Average</th></tr></thead>
                       <tbody>
-                        {data.endpoints.map((x) => (
+                        {top("endpoints", data.endpoints).map((x) => (
                           <tr key={`${x.method} ${x.path}`}>
                             <td className="mono">{x.method} {x.path}</td>
                             <td className="num">{fmtNum(x.count)}</td>
@@ -151,6 +165,7 @@ export function RequestsTab({ st }: { st: InstanceSnapshot }) {
                       </tbody>
                     </table>
                   </div>
+                  {more("endpoints", data.endpoints.length)}
                 </div>
                 <div>
                   <h2>Models</h2>
@@ -159,21 +174,21 @@ export function RequestsTab({ st }: { st: InstanceSnapshot }) {
                       <table>
                         <thead><tr><th>Model</th><th className="num">Requests</th><th className="num">Average</th></tr></thead>
                         <tbody>
-                          {data.models.map((x) => (
+                          {top("models", data.models).map((x) => (
                             <tr key={x.model}><td className="mono">{x.model}</td><td className="num">{fmtNum(x.count)}</td><td className="num">{fmtMs(x.avg_ms)}</td></tr>
                           ))}
                         </tbody>
                       </table>
                     ) : <div className="empty">No requests matched to a model yet.</div>}
                   </div>
+                  {more("models", data.models.length)}
                   <div className="hint" style={{ marginTop: 8 }}>
                     Ollama&apos;s log doesn&apos;t name the model. A request is counted here when exactly one model was loaded at the time.
                   </div>
                 </div>
               </div>
 
-              <RequestTable title="Slowest" rows={data.slowest} nameOf={nameOf} />
-              <RequestTable title="Latest" rows={data.recent} nameOf={nameOf} />
+              <RequestLog key={range} st={st} range={range} to={data.to} nameOf={nameOf} />
             </>
           )}
           <div className="hint" style={{ marginTop: 12 }}>
@@ -214,10 +229,42 @@ function Bars({ data }: { data: RequestSummary }) {
   );
 }
 
-function RequestTable({ title, rows, nameOf }: { title: string; rows: RequestSummary["recent"]; nameOf: (client: string) => string | null }) {
+/** The latest or slowest requests in the range, a page at a time; `to` pins the range's end, as the summary saw it. */
+function RequestLog({ st, range, to, nameOf }: { st: InstanceSnapshot; range: Range; to: number; nameOf: (client: string) => string | null }) {
+  const [sort, setSort] = useState<RequestLogPage["sort"]>("latest");
+  const [offset, setOffset] = useState(0);
+  const [page, setPage] = useState<RequestLogPage | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    api<RequestLogPage>(instPath(st.id, `/requests/log?range=${range}&sort=${sort}&offset=${offset}&limit=${PAGE}&to=${to}`))
+      .then((p) => {
+        if (!live) return;
+        setPage(p);
+        setError(null);
+      })
+      .catch((e) => live && setError((e as Error).message));
+    return () => {
+      live = false;
+    };
+  }, [st.id, range, sort, offset, to]);
+
+  const rows = page?.requests ?? [];
+  const total = page?.total ?? 0;
   return (
     <div className="section">
-      <h2>{title}</h2>
+      <div className="card-head">
+        <h2 style={{ margin: 0 }}>Log</h2>
+        <div className="seg" role="group" aria-label="Order">
+          {(["latest", "slowest"] as const).map((s) => (
+            <button key={s} className={s === sort ? "on" : ""} aria-pressed={s === sort} onClick={() => { setSort(s); setOffset(0); }}>
+              {s === "latest" ? "Latest" : "Slowest"}
+            </button>
+          ))}
+        </div>
+      </div>
+      {error && <div className="notice bad">{error}</div>}
       <div className="card tablewrap">
         <table>
           <thead><tr><th>Time</th><th>Client</th><th>Endpoint</th><th>Model</th><th className="num">Status</th><th className="num">Duration</th></tr></thead>
@@ -235,6 +282,13 @@ function RequestTable({ title, rows, nameOf }: { title: string; rows: RequestSum
           </tbody>
         </table>
       </div>
+      {total > PAGE && (
+        <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+          <span className="hint">{fmtNum(offset + 1)}–{fmtNum(offset + rows.length)} of {fmtNum(total)}</span>
+          <button className="btn sm" aria-label="Previous page" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>‹</button>
+          <button className="btn sm" aria-label="Next page" disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>›</button>
+        </div>
+      )}
     </div>
   );
 }

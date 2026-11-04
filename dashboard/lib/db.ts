@@ -605,6 +605,17 @@ export function requestStats(instance: string, from: number, to: number, bucket:
   return { total, buckets, clients, endpoints, models, slowest, recent };
 }
 
+/** One page of a host's requests from `from` to `to`, latest or slowest first, and how many there are in all. */
+export function requestLog(instance: string, from: number, to: number, sort: "latest" | "slowest", offset: number, limit: number) {
+  const d = db();
+  const where = "FROM requests WHERE instance = ? AND t >= ? AND t <= ?";
+  const order = sort === "slowest" ? "duration_ms DESC, id DESC" : "t DESC, id DESC";
+  const total = Number((d.prepare(`SELECT count(*) AS n ${where}`).get(instance, from, to) as { n: number }).n);
+  const requests = d.prepare(`SELECT t, status, duration_ms, client, method, path, model ${where} ORDER BY ${order} LIMIT ? OFFSET ?`)
+    .all(instance, from, to, limit, offset) as unknown as RequestRow[];
+  return { total, requests };
+}
+
 // ============================================================================ jobs
 export interface StoredJob {
   info: JobInfo;

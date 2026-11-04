@@ -2,10 +2,10 @@
 // since the last ones read and stores them in paddock.db. The requests that the dashboard and other
 // monitors make every few seconds are left out, or they would bury everything else.
 import "server-only";
-import { insertRequests, lastRequestT, modelsAt, requestStats } from "./db";
+import { insertRequests, lastRequestT, modelsAt, requestLog, requestStats } from "./db";
 import { HttpError } from "./http-error";
 import { readJson, writeJson } from "./store";
-import type { AgentRequest, RequestSummary } from "./types";
+import type { AgentRequest, RequestLogPage, RequestSummary } from "./types";
 
 const CLIENTS_FILE = "request-clients.json";
 
@@ -147,4 +147,30 @@ export function requestSummary(id: string, range: RequestRange): RequestSummary 
     clients: stats.clients.map((c) => ({ ...c, name: names[c.client] ?? null })),
     sync: { last_ok: s.last_ok, error: s.error, unsupported: s.unsupported_at !== null, skipped: s.skipped },
   };
+}
+
+export const REQUEST_SORTS = ["latest", "slowest"] as const;
+const MAX_PAGE = 100;
+
+/**
+ * A page of the requests in a range, latest or slowest first. `to` (unix seconds, default now) pins
+ * the range's end, so paging through it isn't shifted by requests that arrive meanwhile.
+ */
+export function requestLogPage(id: string, range: RequestRange, params: URLSearchParams): RequestLogPage {
+  const sort = params.get("sort") ?? "latest";
+  if (!(REQUEST_SORTS as readonly string[]).includes(sort)) throw new HttpError(400, `sort must be one of ${REQUEST_SORTS.join(", ")}`);
+  const int = (name: string, def: number, min: number, max: number) => {
+    const n = Number(params.get(name) ?? def);
+    if (!Number.isInteger(n) || n < min || n > max) throw new HttpError(400, `${name} must be a whole number from ${min} to ${max}`);
+    return n;
+  };
+  const offset = int("offset", 0, 0, 1_000_000);
+  const limit = int("limit", 25, 1, MAX_PAGE);
+  const now = Date.now() / 1000;
+  const toParam = params.get("to");
+  const to = toParam === null ? now : Number(toParam);
+  if (!Number.isFinite(to) || to <= 0) throw new HttpError(400, "to must be a time in unix seconds");
+  const from = Math.min(to, now) - REQUEST_RANGES[range].seconds;
+  const page = requestLog(id, from, to, sort as RequestLogPage["sort"], offset, limit);
+  return { range, sort: sort as RequestLogPage["sort"], from, to, offset, limit, ...page };
 }

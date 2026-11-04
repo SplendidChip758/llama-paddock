@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, fmtDur } from "@/lib/format";
 import { subjectText } from "@/lib/rules";
 import type { ActiveAlert, AlertSilence } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
+import { Popover } from "./ui";
 
 /** How long "Silence for…" offers, in seconds. */
 export const SILENCE_CHOICES: [string, number][] = [["1 hour", 3600], ["8 hours", 8 * 3600], ["1 day", 86400], ["7 days", 7 * 86400]];
@@ -138,21 +139,39 @@ export function HostSilence({ id, name }: { id: string; name: string }) {
   );
 }
 
-/** A host's active alerts, above its tabs. */
-export function HostAlerts({ id, name }: { id: string; name: string }) {
+/** How long the pill pulses when another alert fires. */
+const PULSE_MS = 4000;
+
+/**
+ * A host's active alerts as a pill next to its name, opening the list with its actions: they don't
+ * push the page down. Red while any is firing and not silenced; it pulses briefly when another fires.
+ */
+export function HostAlertPill({ id, name }: { id: string; name: string }) {
   const { alerts } = usePaddock();
   const mine = alerts.filter((a) => a.instance === id);
-  if (!mine.length) return null;
   const loud = loudAlerts(mine).length;
+  const [pulse, setPulse] = useState(false);
+  const seen = useRef(loud);
+  useEffect(() => {
+    const more = loud > seen.current;
+    seen.current = loud;
+    if (!more) return;
+    setPulse(true);
+    const t = setTimeout(() => setPulse(false), PULSE_MS);
+    return () => clearTimeout(t);
+  }, [loud]);
+  if (!mine.length) return null;
+  const n = `${mine.length} alert${mine.length === 1 ? "" : "s"}`;
   return (
-    <div className={`notice ${loud ? "bad" : ""}`}>
-      <div className="row" style={{ marginBottom: 4 }}>
-        <b className="grow">{loud ? `${loud} alert${loud === 1 ? "" : "s"} firing` : "Alerts"}</b>
-        <Link href={`/alerts?host=${encodeURIComponent(id)}`} className="hint">History</Link>
+    <Popover className={`chip alertpill ${loud ? "bad" : ""} ${pulse ? "pulse" : ""}`} label={<><span className={`dot ${loud ? "bad" : ""}`} /> {n}</>}
+      title={loud === mine.length ? undefined : `${loud} firing; the others are pending, silenced or acknowledged`}>
+      <div className="row" style={{ marginBottom: 2 }}>
+        <b className="grow">{n} on {name}</b>
+        <Link href={`/alerts?host=${encodeURIComponent(id)}`} className="hint">All alerts and history →</Link>
       </div>
       <div className="alertlist">
         {mine.map((a) => <AlertLine key={`${a.rule}/${a.subject}`} a={a} host={name} actions />)}
       </div>
-    </div>
+    </Popover>
   );
 }

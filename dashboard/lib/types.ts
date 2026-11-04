@@ -406,6 +406,19 @@ export interface RequestSummary {
   };
 }
 
+/** One page of a host's requests, from GET /api/instances/{id}/requests/log. */
+export interface RequestLogPage {
+  range: string;
+  sort: "latest" | "slowest";
+  from: number;
+  to: number;
+  offset: number;
+  limit: number;
+  /** requests in the range, on every page */
+  total: number;
+  requests: (AgentRequest & { model: string | null })[];
+}
+
 export type ChannelType = "webhook" | "discord" | "slack" | "email";
 
 /** A notification channel as the API returns it. Secrets (URLs, tokens, passwords) never leave the server. */

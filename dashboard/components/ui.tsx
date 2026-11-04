@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { level } from "@/lib/format";
 import { cloudNote, isOffloaded, splitHint, splitText } from "@/lib/split";
 import type { InstanceSnapshot, LoadedModel } from "@/lib/types";
@@ -125,5 +125,30 @@ export function Drawer({ open, onClose, className, children }: { open: boolean; 
       <div className="scrim" onClick={onClose} />
       <aside className={`drawer ${className ?? ""}`}>{children}</aside>
     </>
+  );
+}
+
+/** A button that opens a small panel under it, for detail that shouldn't take room on the page. Escape or a click outside closes it. */
+export function Popover({ label, className, title, children }: { label: ReactNode; className?: string; title?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  return (
+    <span className="popover-anchor" ref={ref}>
+      <button type="button" className={className} title={title} aria-expanded={open} aria-haspopup="dialog" onClick={() => setOpen(!open)}>
+        {label}
+      </button>
+      {open && <div className="popover" role="dialog">{children}</div>}
+    </span>
   );
 }

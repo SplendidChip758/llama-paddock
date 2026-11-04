@@ -13,7 +13,7 @@ import { RequestsTab } from "./RequestsTab";
 import { TABS, type Tab } from "@/lib/tabs";
 import { HostEditor } from "./HostEditor";
 import { AgentKeyNotice, AgentPlainChip, HttpsOffer, agentEncrypted } from "./AgentTls";
-import { HostAlerts, HostSilence } from "./AlertBits";
+import { HostAlertPill, HostSilence } from "./AlertBits";
 
 export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
   const { instances, loaded, toast } = usePaddock();
@@ -48,6 +48,7 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
           <div className="row">
             <span className={`dot ${c}`} />
             <h1>{st.name}</h1>
+            <HostAlertPill id={st.id} name={st.name} />
           </div>
           <div className="meta">
             <span>{label}</span>
@@ -82,7 +83,6 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
       <AgentKeyNotice st={st} />
       {st.agent_error && !st.agent_key_changed && <div className="notice warn">Agent: {st.agent_error}</div>}
       <HttpsOffer st={st} />
-      <HostAlerts id={st.id} name={st.name} />
       <nav className="tabs">
         {TABS.map(([k, l]) => (
           <Link key={k} href={`/i/${encodeURIComponent(id)}/${k}`} className={tab === k ? "active" : ""}>
