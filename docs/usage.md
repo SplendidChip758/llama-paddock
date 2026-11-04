@@ -10,7 +10,7 @@ A host with [alerts](alerts.md) firing gets a red **N alerts** badge that opens 
 
 ## Monitor
 
-The Monitor tab shows loaded models (context window, unload timer and an Unload button), one card per GPU (utilization, VRAM, temperature, power, clocks, PCIe link and per-process VRAM, with sparklines), and host CPU per core, RAM, disks including `OLLAMA_MODELS`, network, and Ollama's memory and runner count. The Processor column on each loaded model shows its [GPU/CPU split](#gpucpu-split) in Ollama's own wording (`38% CPU / 62% GPU`) with a bar and the VRAM it holds. A model that isn't fully on the GPU has a **Not fully on the GPU: why?** note that opens to the likely causes. The Context column shows the context each model runs with next to the most it supports, and flags one cut short by a client; models that load again and again get a warning above the table (see [Context and reloads](context-and-reloads.md)). Above the GPU cards, the [GPU check](gpu-check.md) says whether Ollama uses the GPU, and when it has lost it, why and how to fix it.
+The Monitor tab shows loaded models (context window, unload timer and an Unload button), one card per GPU (utilization, VRAM, temperature, power, clocks, PCIe link and per-process VRAM, with sparklines), and host CPU per core, RAM, disks including `OLLAMA_MODELS`, network, and Ollama's memory and runner count. The Processor column shows each loaded model's [GPU/CPU split](#gpucpu-split), a placement bar and its VRAM allocation. **Context (active / max)** shows the allocated context and the model's supported maximum, in tokens; it is not a count of tokens used by a prompt. Troubleshooting explanations live on [Diagnostics](#diagnostics), keeping the live table compact.
 
 **History**, at the bottom of the tab, charts the last 1h, 6h, 24h, 7d or 30d: GPU utilization, memory, temperature and power (one line per GPU), CPU, RAM, network in/out, and the VRAM held by loaded models. Hover a chart for exact values. The 6h and 24h ranges show 1-minute averages and 7d and 30d 15-minute averages, and lines break where the host wasn't reachable. The chosen range is remembered in your browser.
 
@@ -21,6 +21,12 @@ The Monitor tab shows loaded models (context window, unload timer and an Unload 
 **Versions:** the dashboard's version is shown next to the logo, highlighted for a prerelease. Each host shows its Ollama and agent version on its page and its overview card.
 
 ![Monitor tab](images/monitor.png)
+
+## Diagnostics
+
+The Diagnostics tab groups the [GPU check](gpu-check.md), CPU/GPU placement explanations, [context allocation and reload analysis](context-and-reloads.md). GPU evidence, log lines, **Check again** and recovery actions are here. Context cards separate the active allocation, configured value and model maximum, and identify which setting supplied the configured value.
+
+CPU placement and a smaller context can be intentional. These readings help investigate unexpected behavior; a smaller context alone does not prove that a client overrode it or that a prompt was truncated. Alerts and fleet warning badges still surface detected conditions independently of the tab you have open.
 
 ## Models
 
@@ -57,7 +63,7 @@ Warnings are a hint, not an error: a host without a supported GPU, or a model de
 - **The context is too large.** The KV cache grows with `num_ctx`. Try a smaller context in the [model editor](#models), or a smaller quantization.
 - **Other models are holding VRAM.** Unload them on the Monitor tab, or lower `OLLAMA_MAX_LOADED_MODELS` on the [Environment](#environment) tab.
 - **`num_gpu` limits the GPU layers.** `num_gpu 0` keeps every layer on the CPU. Check the model's parameters in the model editor.
-- **Ollama didn't find the GPU.** The [GPU check](gpu-check.md) on the Monitor tab reads Ollama's log for this, and suggests a fix.
+- **Ollama didn't find the GPU.** The [GPU check](gpu-check.md) on the Diagnostics tab reads Ollama's log for this, and suggests a fix.
 
 **Cloud models** are marked wherever models are listed, since prompts sent to them leave your network. They take no local VRAM, so they never count towards a host's split.
 

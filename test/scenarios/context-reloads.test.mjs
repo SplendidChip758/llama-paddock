@@ -1,6 +1,6 @@
 // Context and reload warnings: a loaded model's context is shown against the most it supports and
 // what the host sets (OLLAMA_CONTEXT_LENGTH or the Modelfile's num_ctx), a smaller one is flagged as
-// probably set by a client, and models that load again and again are flagged with the likely cause:
+// a possible configuration mismatch, and models that load again and again are flagged with the likely cause:
 // from the polls, and from Ollama's log for loads too short for a poll to see. Both are alert kinds.
 import { after, before, test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
@@ -11,7 +11,7 @@ const test = scenarioTest(nodeTest, holder);
 let c, sim;
 
 const RULES = [
-  { id: "ctx", name: "Context cut short", kind: "context_short", for_s: 0, clear_s: 1 },
+  { id: "ctx", name: "Context below configured", kind: "context_short", for_s: 0, clear_s: 1 },
   { id: "churn", name: "Reloading", kind: "reload_churn", threshold: 4, for_s: 0, clear_s: 1 },
 ];
 
@@ -47,10 +47,12 @@ test("a model's context is shown against the most it supports, and Ollama's defa
   assert.equal(ctx.max, 131072);
   assert.equal(ctx.configured, null);
   assert.match(ctx.hint, /OLLAMA_CONTEXT_LENGTH/);
+  assert.match(ctx.hint, /not evidence of truncated prompts/);
+  assert.doesNotMatch(ctx.hint, /lose their start/);
   assert.deepEqual(inst.reload_churn, []);
 });
 
-test("a client asking for less than OLLAMA_CONTEXT_LENGTH is flagged and fires the alert, which resolves on unload", async () => {
+test("a context below OLLAMA_CONTEXT_LENGTH is flagged and fires the alert, which resolves on unload", async () => {
   const env = await c.put("/api/instances/sim-1/env", {
     vars: { OLLAMA_HOST: "0.0.0.0:11434", OLLAMA_KEEP_ALIVE: "5m", OLLAMA_CONTEXT_LENGTH: "16384" }, restart: true,
   });
@@ -64,7 +66,11 @@ test("a client asking for less than OLLAMA_CONTEXT_LENGTH is flagged and fires t
   inst = await loadWith("sim-1", "llama3.2:3b", 2048);
   const ctx = loaded(inst, "llama3.2:3b").context;
   assert.equal(ctx.state, "short", JSON.stringify(ctx));
-  assert.match(ctx.hint, /less than the 16,384 the host sets \(OLLAMA_CONTEXT_LENGTH=16384\)\. A client probably asked for num_ctx 2,048/);
+  assert.equal(ctx.running, 2048);
+  assert.equal(ctx.configured, 16384);
+  assert.match(ctx.hint, /below the configured 16,384 \(OLLAMA_CONTEXT_LENGTH=16384\)/);
+  assert.match(ctx.hint, /does not show why it differs or whether any prompt was truncated/);
+  assert.doesNotMatch(ctx.hint, /probably asked|lose their start/);
   await waitFor(async () => (await alertOf("ctx", "sim-1", "llama3.2:3b"))?.state === "firing", { what: "the context alert firing" });
 
   const since = Date.now() / 1000;
@@ -116,4 +122,10 @@ test("without the log (agents before 0.8.0), counts are a minimum", async () => 
   const inst = await c.waitInstance("sim-2", (x) => x.reload_churn.some((y) => /loaded at least \d+ times/.test(y.summary)), "the counts marked as a minimum",
     60_000);
   assert.ok(inst.reload_churn.every((y) => y.model !== null), "no unseen-load entry without the log");
+});
+
+test("the Diagnostics tab can be opened directly, while unknown tabs still return 404", async () => {
+  assert.equal((await c.get("/i/sim-1/diagnostics")).status, 200);
+  assert.equal((await c.get("/i/sim-1/monitor")).status, 200);
+  assert.equal((await c.get("/i/sim-1/not-a-tab")).status, 404);
 });

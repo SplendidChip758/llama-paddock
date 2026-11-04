@@ -4,11 +4,10 @@ import { useEffect, useState } from "react";
 import { api, fmtBytes, fmtDur, fmtMiB, fmtNum, instPath, level, pct, untilText } from "@/lib/format";
 import { isOffloaded, splitHint, splitText } from "@/lib/split";
 import type { GpuProcess, GpuStats, HistoryPoint, InstanceSnapshot, LoadedModel, ServiceStatus, SystemStats } from "@/lib/types";
-import { GpuCheckCard } from "./GpuCheck";
 import { Availability } from "./Availability";
 import { HistoryCharts } from "./HistoryCharts";
 import { usePaddock } from "./PaddockProvider";
-import { CloudBadge, Meter, SparkCell, SplitHint, Stat } from "./ui";
+import { CloudBadge, Meter, SparkCell, Stat } from "./ui";
 
 export function MonitorTab({ st }: { st: InstanceSnapshot }) {
   const [hist, setHist] = useState<HistoryPoint[]>([]);
@@ -23,7 +22,6 @@ export function MonitorTab({ st }: { st: InstanceSnapshot }) {
       <h2 style={{ marginBottom: 12 }}>
         Loaded models <span className="faint" style={{ textTransform: "none", letterSpacing: 0 }}>· ollama ps</span>
       </h2>
-      <ReloadNotice st={st} />
       <div className="card">
         <PsTable st={st} />
       </div>
@@ -36,12 +34,9 @@ export function MonitorTab({ st }: { st: InstanceSnapshot }) {
         ) : nv && !nv.available ? (
           <div className="notice warn">nvidia-smi: {nv.error}</div>
         ) : nv ? (
-          <>
-            <GpuCheckCard st={st} />
-            <div className="grid g2">
-              {nv.gpus.map((g, i) => <GpuCard key={g.uuid} g={g} gi={i} hist={hist} procs={nv.processes} />)}
-            </div>
-          </>
+          <div className="grid g2">
+            {nv.gpus.map((g, i) => <GpuCard key={g.uuid} g={g} gi={i} hist={hist} procs={nv.processes} />)}
+          </div>
         ) : null}
       </div>
       {sys && st.stats && (
@@ -79,7 +74,7 @@ function PsTable({ st }: { st: InstanceSnapshot }) {
       <table>
         <thead>
           <tr>
-            <th>Model</th><th>Params</th><th>Quant</th><th className="r">Context</th><th className="r">Size</th>
+            <th>Model</th><th>Params</th><th>Quant</th><th className="r">Context <span className="faint">(active / max)</span></th><th className="r">Size</th>
             <th style={{ minWidth: 180 }}>Processor</th><th>Unloads</th><th />
           </tr>
         </thead>
@@ -95,7 +90,6 @@ function PsTable({ st }: { st: InstanceSnapshot }) {
               <td className="r num">{fmtBytes(m.size)}</td>
               <td>
                 <Processor m={m} />
-                <SplitHint m={m} />
               </td>
               <td className="num">{untilText(m.expires_at)}</td>
               <td className="r">
@@ -109,37 +103,13 @@ function PsTable({ st }: { st: InstanceSnapshot }) {
   );
 }
 
-/** The context a model runs with, the most it supports, and why a short one matters. */
+/** Keep allocation separate from usage: Ollama doesn't report tokens consumed here. */
 function ContextCell({ m }: { m: LoadedModel }) {
-  const c = m.context;
-  const warn = c?.state === "short" || c?.state === "default";
   return (
-    <>
-      <span className={c?.state === "short" ? "warn-text" : undefined}>{fmtNum(m.context_length)}</span>
-      {c?.max != null && <span className="faint"> / {fmtNum(c.max)}</span>}
-      {warn && (
-        <details className="split-hint ctx-hint">
-          <summary>{c!.state === "short" ? "Less than the host sets: why?" : "Ollama's default: enough?"}</summary>
-          {c!.hint}
-        </details>
-      )}
-    </>
-  );
-}
-
-/** Models that load again and again, with the likely causes and what to change. */
-function ReloadNotice({ st }: { st: InstanceSnapshot }) {
-  if (!st.reload_churn.length) return null;
-  return (
-    <div className="notice warn reload-notice">
-      {st.reload_churn.map((x) => (
-        <div key={x.model ?? ""}>
-          <b>{x.summary}</b> Each load makes requests wait.
-          {x.causes.length > 0 && <ul>{x.causes.map((y) => <li key={y}>{y}</li>)}</ul>}
-          {x.fixes.length > 0 && <div className="hint">{x.fixes.join(" ")}</div>}
-        </div>
-      ))}
-    </div>
+    <span title="Allocated context / model maximum, in tokens. Settings and explanations are on the Diagnostics tab.">
+      {fmtNum(m.context_length)}
+      {m.context?.max != null && <span className="faint"> / {fmtNum(m.context.max)}</span>}
+    </span>
   );
 }
 

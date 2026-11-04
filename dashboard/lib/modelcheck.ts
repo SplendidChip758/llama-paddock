@@ -1,9 +1,6 @@
 // ===== Context and reload warnings
-// Two problems look like a bad model rather than a broken setup. Clients choose the context size:
-// one that sends num_ctx 2048 overrides the host's OLLAMA_CONTEXT_LENGTH, and Ollama drops the start
-// of longer prompts without an error. And when clients send different num_ctx values, or a short
-// keep_alive, Ollama loads the model again and again, so requests wait for loads and VRAM churns.
-// Neither is proof on its own (a client may want a small context), so the wording says "probably".
+// Compare observed context with configured intent, without inferring request options or truncation
+// from allocation alone. Repeated loads can also explain why requests wait and VRAM churns.
 import "server-only";
 import type { ContextCheck, HostEvent, PsModel, ReloadChurn } from "./types";
 
@@ -15,7 +12,7 @@ export interface ModelInfo {
   num_ctx: number | null;
 }
 
-/** With nothing configured, a context this small is most likely Ollama's default (2048 or 4096, by version). */
+/** A small allocation without a reported host setting is worth explaining, even when intentional. */
 const DEFAULT_CTX_MAX = 8192;
 
 const fmt = (n: number) => n.toLocaleString("en-US");
@@ -40,17 +37,17 @@ export function contextCheck(m: PsModel, info: ModelInfo | undefined, env: Recor
     const by = configured_by === "modelfile" ? `num_ctx ${fmt(configured!)} in its Modelfile` : `OLLAMA_CONTEXT_LENGTH=${configured}`;
     return {
       ...base, state: "short",
-      hint: `${m.name} runs with ${fmt(running)} tokens of context, less than the ${fmt(target)} the host sets (${by}). ` +
-        `A client probably asked for num_ctx ${fmt(running)}, so prompts longer than that lose their start without an error. ` +
-        "Raise num_ctx in the client's settings or request options, or leave it out so the host's value applies.",
+      hint: `${m.name} has ${fmt(running)} tokens of context allocated, below the configured ${fmt(target)} (${by}). ` +
+        "A client request may select a smaller context, but this reading alone does not show why it differs or whether any prompt was truncated. " +
+        "If you need more context, compare the client's num_ctx with the model and host settings. A larger context uses more memory.",
     };
   }
   if (target === null && env !== null && info.max && running < info.max && running <= DEFAULT_CTX_MAX) {
     return {
       ...base, state: "default",
-      hint: `${m.name} runs with ${fmt(running)} tokens of context out of the ${fmt(info.max)} it supports, and nothing on the host sets more. ` +
-        "Prompts longer than that lose their start without an error. If clients send long prompts, set OLLAMA_CONTEXT_LENGTH on the " +
-        "Environment tab or num_ctx in the Modelfile. A larger context takes more VRAM.",
+      hint: `${m.name} has ${fmt(running)} tokens of context allocated out of the ${fmt(info.max)} it supports, with no configured context reported. ` +
+        "This may be a default or a client-selected value; a smaller allocation is not evidence of truncated prompts. " +
+        "If you need more context, check the client's num_ctx, OLLAMA_CONTEXT_LENGTH on the Environment tab, or num_ctx in the Modelfile. A larger context uses more memory.",
     };
   }
   return { ...base, state: "ok", hint: null };
