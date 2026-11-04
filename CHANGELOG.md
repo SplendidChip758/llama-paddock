@@ -1,3 +1,9 @@
+## [0.8.0-dev.10](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.9...v0.8.0-dev.10) (2026-11-04)
+
+### Features
+
+* **dashboard:** add a Diagnostics tab for GPU, context and reload checks ([#116](https://github.com/SplendidChip758/llama-paddock/issues/116)) ([125e99b](https://github.com/SplendidChip758/llama-paddock/commit/125e99bd66ebcb6fbbefe9db917c60e718a790a3))
+
 ## [0.8.0-dev.9](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.8...v0.8.0-dev.9) (2026-11-04)
 
 ### Features
