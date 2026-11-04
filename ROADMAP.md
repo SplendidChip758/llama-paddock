@@ -14,7 +14,7 @@ Progress is tracked in [GitHub milestones](https://github.com/SplendidChip758/ll
 | M6 | [Platforms](#m6-platforms) | Run the agent everywhere Ollama runs | 1.x |
 | M7 | [Routing gateway](#m7-routing-gateway) | One OpenAI-compatible API for the whole fleet | 1.x |
 | M8 | [Fleet operations](#m8-fleet-operations) | Run many hosts as one | 1.x |
-| | [Later](#later) | Gateway optimization and other providers | 1.x or 2.0 |
+| | [Later](#later) | Gateway optimization, other providers and smart routing | 1.x or 2.0 |
 
 This is the milestone scope, not a list of features already available. Some items may already be implemented on `dev` or in a release; use the linked issues and milestones for status, and the [user guides](docs/README.md) for current behavior.
 
@@ -164,6 +164,7 @@ Day-to-day work across many hosts: adding them, keeping them alike, and keeping 
 
 - **Gateway optimization.** After M7, [#36](https://github.com/SplendidChip758/llama-paddock/issues/36) can add opt-in prompt compression, response caching and routing affinity independently. Compression must preserve tool-call structure and pass task-quality checks; report end-to-end latency and compression cost as well as tokens saved. Cache keys must isolate users/permissions and include model identity and request settings, with invalidation rules. Treat affinity as best effort, not guaranteed upstream KV-cache reuse.
 - **Other providers in the gateway.** Route to OpenAI-compatible services (OpenAI, Anthropic, OpenRouter, vLLM, llama.cpp server, LM Studio) next to Ollama, with fallback from local to cloud. This is a likely 2.0 if it changes how hosts are configured.
+- **Smart routing.** [#112](https://github.com/SplendidChip758/llama-paddock/issues/112) lets the gateway pick the model from the request itself: a simple question goes to a small local model, a hard one to a larger local model, and to a cloud provider once other providers exist and a key or route allows it. The decision must cost far less than it saves, so it runs in steps and stops at the first confident answer: explicit signals first (key or route, an alias such as `auto`, tools or images, prompt size), then cheap scoring (length, code or multi-step cues, similarity to example prompts using a small embedding model that is already loaded), and only if enabled a small-model classifier with a timeout that falls back to a default tier. Prefer a model that is already loaded over a cold one. An optional escalation can re-route to a larger tier when the small model signals low confidence, but only before any response content is emitted, as in [#24](https://github.com/SplendidChip758/llama-paddock/issues/24). Cloud tiers are opt-in, never the default. The log records the tier and the reason, not the prompt, and a request that can't be classified goes to the default tier. Measure the added latency and how often the choice was wrong.
 - Ideas from issues and discussions land here first.
 
 **Done when:** each follow-up has its own reviewed scope and acceptance checks; none blocks 1.0 or the initial M7 gateway.
