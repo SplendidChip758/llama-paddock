@@ -14,7 +14,7 @@ Progress is tracked in [GitHub milestones](https://github.com/SplendidChip758/ll
 | M6 | [Platforms](#m6-platforms) | Run the agent everywhere Ollama runs | 1.x |
 | M7 | [Routing gateway](#m7-routing-gateway) | One OpenAI-compatible API for the whole fleet | 1.x |
 | M8 | [Fleet operations](#m8-fleet-operations) | Run many hosts as one | 1.x |
-| | [Later](#later) | Gateway optimization, other providers and smart routing | 1.x or 2.0 |
+| | [Later](#later) | Local backends, gateway optimization, other providers and smart routing | 1.x or 2.0 |
 
 This is the milestone scope, not a list of features already available. Some items may already be implemented on `dev` or in a release; use the linked issues and milestones for status, and the [user guides](docs/README.md) for current behavior.
 
