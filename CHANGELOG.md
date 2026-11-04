@@ -1,3 +1,9 @@
+## [0.8.0-dev.8](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.7...v0.8.0-dev.8) (2026-11-04)
+
+### Bug Fixes
+
+* **agent:** keep requests logged in the second a read ended ([#114](https://github.com/SplendidChip758/llama-paddock/issues/114)) ([3fd3066](https://github.com/SplendidChip758/llama-paddock/commit/3fd306669596389b125ef7f749fdbeac92fd397f))
+
 ## [0.8.0-dev.7](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.6...v0.8.0-dev.7) (2026-11-03)
 
 ### Features
