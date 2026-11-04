@@ -48,13 +48,16 @@ before(async () => {
 });
 after(() => holder.stack?.stop());
 
-/** Ollama's log as gin writes it, local time without a zone: two requests, a monitoring call, a line it can't read, and noise. */
-function writeOllamaLog(file) {
+/** gin's line start at unix time `t`: local time without a zone, in whole seconds. */
+function ginAt(t) {
   const p = (n) => String(n).padStart(2, "0");
-  const gin = (ago) => {
-    const d = new Date(Date.now() - ago * 1000);
-    return `[GIN] ${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} - ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-  };
+  const d = new Date(t * 1000);
+  return `[GIN] ${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} - ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/** Ollama's log as gin writes it: two requests, a monitoring call, a line it can't read, and noise. */
+function writeOllamaLog(file) {
+  const gin = (ago) => ginAt(Date.now() / 1000 - ago);
   fs.writeFileSync(file, [
     'time=2026-11-02T09:00:00 level=INFO source=routes.go msg="Listening on [::]:11434"',
     `${gin(120)} | 200 |  2.512345s |   192.168.30.30 | POST     "/api/chat"`,
@@ -174,6 +177,16 @@ test("the real agent reads Ollama's request log; the dashboard stores it and cou
   assert.equal(s.total.count, 2);
   assert.equal(s.total.errors, 1);
   assert.ok(s.sync.skipped >= 1);
+});
+
+test("a request logged later in the second a read ended comes with the next read", async () => {
+  const first = await real("GET", `/requests?since=${Date.now() / 1000 - 3600}`);
+  const until = first.data.until;
+  // gin stamps it with that second, which is before `until`
+  fs.appendFileSync(path.join(data.dir, "ollama.log"), `${ginAt(Math.floor(until))} | 200 |  1.5s |   192.168.30.32 | POST     "/api/generate"\n`);
+  const next = await real("GET", `/requests?since=${until}`);
+  assert.equal(next.status, 200, JSON.stringify(next.data));
+  assert.deepEqual(next.data.requests.map((x) => `${x.client} ${x.path}`), ["192.168.30.32 /api/generate"], "and the older lines don't come again");
 });
 
 test("simulated GPUs have the fields the agents read from nvidia-smi", async () => {
