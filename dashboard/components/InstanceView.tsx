@@ -6,6 +6,7 @@ import { api, instPath } from "@/lib/format";
 import { usePaddock } from "./PaddockProvider";
 import { statusOf } from "./ui";
 import { MonitorTab } from "./MonitorTab";
+import { DiagnosticsTab } from "./DiagnosticsTab";
 import { ModelsTab } from "./ModelsTab";
 import { EnvTab } from "./EnvTab";
 import { LogsTab } from "./LogsTab";
@@ -91,6 +92,7 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
         ))}
       </nav>
       {tab === "monitor" && <MonitorTab st={st} />}
+      {tab === "diagnostics" && <DiagnosticsTab st={st} />}
       {tab === "models" && <ModelsTab st={st} />}
       {tab === "env" && <EnvTab st={st} key={id} />}
       {tab === "logs" && <LogsTab st={st} key={id} />}

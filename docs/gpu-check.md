@@ -2,7 +2,7 @@
 
 When Ollama can't use the GPU, it falls back to the CPU without an error. `nvidia-smi` still shows the GPU, so everything looks fine until models get slow. The GPU check compares where Ollama puts the loaded models with what `nvidia-smi` sees, reads Ollama's log for the reason, and suggests a fix.
 
-It needs the [Linux](agent-linux.md) or [Windows](agent-windows.md) agent and an NVIDIA GPU. The result is shown on the host's **Monitor** tab, above the GPU cards, and a host whose GPU is lost gets a **GPU lost** chip on the fleet overview.
+It needs the [Linux](agent-linux.md) or [Windows](agent-windows.md) agent and an NVIDIA GPU. The result, evidence, log lines and recovery actions are on the host's **Diagnostics** tab, and a host whose GPU is lost gets a **GPU lost** chip on the fleet overview.
 
 ## What it checks
 

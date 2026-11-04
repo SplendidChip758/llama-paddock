@@ -151,7 +151,7 @@ function InstCard({ st, uptime }: { st: InstanceSnapshot; uptime?: UptimeBrief }
       {offloaded.length > 0 && (
         <div className="split-note">
           <b>Not fully on the GPU:</b> {offloaded.map((m) => m.name).join(", ")}. If that isn't intended, try a smaller num_ctx
-          or quantization, or unload other models. The Monitor tab has details.
+          or quantization, or unload other models. The Diagnostics tab has details.
         </div>
       )}
       {err && <div className="hint" style={{ color: "var(--bad)", marginTop: 10 }}>{err}</div>}

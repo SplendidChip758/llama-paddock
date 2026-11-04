@@ -111,7 +111,7 @@ export interface ContextCheck {
   /** what the host sets when a client doesn't: num_ctx in the Modelfile, else OLLAMA_CONTEXT_LENGTH */
   configured: number | null;
   configured_by: "modelfile" | "env" | null;
-  /** short: below what the host sets, so a client probably asked for less · default: nothing sets more,
+  /** short: below what the host sets, without proof of the cause · default: nothing sets more,
    *  and the model supports far more · ok · unknown: Ollama doesn't report the running context */
   state: "ok" | "short" | "default" | "unknown";
   /** what it means and what to change; null when ok */

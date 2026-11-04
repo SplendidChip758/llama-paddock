@@ -42,8 +42,8 @@ export const ALERT_KINDS: Record<AlertKind, KindInfo> = {
     help: "nvidia-smi sees a GPU, but the loaded models run entirely on the CPU, or Ollama's log shows it found no GPU or hit GPU errors. Settings that ask for the CPU (CUDA_VISIBLE_DEVICES=-1, num_gpu 0) don't count. Needs the agent.",
   },
   context_short: {
-    label: "Context cut short", unit: null, threshold: null, for_s: 60,
-    help: "A loaded model runs with less context than the host sets (num_ctx in its Modelfile, or OLLAMA_CONTEXT_LENGTH), so a client probably asked for less and longer prompts lose their start. Each model has its own alert. OLLAMA_CONTEXT_LENGTH needs the agent.",
+    label: "Context below configured", unit: null, threshold: null, for_s: 60,
+    help: "A loaded model has less context allocated than the host sets (num_ctx in its Modelfile, or OLLAMA_CONTEXT_LENGTH). This does not prove a client override or prompt truncation. Each model has its own alert. OLLAMA_CONTEXT_LENGTH needs the agent.",
   },
   reload_churn: {
     label: "Model reloading constantly", unit: "loads/h", threshold: 10, max: 10000, for_s: 0,
