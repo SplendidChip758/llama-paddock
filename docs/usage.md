@@ -16,7 +16,7 @@ The Monitor tab shows loaded models (context window, unload timer and an Unload 
 
 **Availability**, below History, shows timelines of Ollama and the agent over the last 24 hours, 7 days or 30 days: up, down, or not yet seen after the dashboard started watching, with stretches the dashboard wasn't running or polling hatched. Each line shows the share of the watched time it was up; unwatched time doesn't count either way, so restarting the dashboard never lowers a host's availability. Below them is the list of outages with when they started, how long they lasted, and the error the poll got. Hover the timeline for the times of each stretch.
 
-**Alerts** on the host are listed above the tabs, where they can be acknowledged or silenced, and **Silence host for…** next to **Edit host** silences every alert on the host for a while, for maintenance. See [Silences](alerts.md#silences).
+**Alerts** on the host show as a pill next to its name, such as **2 alerts**, red while any is firing and pulsing briefly when another fires. Click it to list them and acknowledge or silence each one.  **Silence host for…** next to **Edit host** silences every alert on the host for a while, for maintenance. See [Silences](alerts.md#silences).
 
 **Versions:** the dashboard's version is shown next to the logo, highlighted for a prerelease. Each host shows its Ollama and agent version on its page and its overview card.
 
@@ -84,7 +84,7 @@ The Logs tab tails `journalctl -u ollama` on Linux, `server.log` on Windows, wit
 
 ## Requests
 
-The Requests tab shows the calls made to Ollama on the host over the last hour, day, week or month: how many over time, with the errors in red; per client and per endpoint with their error rates and durations; per model; and the slowest and latest requests. **Name** next to a client address gives it a name, such as `open-webui`, shown wherever that address appears, on every host.
+The Requests tab shows the calls made to Ollama on the host over the last hour, day, week or month: how many over time, with the errors in red; per client and per endpoint with their error rates and durations; and per model. Each of those tables shows its 10 busiest rows, with **Show all** for the rest. The **Log** below lists the requests themselves, latest or slowest first, 25 to a page. **Name** next to a client address gives it a name, such as `open-webui`, shown wherever that address appears, on every host.
 
 The agent reads the requests from Ollama's own log (the journal on Linux, `server.log` on Windows), and the dashboard collects them every 10 polls and keeps them for `history_retention_days`. Each line has the time, status, duration, client address, method and endpoint. **No prompts or answers are collected:** Ollama doesn't log them. Monitoring calls (`/api/ps`, `/api/version`) aren't kept, since the dashboard itself makes one every few seconds. The dashboard's other calls, such as the [context check](context-and-reloads.md)'s `/api/show` for a newly loaded model and actions from the Models tab, are kept under the dashboard's address.
 

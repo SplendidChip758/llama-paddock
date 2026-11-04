@@ -101,3 +101,30 @@ test("client addresses can be named; names are checked and stored with mode 600"
   assert.equal(fs.statSync(path.join(stack.data.data, "request-clients.json")).mode & 0o777, 0o600);
   assert.equal((await c.get("/api/instances/sim-1/requests?range=1y")).status, 400);
 });
+
+test("the log pages through every request in the range, latest or slowest first", async () => {
+  const s = await summary("sim-1");
+  const page = async (q) => {
+    const r = await c.get(`/api/instances/sim-1/requests/log?range=1h&to=${s.to}&${q}`);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    return r.data;
+  };
+  // the earlier tests left at least 6 requests on sim-1, all read by now
+  const first = await page("limit=2");
+  assert.equal(first.total, s.total.count);
+  assert.ok(first.total >= 6, `total ${first.total}`);
+  assert.equal(first.requests.length, 2);
+  const all = [];
+  for (let offset = 0; offset < first.total; offset += 2) all.push(...(await page(`limit=2&offset=${offset}`)).requests);
+  assert.equal(all.length, first.total, "the pages cover every request once");
+  assert.deepEqual(all.map((r) => r.t), all.map((r) => r.t).sort((a, b) => b - a), "latest first");
+  assert.deepEqual(all.slice(0, 2), first.requests);
+
+  const slow = await page("sort=slowest&limit=100");
+  assert.deepEqual(slow.requests.map((r) => r.duration_ms), slow.requests.map((r) => r.duration_ms).sort((a, b) => b - a));
+  assert.equal(slow.requests[0].duration_ms, s.total.max_ms);
+
+  for (const q of ["sort=fastest", "limit=0", "limit=101", "offset=-1", "range=1y", "to=soon"]) {
+    assert.equal((await c.get(`/api/instances/sim-1/requests/log?${q}`)).status, 400, q);
+  }
+});

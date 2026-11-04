@@ -72,7 +72,7 @@ export function Overview() {
         <Stat k="GPU power" v={watts.toFixed(0)} unit="W" />
         <Stat k="Models loaded" v={instances.reduce((a, s) => a + s.ps.length, 0)} unit={offloaded ? `${offloaded} not fully on GPU` : undefined} />
       </div>
-      <div className="grid g3">
+      <div className="grid hostgrid">
         {instances.map((st) => <InstCard key={st.id} st={st} uptime={uptime[st.id]} />)}
       </div>
     </>

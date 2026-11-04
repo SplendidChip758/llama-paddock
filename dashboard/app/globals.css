@@ -83,6 +83,8 @@ h3 { font-size: 15px; }
 .grid { display: grid; gap: 16px; }
 .g2 { grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
 .g3 { grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); }
+/* host cards: never more than 3 across (a column is at least a third of the row), fewer when narrow */
+.hostgrid { grid-template-columns: repeat(auto-fit, minmax(min(100%, max(380px, calc((100% - 32px) / 3))), 1fr)); }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; min-width: 0; }
 .card-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
 .section { margin-top: 26px; }
@@ -247,6 +249,20 @@ label.field > span { display: block; font-size: 12.5px; color: var(--muted); mar
 button.chip { cursor: pointer; font: inherit; font-family: var(--mono); font-size: 12px; }
 select.btn.sm { width: auto; }
 .alertline > .dot { margin-top: 6px; }
+.alertpill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; }
+.alertpill.bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); background: color-mix(in srgb, var(--bad) 12%, var(--panel2)); }
+.alertpill.pulse { animation: alertpulse 1.3s ease-out 3; }
+@keyframes alertpulse { from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--bad) 60%, transparent); } to { box-shadow: 0 0 0 10px transparent; } }
+@media (prefers-reduced-motion: reduce) { .alertpill.pulse { animation: none; } }
+
+/* popovers */
+.popover-anchor { position: relative; display: inline-flex; }
+.popover {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 30; width: min(640px, calc(100vw - 32px));
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 14px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.3); font-size: 14px; font-weight: 400; text-align: left;
+}
+@media (max-width: 720px) { .popover { position: fixed; top: auto; left: 16px; right: 16px; width: auto; } }
 .alertline .grow { flex: 1; min-width: 0; word-break: break-word; }
 .alertline a:hover { color: var(--accent2); }
 tr.off td { opacity: .55; }

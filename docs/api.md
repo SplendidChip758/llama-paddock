@@ -31,6 +31,7 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 | GET | `/api/instances/{id}/history` | Recent samples or a requested range; see [History](#history) |
 | GET | `/api/instances/{id}/events` | Availability and model load events over a range; see [Events](#events) |
 | GET | `/api/instances/{id}/requests?range=…` | The host's requests from Ollama's log; see [Requests](#requests) |
+| GET | `/api/instances/{id}/requests/log?range=…&sort=…` | One page of the host's requests, latest or slowest first; see [Requests](#requests) |
 | GET | `/api/request-clients` | `{names}`: names given to client addresses, `{"192.168.30.20": "open-webui"}` |
 | PUT | `/api/request-clients` | `{names}` → `{names}`; replaces them all, and a blank name removes one |
 | GET | `/api/instances/{id}/uptime?range=…` | Ollama's and the agent's availability as timelines and outages; see [Uptime](#uptime) |
@@ -84,6 +85,8 @@ Available points depend on how long the dashboard has collected data and the [re
 | `sync` | `{last_ok, error, unsupported, skipped}`: the last successful read of the agent's log, the last error, whether the agent is too old to read it, and lines skipped in an unknown format |
 
 Times are unix seconds. Monitoring calls (`GET /api/ps`, `/api/version`, `/`) aren't stored.
+
+`GET /api/instances/{id}/requests/log` pages through every request in a range. It takes `range` as above, `sort` (`latest` or `slowest`, default `latest`), `offset` (default 0), `limit` (1–100, default 25) and `to`, the range's end in unix seconds (default now). Pass the `to` from the first page with every later one, so requests that arrive meanwhile don't shift the pages. It returns `{range, sort, from, to, offset, limit, total, requests}`: `total` counts the requests on every page, and each request has the fields of `recent` above.
 
 ## Uptime
 
