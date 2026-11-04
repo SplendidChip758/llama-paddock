@@ -1,3 +1,9 @@
+## [0.8.0-dev.9](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.8...v0.8.0-dev.9) (2026-11-04)
+
+### Features
+
+* **dashboard:** move host alerts into a header pill and page the request log ([#115](https://github.com/SplendidChip758/llama-paddock/issues/115)) ([e83686e](https://github.com/SplendidChip758/llama-paddock/commit/e83686e1bdaa8b60cdb427e6e14c4309d519f18f)), closes [#9](https://github.com/SplendidChip758/llama-paddock/issues/9) [#73](https://github.com/SplendidChip758/llama-paddock/issues/73)
+
 ## [0.8.0-dev.8](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.7...v0.8.0-dev.8) (2026-11-04)
 
 ### Bug Fixes
