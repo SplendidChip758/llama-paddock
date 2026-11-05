@@ -61,6 +61,7 @@ Under the hood this calls Ollama's `POST /api/create` with `from` and `parameter
 
 A prompt loads the model like any other request, with the host's usual keep-alive, so it may unload another model that doesn't fit beside it. Running prompts needs an admin account.
 
+<<<<<<< HEAD
 ## Benchmarks
 
 **Benchmarks** in the header runs a fixed set of prompts against a model, several times, and keeps the results so you can compare hosts, models and quantizations, or one host over time. Pick a model, one or more hosts that have it (*All … with it* picks every host that has the model), the context, the number of repetitions and the model state, then *Run*. Each host's benchmark shows in the Jobs drawer while it runs, and hosts run at the same time.
@@ -84,6 +85,8 @@ Tick results to compare them side by side. The best figure in each row (the high
 
 A benchmark keeps the host busy, and other requests to the host during it slow both down: run it when the host is otherwise idle. Results are saved in `paddock.db` until you delete them, also after the host is removed. A benchmark running when the dashboard restarts is marked interrupted and keeps its finished runs. Running a benchmark needs an admin account; viewers can see and compare the results. Without an agent on a host, its GPUs, driver and Ollama settings aren't recorded.
 
+=======
+>>>>>>> origin/dev
 ## GPU/CPU split
 
 Ollama keeps as much of a loaded model as fits in VRAM and puts the rest in system RAM, where the CPU runs it, usually far slower. The dashboard works out the split from Ollama's `/api/ps` (`size_vram` out of `size`, which includes the KV cache for the model's context) the same way on every page:

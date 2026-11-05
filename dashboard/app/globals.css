@@ -379,6 +379,7 @@ code { font-family: var(--mono); font-size: .92em; background: var(--panel2); pa
 .prompt-compose { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
 .prompt-compose summary { cursor: pointer; font-size: 12.5px; }
 .prompt-compose .row .hint { margin-top: 0; }
+<<<<<<< HEAD
 
 /* benchmarks */
 .warn-text { color: var(--warn); }
@@ -389,3 +390,5 @@ tr.selected td { background: var(--bg2); }
 .bench-compare tr.bench-group th { text-align: left; padding-top: 14px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .bench-compare tr.bench-differs td { background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .bench-warnings { margin: 0; padding-left: 16px; font-size: 12.5px; color: var(--muted); max-width: 38ch; }
+=======
+>>>>>>> origin/dev

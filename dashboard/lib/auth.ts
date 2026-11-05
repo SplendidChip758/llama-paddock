@@ -1,6 +1,10 @@
-// Dashboard login: user accounts in <data dir>/auth.json, signed session cookies.
-// Used by proxy.ts (every request) and the /api/auth and /api/users routes, so no "server-only".
+// Dashboard login: user accounts in <data dir>/auth.json, signed session cookies, and bearer tokens (credentials.ts).
+// Used by proxy.ts (every request) and the /api/auth, /api/users and /api/tokens routes, so no "server-only".
 import crypto from "node:crypto";
+import {
+  ROLE_SCOPES, findByToken, isExpired, narrowCredentials, pruneOrphans, removeCredentialsOf, touch,
+  type CredentialKind, type Scope,
+} from "./credentials";
 import { HttpError } from "./http-error";
 import { mtimeOf, readJson, writeJson } from "./store";
 
@@ -47,6 +51,15 @@ export interface Session {
   mustChange: boolean;
 }
 
+/** Who is making a request: a signed-in browser, or a credential acting for its user. */
+export interface Caller {
+  username: string;
+  role: Role;
+  /** What this request may do: the role's scopes for a session; for a credential, its scopes that the role still allows. */
+  scopes: Scope[];
+  credential: { id: string; kind: CredentialKind; name: string } | null;
+}
+
 export interface UserInfo {
   username: string;
   role: Role;
@@ -63,6 +76,7 @@ const g = globalThis as unknown as {
   __paddockLoginFails?: Map<string, { n: number; until: number; last: number }>;
   /** Timestamps of recent failures from every address, for the global ceiling. */
   __paddockLoginFailsGlobal?: number[];
+  __paddockTokenFails?: Map<string, { n: number; until: number; last: number }>;
 };
 
 function hashPassword(password: string): string {
@@ -136,6 +150,8 @@ export function loadAuth(): AuthFile {
     users: [{ id: newId(), username, role: "admin", hash: hashPassword(password), must_change: true, version: 1 }],
   };
   save(auth);
+  // a reset login starts without the old accounts' tokens
+  pruneOrphans(new Set(auth.users.map((u) => u.id)));
   return auth;
 }
 
@@ -193,9 +209,12 @@ export function addUser(username: string, role: unknown): string {
   return password;
 }
 
+/** The user's tokens lose, for good, whatever the new role can't do. */
 export function setRole(username: string, role: unknown): UserInfo {
   const r = checkRole(role);
-  return info(updateUser(username, (u) => ({ ...u, role: r })));
+  const user = updateUser(username, (u) => ({ ...u, role: r }));
+  narrowCredentials(user.id, r);
+  return info(user);
 }
 
 /** Signs the user out everywhere and returns a temporary password they must replace. */
@@ -210,6 +229,7 @@ export function removeUser(username: string) {
   const user = findUser(auth, username);
   if (!user) throw new HttpError(404, `no user "${username}"`);
   save({ ...auth, users: auth.users.filter((u) => u !== user) });
+  removeCredentialsOf(user.id);
 }
 
 // ============================================================================ sessions
@@ -251,6 +271,59 @@ export function requireAdmin(req: { cookies: { get(name: string): { value: strin
   if (!session) throw new HttpError(401, "not signed in");
   if (session.role !== "admin") throw new HttpError(403, "your account is read-only");
   return session;
+}
+
+/** The signed-in user, for routes that only a browser session may use (managing tokens). */
+export function requireSession(req: { cookies: { get(name: string): { value: string } | undefined } }): Session & { id: string } {
+  if (!authEnabled()) throw new HttpError(400, "login is disabled (PADDOCK_AUTH=off)");
+  const session = readSession(req.cookies.get(SESSION_COOKIE)?.value);
+  if (!session) throw new HttpError(401, "not signed in");
+  const user = findUser(loadAuth(), session.username)!;
+  return { ...session, id: user.id };
+}
+
+/** Usernames by user id, to show who owns a credential. */
+export const usernamesById = () => new Map(loadAuth().users.map((u) => [u.id, u.username]));
+
+// ============================================================================ tokens
+/** The token from `Authorization: Bearer …`, or undefined when the request has none. */
+export function bearerToken(req: { headers: { get(name: string): string | null } }): string | undefined {
+  const m = /^Bearer\s+(\S+)\s*$/i.exec(req.headers.get("authorization") ?? "");
+  return m?.[1];
+}
+
+export type TokenCheck =
+  | { caller: Caller }
+  /** guess: the token matches nothing stored, which counts towards the lockout. A known but expired or orphaned one doesn't. */
+  | { caller: null; detail: string; guess: boolean };
+
+/**
+ * Like readSession, the user and role come from auth.json on every request. What the credential may do
+ * is its own scopes cut down to what the role allows now, so it can never do more than its user.
+ */
+export function verifyToken(token: string, { record = true } = {}): TokenCheck {
+  const cred = findByToken(token);
+  if (!cred) return { caller: null, detail: "invalid token", guess: true };
+  if (isExpired(cred)) return { caller: null, detail: "token expired", guess: false };
+  const user = loadAuth().users.find((u) => u.id === cred.user);
+  if (!user) return { caller: null, detail: "invalid token", guess: false };
+  if (record) touch(cred.id);
+  return {
+    caller: {
+      username: user.username,
+      role: user.role,
+      scopes: cred.scopes.filter((s) => ROLE_SCOPES[user.role].includes(s)),
+      credential: { id: cred.id, kind: cred.kind, name: cred.name },
+    },
+  };
+}
+
+/** The caller of a request that proxy.ts already let in: the bearer token if there is one, else the session. */
+export function currentCaller(req: { headers: { get(name: string): string | null }; cookies: { get(name: string): { value: string } | undefined } }): Caller | null {
+  const token = bearerToken(req);
+  if (token !== undefined) return verifyToken(token, { record: false }).caller;
+  const session = readSession(req.cookies.get(SESSION_COOKIE)?.value);
+  return session && { username: session.username, role: session.role, scopes: [...ROLE_SCOPES[session.role]], credential: null };
 }
 
 /** Admins can't demote, reset or remove themselves, so there is always an admin left who can sign in. */
@@ -296,16 +369,35 @@ export function loginLockedGlobally(): number {
   return list.length >= MAX_FAILS_GLOBAL ? Math.ceil((list[0] + LOCKOUT_S * 1000 - now) / 1000) : 0;
 }
 
-/** Seconds until this address may try again (0 = allowed). */
-export function loginLockedFor(ip: string): number {
-  const f = fails().get(ip);
+type FailMap = Map<string, { n: number; until: number; last: number }>;
+
+const lockedFor = (map: FailMap, ip: string) => {
+  const f = map.get(ip);
   return f && f.until > Date.now() ? Math.ceil((f.until - Date.now()) / 1000) : 0;
-}
+};
+
+/** Seconds until this address may try again (0 = allowed). */
+export const loginLockedFor = (ip: string) => lockedFor(fails(), ip);
 
 export function noteLoginFailure(ip: string) {
+  globalFails().push(Date.now());
+  noteFailure(fails(), ip);
+}
+
+export const clearLoginFailures = (ip: string) => fails().delete(ip);
+
+/**
+ * Failed bearer tokens lock out their address like failed logins, but on a separate count and with no
+ * global ceiling: guessing a 256-bit secret is hopeless, and a script left running with a revoked
+ * token must not lock everyone out of the login, or every other script out of the API.
+ */
+const tokenFails = () => (g.__paddockTokenFails ??= new Map());
+export const tokenLockedFor = (ip: string) => lockedFor(tokenFails(), ip);
+export const noteTokenFailure = (ip: string) => noteFailure(tokenFails(), ip);
+export const clearTokenFailures = (ip: string) => tokenFails().delete(ip);
+
+function noteFailure(map: FailMap, ip: string) {
   const now = Date.now();
-  globalFails().push(now);
-  const map = fails();
   // forget addresses that have been quiet for a lockout period, and never grow without bound
   for (const [k, v] of map) if (v.last <= now - LOCKOUT_S * 1000 && v.until <= now) map.delete(k);
   while (map.size >= MAX_TRACKED) map.delete(map.keys().next().value!);
@@ -320,5 +412,3 @@ export function noteLoginFailure(ip: string) {
   map.delete(ip); // re-insert so the eviction order stays oldest-first
   map.set(ip, f);
 }
-
-export const clearLoginFailures = (ip: string) => fails().delete(ip);

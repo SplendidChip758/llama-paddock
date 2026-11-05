@@ -1065,8 +1065,13 @@ export function startTask(
   return jobInfo(job);
 }
 
+<<<<<<< HEAD
 function runJob(job: Job, inst: Instance) {
   return tracked(job, async () => {
+=======
+async function runJob(job: Job, inst: Instance) {
+  try {
+>>>>>>> origin/dev
     const r = await ollamaPost(inst, job.path, job.body, job.abort.signal);
     for await (const msg of ndjsonLines(r)) {
       if (msg.error) throw new Error(msg.error);

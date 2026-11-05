@@ -16,13 +16,17 @@ group named after it. Keep that format. -->
 ## Configure
 
 - [Configuration and login](configuration.md): `config.yaml`, environment variables, login, users and roles, and the data directory
-- [Security](security.md): what admins and viewers can do, exposing the dashboard, lockout, cross-site requests and agent tokens
+- [Security](security.md): what admins and viewers can do, API tokens, exposing the dashboard, lockout, cross-site requests and agent tokens
   - [Reverse proxies](proxy.md): the dashboard behind a proxy, and Ollama behind a proxy that checks a key
 - [Prometheus and Grafana](prometheus.md): the `/metrics` endpoint, its scrape token, the metric list and a Grafana dashboard
 
 ## Use
 
+<<<<<<< HEAD
 - [Using the dashboard](usage.md): fleet overview, Monitor and History, Models, test prompts, benchmarks, the GPU/CPU split, Environment, Logs and jobs
+=======
+- [Using the dashboard](usage.md): fleet overview, Monitor and History, Models, test prompts, the GPU/CPU split, Environment, Logs and jobs
+>>>>>>> origin/dev
 - [GPU check](gpu-check.md): when Ollama falls back to the CPU while the GPU is there, why, and how to fix it
 - [Context and reloads](context-and-reloads.md): contexts cut short by clients, and models that load again and again
 - [Alerts](alerts.md): alert rules, durations, flapping and what happens when data is missing
@@ -30,7 +34,7 @@ group named after it. Keep that format. -->
 
 ## Reference
 
-- [API](api.md): the dashboard's JSON API and the agent API
+- [API](api.md): the dashboard's JSON API, API tokens for scripts and Home Assistant, and the agent API
 - [Architecture](architecture.md): components, ports and source layout
 
 For contributors: [contributing](../CONTRIBUTING.md), the [roadmap](../ROADMAP.md), [agent instructions](../AGENTS.md), the [security policy](../SECURITY.md) and the [Code of Conduct](../CODE_OF_CONDUCT.md).

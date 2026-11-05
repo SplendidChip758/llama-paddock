@@ -647,7 +647,7 @@ NEXT_TELEMETRY_DISABLED=1
 # First admin account. You must change the password on first sign-in; after that
 # accounts live (hashed) in ${DATA_DIR}/auth.json and these two lines are ignored.
 # Forgot it? Another admin can reset it under Users. If none can sign in:
-# rm ${DATA_DIR}/auth.json && systemctl restart llama-paddock (removes every account)
+# rm ${DATA_DIR}/auth.json && systemctl restart llama-paddock (removes every account and API token)
 PADDOCK_USERNAME=admin
 PADDOCK_PASSWORD=${ADMIN_PASSWORD}
 # PADDOCK_AUTH=off disables the login, e.g. behind an auth proxy.
