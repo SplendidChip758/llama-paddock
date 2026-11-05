@@ -196,10 +196,25 @@ A transition is `{id, t, rule, name, kind, instance, subject, state, value, deta
 | POST | `/api/instances/{id}/models/unload` | `{model}` |
 | POST | `/api/instances/{id}/models/delete` | `{model}` |
 | POST | `/api/instances/{id}/models/copy` | `{source, destination}` |
+| POST | `/api/instances/{id}/chat` | `{model, messages, options?, keep_alive?, think?}` → the answer as newline-delimited JSON events; see [Test prompts](#test-prompts) |
 | GET | `/api/jobs` | `{jobs}` containing job status and progress |
 | DELETE | `/api/jobs/{jid}` | Cancels a running job, or removes a finished job from the list |
 
 There is no `GET /api/jobs/{jid}`; find the returned job ID in `/api/jobs`. Pull and create responses are job objects, not streamed progress. Poll the jobs endpoint for updates. Pulls can resume after a dashboard restart; running creates are marked interrupted. See [History and jobs](usage.md#history-and-jobs).
+
+### Test prompts
+
+`POST /api/instances/{id}/chat` sends a chat to the host's Ollama (`/api/chat`) and streams the answer back. `messages` is a list of `{role, content}` with `role` `system`, `user` or `assistant`. `options` are Ollama's model options (`temperature`, `num_ctx`, …), `keep_alive` is passed on, and `think` turns thinking on or off for models that support it.
+
+Errors before the answer starts (an unknown model, an unreachable host, a bad body) are ordinary JSON errors with `{detail}`. Ollama answers once the model is loaded, so this can take a while for a large model; after 10 minutes without an answer the request fails with 504. Once Ollama starts answering, the response is `application/x-ndjson`, one event per line:
+
+| Event | Meaning |
+|---|---|
+| `{type: "token", content, thinking?}` | The next piece of the answer, and of the model's thinking if it has any |
+| `{type: "done", stats}` | The last line of a complete answer |
+| `{type: "error", detail}` | The answer failed partway; nothing follows |
+
+`stats` holds `ttft_ms` (from sending the request to the first token, timed by the dashboard, so it includes loading the model and reading the prompt), `wall_ms` (to the last line), Ollama's own `load_ms`, `prompt_tokens`, `prompt_ms`, `eval_ms`, `total_ms` and `tokens`, the rates `prompt_tps` and `tps` in tokens per second, and `done_reason` (`stop`, or `length` when `num_predict` cut it off). Ollama's figures are `null` if it left them out. Closing the connection stops the host generating. Viewers can't send prompts, since a prompt loads models.
 
 ## Environment, restart and logs
 

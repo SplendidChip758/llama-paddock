@@ -11,7 +11,7 @@ import { loudAlerts } from "./AlertBits";
 
 export function Header({ version }: { version: string }) {
   const pre = version.includes("-");
-  const { instances, jobs, setJobsOpen, me, alerts } = usePaddock();
+  const { instances, jobs, setJobsOpen, me, alerts, readOnly } = usePaddock();
   const path = usePathname();
   const m = path.match(/^\/i\/([^/]+)(?:\/([^/]+))?/);
   const currentId = m ? decodeURIComponent(m[1]) : null;
@@ -39,6 +39,7 @@ export function Header({ version }: { version: string }) {
             );
           })}
         </nav>
+        {!readOnly && <Link href="/prompt" className={`jobsbtn ${path === "/prompt" ? "active" : ""}`} title="Chat with a model and time the answer">Prompt</Link>}
         <Link href="/alerts" className={`jobsbtn ${path === "/alerts" ? "active" : ""}`}
           title={firing ? `${firing} alert${firing === 1 ? "" : "s"} firing` : "Alert rules"}>
           <span>Alerts</span>

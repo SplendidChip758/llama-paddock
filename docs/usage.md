@@ -46,6 +46,21 @@ Under the hood this calls Ollama's `POST /api/create` with `from` and `parameter
 
 ![Model editor](images/model-editor.png)
 
+## Test prompt
+
+**Prompt** in the header (or *Prompt* next to a model on the Models tab) opens a chat with a model on a host. The answer streams in as the host generates it, and each reply ends with how fast it came:
+
+| Figure | Meaning |
+|---|---|
+| Generation | Tokens per second while writing the answer, from Ollama's `eval_count` and `eval_duration` |
+| First token | From sending the prompt to the first word of the answer, timed by the dashboard. It includes loading the model and reading the prompt, so it is what a user of the host waits for |
+| Load | Time Ollama spent loading the model for this request. Near zero when the model was already loaded |
+| Prompt | Tokens per second while reading the prompt (`prompt_eval_count` and `prompt_eval_duration`). Ollama caches a conversation's earlier turns, so later turns read fewer tokens |
+
+*Compare* adds a second column with its own host and model, and each prompt goes to both. Columns on different hosts run at the same time. Two columns on the same host take turns, so neither answer is slowed by the other. *Stop* cancels the answer on the host as well. Changing a column's host or model starts a new conversation in it.
+
+A prompt loads the model like any other request, with the host's usual keep-alive, so it may unload another model that doesn't fit beside it. Running prompts needs an admin account.
+
 ## GPU/CPU split
 
 Ollama keeps as much of a loaded model as fits in VRAM and puts the rest in system RAM, where the CPU runs it, usually far slower. The dashboard works out the split from Ollama's `/api/ps` (`size_vram` out of `size`, which includes the KV cache for the model's context) the same way on every page:

@@ -487,6 +487,37 @@ export interface ShowResult {
   modified_at: string | null;
 }
 
+export interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+/** How fast a host answered one prompt. Times in milliseconds; null where Ollama didn't say. */
+export interface PromptStats {
+  /** from sending the request to the first token, measured by the dashboard: includes loading the model and reading the prompt */
+  ttft_ms: number | null;
+  /** from sending the request to the last line of the answer, measured by the dashboard */
+  wall_ms: number;
+  /** the rest are Ollama's own figures from the answer's final line */
+  load_ms: number | null;
+  prompt_tokens: number | null;
+  prompt_ms: number | null;
+  /** prompt evaluation rate, tokens per second */
+  prompt_tps: number | null;
+  tokens: number | null;
+  eval_ms: number | null;
+  /** generation rate, tokens per second */
+  tps: number | null;
+  total_ms: number | null;
+  done_reason: string | null;
+}
+
+/** One line of the chat stream from POST /api/instances/{id}/chat. */
+export type PromptEvent =
+  | { type: "token"; content: string; thinking?: string }
+  | { type: "done"; stats: PromptStats }
+  | { type: "error"; detail: string };
+
 export interface EnvState {
   platform?: Platform;
   managed: Record<string, string>;
