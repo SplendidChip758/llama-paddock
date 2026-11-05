@@ -1,3 +1,9 @@
+## [0.9.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.3...v0.9.0-dev.4) (2026-11-05)
+
+### Features
+
+* **dashboard:** add benchmarks with repeated runs and saved conditions ([#129](https://github.com/SplendidChip758/llama-paddock/issues/129)) ([f9d6298](https://github.com/SplendidChip758/llama-paddock/commit/f9d6298b5c79b529dd5226b5203a76a70921df9f)), closes [#17](https://github.com/SplendidChip758/llama-paddock/issues/17) [#17](https://github.com/SplendidChip758/llama-paddock/issues/17) [#32](https://github.com/SplendidChip758/llama-paddock/issues/32)
+
 ## [0.9.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.2...v0.9.0-dev.3) (2026-11-05)
 
 ### Features
