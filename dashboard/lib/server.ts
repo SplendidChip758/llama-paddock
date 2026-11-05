@@ -7,7 +7,8 @@ import {
   type Instance, type InstanceInput, type Settings,
 } from "./config";
 import {
-  deleteHistory, deleteJobs, interruptBenchmarks, loadJobs, maintainHistory, modelEvents, recordObservations, recordSamples, saveJob, type ObservedSpan,
+  deleteHistory, deleteJobs, interruptBenchmarks, loadJobs, maintainHistory, modelEvents, recordObservations, recordSamples, saveJob, trimAudit,
+  type ObservedSpan,
 } from "./db";
 import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
 import { diagnoseGpu, isGpuLogLine, modelKey, ollamaRun, onCpu, readLog, type GpuEvidence } from "./gpucheck";
@@ -788,6 +789,11 @@ async function pollLoop(p: Paddock) {
       if (started - maintained >= MAINTAIN_EVERY_MS) {
         maintained = started;
         maintainHistory(p.settings.history_retention_days);
+        try {
+          trimAudit(p.settings.audit_retention_days);
+        } catch (e) {
+          console.error("[llama-paddock] trimming the audit log failed:", e);
+        }
       }
     } catch (e) {
       console.error("[llama-paddock] saving metric history failed:", e);

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import {
   MIN_PASSWORD, SESSION_COOKIE, authEnabled, changePassword, checkPassword, createSession, readSession, sessionCookie,
 } from "@/lib/auth";
+import { audit } from "@/lib/audit";
 import { HttpError, handle, readBody } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -19,6 +20,7 @@ export const POST = handle(async (req: NextRequest) => {
   if (await checkPassword(session.username, next)) throw new HttpError(400, "new password must differ from the current one");
 
   changePassword(session.username, next);
+  audit(req, { action: "auth.password", user: session.username, detail: session.mustChange ? "replaced the temporary password" : "" });
   const res = NextResponse.json({ ok: true });
   res.cookies.set(sessionCookie(req, createSession(session.username)));
   return res;

@@ -10,7 +10,7 @@ The browser uses a session cookie. Scripts, Home Assistant and cron jobs use an 
 2. If the response has `must_change: true`, call `POST /api/auth/password` with `{"password":"…"}` and save the replacement cookie. Other application endpoints return 403 until this is done. The new password must differ from the old one and contain at least eight characters.
 3. Sessions last seven days. Changing the password invalidates other sessions, and so do an admin resetting it or removing the account.
 4. Failed logins return 401. After five failures from one address, or 20 from all addresses together, the login returns 429 for five minutes. See [Security](security.md).
-5. Accounts have a [role](configuration.md#users-and-roles). A **viewer** may call every `GET` endpoint below except `/api/users`, plus `POST /api/instances/{id}/models/show`, `POST /api/instances/{id}/gpu-check` and its own `/api/auth` routes. Anything else answers 403 with `code: "forbidden"`. An **admin** may call everything.
+5. Accounts have a [role](configuration.md#users-and-roles). A **viewer** may call every `GET` endpoint below except `/api/users` and `/api/audit`, plus `POST /api/instances/{id}/models/show`, `POST /api/instances/{id}/gpu-check` and its own `/api/auth` routes. Anything else answers 403 with `code: "forbidden"`. An **admin** may call everything.
 6. From a browser, requests other than `GET` must come from the dashboard's own origin, or they get 403. `curl` and scripts send no `Origin` or `Sec-Fetch-Site` header and are unaffected. See [Cross-site requests](security.md#cross-site-requests).
 
 | Method | Path | Body / result |
@@ -77,6 +77,16 @@ Admins only. With `PADDOCK_AUTH=off` these return 400. `{name}` is matched witho
 | DELETE | `/api/users/{name}` | Removes the account and signs it out |
 
 An admin can't change the role of, reset or remove their own account (400).
+
+## Audit log
+
+Admins only, with a session or a token whose user is an admin; 403 for viewers. What it records is described under [Security](security.md#audit-log).
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/audit` | `{entries, next, users, instances}`, newest first. Each entry is `{id, t, user, credential, credential_id, ip, action, instance, instance_name, target, detail}`. Filters: `?user=`, `?instance=` (a host id) and `?action=`, either one action such as `model.delete` or a group such as `model`. `limit` is 1–500 (default 100); pass `next` as `?before=` for older entries, until it is `null`. `users` and `instances` list who and which hosts appear in the log, for filters |
+
+`user` is `null` with `PADDOCK_AUTH=off` and for a failed sign-in to an account that doesn't exist. `credential` and `credential_id` name the API token a change came with, or are `null` for a browser. `instance_name` is the host's name at the time, so it survives the host being renamed or removed. The actions are `auth.login`, `auth.login_failed`, `auth.password`, `user.add`, `user.role`, `user.reset`, `user.remove`, `token.create`, `token.revoke`, `host.add`, `host.edit`, `host.remove`, `host.agent_https`, `host.agent_key`, `ollama.restart`, `ollama.gpu_fix`, `env.change`, `model.pull`, `model.create`, `model.copy`, `model.delete`, `model.load`, `model.unload`, `job.cancel`, `alert.rules`, `alert.channels`, `alert.silence`, `alert.unsilence`, `benchmark.start`, `benchmark.cancel`, `benchmark.delete` and `settings.client_names`. New actions may be added.
 
 ## Hosts
 

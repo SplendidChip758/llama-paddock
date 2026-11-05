@@ -8,6 +8,7 @@ poll_interval: 3        # seconds between polls of every instance
 history_points: 400     # recent samples shown in sparklines (~20 min at 3s)
 history_retention_days: 30  # metric history kept in the data dir: raw polls for 24h,
                             # 1-min averages for 7 days, 15-min averages after that
+audit_retention_days: 365   # audit log of who changed what (admins: menu → Audit log)
 
 # Prometheus /metrics (docs/prometheus.md) is off unless one of these is set.
 # metrics_token: ${PADDOCK_METRICS_TOKEN}  # scrapers send Authorization: Bearer <token>

@@ -167,6 +167,11 @@ export async function verifyLogin(username: string, password: string): Promise<U
   return ok && user ? info(user) : null;
 }
 
+/** The account's name as stored, or null: what the audit log records for a failed sign-in, never the text typed. */
+export function knownUsername(username: string): string | null {
+  return findUser(loadAuth(), username)?.username ?? null;
+}
+
 export async function checkPassword(username: string, password: string): Promise<boolean> {
   const user = findUser(loadAuth(), username);
   return !!user && (await matchesHash(password, user.hash));
