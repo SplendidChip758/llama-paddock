@@ -519,7 +519,6 @@ export type PromptEvent =
   | { type: "done"; stats: PromptStats }
   | { type: "error"; detail: string };
 
-<<<<<<< HEAD
 // ============================================================================ benchmarks (#32)
 /** short: a short question · long_context: reading a long prompt · long_generation: writing a long answer */
 export type BenchCase = "short" | "long_context" | "long_generation";
@@ -621,8 +620,6 @@ export interface BenchmarkInfo {
   runs?: BenchRun[];
 }
 
-=======
->>>>>>> origin/dev
 export interface EnvState {
   platform?: Platform;
   managed: Record<string, string>;

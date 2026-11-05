@@ -237,13 +237,10 @@ A transition is `{id, t, rule, name, kind, instance, subject, state, value, deta
 | POST | `/api/instances/{id}/models/delete` | `{model}` |
 | POST | `/api/instances/{id}/models/copy` | `{source, destination}` |
 | POST | `/api/instances/{id}/chat` | `{model, messages, options?, keep_alive?, think?}` → the answer as newline-delimited JSON events; see [Test prompts](#test-prompts) |
-<<<<<<< HEAD
 | GET | `/api/benchmarks` | `{benchmarks}`, newest first, without their runs. `?instance=<id>`, `?model=<name>`, `?limit=` 1–500 (default 100); see [Benchmarks](#benchmarks) |
 | POST | `/api/benchmarks` | `{model, instances, num_ctx?, repeat?, mode?, cases?}` → `{benchmarks}`, one per host, each started as a job |
 | GET | `/api/benchmarks/{bid}` | One benchmark with its `runs` |
 | DELETE | `/api/benchmarks/{bid}` | Cancels a running benchmark, keeping its finished runs, or deletes a finished one |
-=======
->>>>>>> origin/dev
 | GET | `/api/jobs` | `{jobs}` containing job status and progress |
 | DELETE | `/api/jobs/{jid}` | Cancels a running job, or removes a finished job from the list |
 
@@ -263,7 +260,6 @@ Errors before the answer starts (an unknown model, an unreachable host, a bad bo
 
 `stats` holds `ttft_ms` (from sending the request to the first token, timed by the dashboard, so it includes loading the model and reading the prompt), `wall_ms` (to the last line), Ollama's own `load_ms`, `prompt_tokens`, `prompt_ms`, `eval_ms`, `total_ms` and `tokens`, the rates `prompt_tps` and `tps` in tokens per second, and `done_reason` (`stop`, or `length` when `num_predict` cut it off). Ollama's figures are `null` if it left them out. Closing the connection stops the host generating. Viewers can't send prompts, since a prompt loads models.
 
-<<<<<<< HEAD
 ### Benchmarks
 
 `POST /api/benchmarks` runs the built-in prompt set against `model` on each host in `instances` (host IDs). The hosts run at the same time; a host already running a benchmark is refused with 409. Options:
@@ -287,8 +283,6 @@ A benchmark is `{id, batch, instance, instance_name, model, state, error, starte
 
 Results are kept until deleted: history retention doesn't remove them, and neither does removing the host. A benchmark running when the dashboard stops is marked `error` (`interrupted: the dashboard restarted`) and keeps its finished runs. Viewers can read results but not run or delete them.
 
-=======
->>>>>>> origin/dev
 ## Environment, restart and logs
 
 These routes require an agent configured for the host.
