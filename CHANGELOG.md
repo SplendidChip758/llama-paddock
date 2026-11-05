@@ -1,3 +1,9 @@
+## [0.9.0-dev.5](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.4...v0.9.0-dev.5) (2026-11-05)
+
+### Features
+
+* **dashboard:** add an audit log of who changed what ([#130](https://github.com/SplendidChip758/llama-paddock/issues/130)) ([f9a9bb7](https://github.com/SplendidChip758/llama-paddock/commit/f9a9bb74d02e06bf02d50afa81b4fe0578322fc4)), closes [#85](https://github.com/SplendidChip758/llama-paddock/issues/85)
+
 ## [0.9.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.3...v0.9.0-dev.4) (2026-11-05)
 
 ### Features
