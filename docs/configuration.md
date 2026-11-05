@@ -54,7 +54,7 @@ Only `ollama_url` is required; supply a stable, unique `id` using letters, digit
 - If `PADDOCK_PASSWORD` is empty, a random one is printed to the log on first start.
 - Change your password from the account menu (top right). Changing it signs out your other sessions.
 - Five wrong attempts lock that address out for 5 minutes, and 20 wrong attempts from all addresses together pause the login for everyone for 5 minutes. Behind a reverse proxy, set `PADDOCK_TRUSTED_PROXIES` so the per-address lockout sees the real client. See [Security](security.md).
-- **Forgot a password:** another admin can reset it under **Users**. If no admin can sign in, stop the dashboard, delete `auth.json` from the data directory (`/var/lib/llama-paddock`, or the Docker volume) and restart. This removes **every** account; the first admin is recreated from the env values.
+- **Forgot a password:** another admin can reset it under **Users**. If no admin can sign in, stop the dashboard, delete `auth.json` from the data directory (`/var/lib/llama-paddock`, or the Docker volume) and restart. This removes **every** account and every API token; the first admin is recreated from the env values.
 - `PADDOCK_AUTH=off` disables the login, e.g. when a reverse proxy with auth already sits in front of it. Everyone the proxy lets in then has full control, and there are no roles. `/api/healthz` stays open for health checks.
 
 ### Users and roles
@@ -69,9 +69,11 @@ Each person can have their own account, with one of two roles:
 Admins manage accounts under **Users** in the account menu:
 
 - **Add user:** pick a name and a role. The dashboard makes a temporary password, shown once, for you to pass on. The new user must choose their own when they first sign in.
-- **Role:** takes effect at once, also for a user who is signed in.
-- **Reset password:** signs the user out everywhere and shows a new temporary password.
-- **Remove:** signs the user out at once.
+- **Role:** takes effect at once, also for a user who is signed in. Making an admin a viewer also takes write access from their API tokens, for good.
+- **Reset password:** signs the user out everywhere and shows a new temporary password. Their API tokens keep working; revoke them under **API tokens** if needed.
+- **Remove:** signs the user out at once and removes their API tokens.
+
+Every user can create [API tokens](api.md#api-tokens) for scripts under **API tokens** in the account menu: read-only, or read and write for admins. Admins can also list and revoke everyone's.
 
 An admin can't change the role of, reset or remove their own account, so there is always an admin who can sign in. Usernames are matched without regard to case.
 
@@ -85,6 +87,6 @@ Dashboards from before user accounts had a single login. On upgrade it becomes t
 | Docker Compose | `paddock-data` volume, mounted at `/data` |
 | Source | The path set by `PADDOCK_DATA_DIR` |
 
-`hosts.json` stores hosts added in the UI, including agent tokens, proxy keys and pinned agent keys. `agent-pins.json` stores the agent keys pinned for `config.yaml` hosts without an `agent_fingerprint`. `auth.json` stores the user accounts, their password hashes and roles, and the session signing secret. `alert-rules.json` stores the [alert rules](alerts.md) once they have been changed in the dashboard, and `alert-channels.json` the [notification channels](alerts.md#notifications), including their webhook URLs and passwords. `request-clients.json` stores the names given to client addresses in the [request log](usage.md#requests). `paddock.db` stores metric history, host availability and model load events, alerts firing and resolving, alert silences, the request log, and jobs; SQLite may also create `paddock.db-wal` and `paddock.db-shm`.
+`hosts.json` stores hosts added in the UI, including agent tokens, proxy keys and pinned agent keys. `agent-pins.json` stores the agent keys pinned for `config.yaml` hosts without an `agent_fingerprint`. `auth.json` stores the user accounts, their password hashes and roles, and the session signing secret. `credentials.json` stores the [API tokens](api.md#api-tokens): their names, owners, scopes, expiry and hashes, never the tokens themselves. `alert-rules.json` stores the [alert rules](alerts.md) once they have been changed in the dashboard, and `alert-channels.json` the [notification channels](alerts.md#notifications), including their webhook URLs and passwords. `request-clients.json` stores the names given to client addresses in the [request log](usage.md#requests). `paddock.db` stores metric history, host availability and model load events, alerts firing and resolving, alert silences, the request log, and jobs; SQLite may also create `paddock.db-wal` and `paddock.db-shm`.
 
 Keep these files private (mode 600 on Linux) and retain the directory across upgrades. See [Backups](operations.md#backups) for copying SQLite data safely. Agent configuration is separate: [Linux](agent-linux.md) and [Windows](agent-windows.md#settings-and-updates).

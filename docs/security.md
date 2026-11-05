@@ -16,6 +16,16 @@ The dashboard is designed for a trusted LAN or a reverse proxy, not the open int
 - **Use TLS from anywhere else.** Put a reverse proxy with TLS in front (Caddy, nginx, Traefik), then set `PADDOCK_TRUSTED_PROXIES` ([reverse proxies](proxy.md#the-dashboard-behind-a-proxy)). The session cookie is marked `Secure` when the proxy sends `X-Forwarded-Proto: https`.
 - **Or let the proxy do the login.** With an authenticating proxy (Authelia, Authentik, Cloudflare Access, …) in front, `PADDOCK_AUTH=off` turns the dashboard's own login off. Only do that when nothing can reach the dashboard's port without going through the proxy.
 
+## API tokens
+
+[API tokens](api.md#api-tokens) let scripts call the API as their user. Each is 256 random bits, shown once and stored as a SHA-256 hash in `credentials.json` (mode 600), so the file can't be used to sign in. Make a token read-only unless the script has to change something: a read-and-write admin token can restart Ollama and edit its environment on every host.
+
+- **Scopes and roles:** a token can only do what both its scopes and its user's current role allow. Demoting a user takes write access from their tokens for good; removing the user removes them.
+- **No credential management:** tokens can't create or revoke tokens, manage users or change passwords. Those need a signed-in browser.
+- **Expiry and revocation:** set an expiry when you create one, and revoke it under **API tokens** when a script is retired or a token may have leaked. Admins can see and revoke every user's tokens. Each token shows when it was last used (to the minute).
+- **Lockout:** five unknown or wrong tokens from one address lock that address out of token requests for five minutes. Unlike the login there is no limit for everyone together: a 256-bit token can't be guessed, and a forgotten script with a revoked token shouldn't lock every other script or person out. Token failures don't count towards the login lockout either.
+- **Transport:** like the session cookie, a token crosses the network in clear text unless the dashboard is behind TLS.
+
 ## Prometheus metrics
 
 `/metrics` doesn't use the login, because Prometheus can't sign in. It's off unless you set a scrape token (`metrics_token` or `PADDOCK_METRICS_TOKEN`), which it compares in constant time, or set `metrics_open: true`. The token only reads metrics; it can't sign in or call the API. The metrics hold no secrets, but they name your hosts, models, GPUs and versions, so only leave the endpoint open on a network you trust. See [Prometheus and Grafana](prometheus.md).

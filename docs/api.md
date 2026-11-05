@@ -4,7 +4,7 @@ The dashboard exposes the JSON endpoints used by its UI. Paths below are relativ
 
 ## Authentication
 
-Dashboard requests use a session cookie, not the agent bearer token. Send JSON bodies with `Content-Type: application/json`; other content types are refused with 415.
+The browser uses a session cookie. Scripts, Home Assistant and cron jobs use an [API token](#api-tokens) instead. Neither is the agent's bearer token. Send JSON bodies with `Content-Type: application/json`; other content types are refused with 415.
 
 1. `POST /api/auth/login` with `{"username":"admin","password":"…"}`. Save the returned `paddock_session` cookie and send it on subsequent requests.
 2. If the response has `must_change: true`, call `POST /api/auth/password` with `{"password":"…"}` and save the replacement cookie. Other application endpoints return 403 until this is done. The new password must differ from the old one and contain at least eight characters.
@@ -16,13 +16,53 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 | Method | Path | Body / result |
 |---|---|---|
 | POST | `/api/auth/login` | `{username, password}` → `{ok, must_change}` and a session cookie |
-| GET | `/api/auth/me` | `{auth, username, role, must_change, min_password}` when auth is enabled; `{auth: false, role: "admin"}` otherwise |
+| GET | `/api/auth/me` | `{auth, username, role, must_change, min_password}` when auth is enabled; `{auth: false, role: "admin"}` otherwise. With a token, `{auth, username, role, must_change, token: {id, kind, name, scopes}}`, where `scopes` is what the token may do now |
 | POST | `/api/auth/password` | `{current, password}`; `current` is optional during the forced first-login change |
 | POST | `/api/auth/logout` | Clears the session cookie |
 | GET | `/api/healthz` | `{ok, version}`; no login required |
 | GET | `/metrics` | Prometheus metrics; needs the scrape token instead of a login, and is off unless configured. See [Prometheus](prometheus.md) |
 
 `PADDOCK_AUTH=off` disables dashboard authentication, and every request has admin rights. Only use it when another layer protects access. See [Login](configuration.md#login). Unauthenticated API requests normally return 401, and failed requests use a JSON `detail` field.
+
+### API tokens
+
+Create a token under **API tokens** in the account menu, and send it on every request:
+
+```bash
+curl -H "Authorization: Bearer paddock_…" http://192.168.30.100:8080/api/instances
+```
+
+- A token belongs to a user and has **scopes**. `api:read` allows every `GET` endpoint and the `POST` requests that only read (those a viewer may make); `api:write` allows the rest. Viewers can only create `api:read` tokens.
+- A token never does more than its user's role allows at the time of the request. When an admin is made a viewer, their tokens lose `api:write` for good: making them an admin again doesn't restore it. Removing a user removes their tokens.
+- Tokens can't manage users, tokens or passwords (`/api/users`, `/api/tokens`, `/api/auth/*` except `GET /api/auth/me`): those need a signed-in browser, so a leaked token can't create another or lock its owner out. They answer 403 with `code: "session_only"`.
+- A missing scope answers 403 with `code: "forbidden"` and the `scope` that was needed. An unknown, revoked or expired token answers 401 with `code: "bad_token"`.
+- Five unknown or wrong tokens from one address lock that address out of token requests for five minutes (429 with `Retry-After`). This is counted apart from failed logins, and an expired token doesn't count. See [Security](security.md#api-tokens).
+- With a token, the `Authorization` header decides: a session cookie sent alongside is ignored. With `PADDOCK_AUTH=off` there are no tokens and the header is ignored.
+- Tokens are shown once and stored as a SHA-256 hash. They look like `paddock_<16 hex>_<43 characters>`, so secret scanners and log filters can spot them.
+
+A [Home Assistant RESTful sensor](https://www.home-assistant.io/integrations/sensor.rest/) that counts the hosts whose Ollama answers, with a read-only token kept in `secrets.yaml`:
+
+```yaml
+# configuration.yaml
+sensor:
+  - platform: rest
+    name: Ollama hosts up
+    resource: http://192.168.30.100:8080/api/instances
+    headers:
+      Authorization: !secret paddock_token   # secrets.yaml: paddock_token: "Bearer paddock_…"
+    value_template: "{{ value_json.instances | selectattr('ollama_ok') | list | length }}"
+    json_attributes:
+      - instances
+    scan_interval: 60
+```
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/tokens` | `{tokens}`: your own, each `{id, kind, name, scopes, created, expires, last_used, expired}`. Admins can add `?all=1` for every user's, with `user` |
+| POST | `/api/tokens` | `{name, scopes, expires_days}` → the token's fields plus `token` (201), the only time it is returned. `scopes` defaults to `["api:read"]`; `expires_days` is 1–3650, or `null`/omitted for never. 403 for a scope your role can't grant; 409 past 50 tokens |
+| DELETE | `/api/tokens/{id}` | Revokes your own token, or anyone's as an admin; 404 otherwise |
+
+`kind` is `api` for every token today. The wall display's links ([#11](https://github.com/SplendidChip758/llama-paddock/issues/11), scope `display:read`) and the gateway's client keys ([#26](https://github.com/SplendidChip758/llama-paddock/issues/26), scope `gateway:invoke`) will be credentials of other kinds with their own scopes, revoked and listed the same way. A display link will only open the display, and a gateway key only call `/v1`.
 
 ## Users
 
