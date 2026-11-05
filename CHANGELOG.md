@@ -1,3 +1,9 @@
+## [0.9.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0...v0.9.0-dev.1) (2026-11-05)
+
+### Features
+
+* **dashboard:** add user accounts with admin and viewer roles ([#126](https://github.com/SplendidChip758/llama-paddock/issues/126)) ([c14f48f](https://github.com/SplendidChip758/llama-paddock/commit/c14f48f4f58325473d8f9f6b1c2b00ac2baa0c5b)), closes [#10](https://github.com/SplendidChip758/llama-paddock/issues/10)
+
 ## [0.8.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0...v0.8.0) (2026-11-05)
 
 ### Features
