@@ -283,6 +283,7 @@ pre.logs .wrn { color: var(--warn); }
 .notice { padding: 10px 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg2); color: var(--muted); font-size: 13px; margin-bottom: 14px; }
 .notice.bad { border-color: color-mix(in srgb, var(--bad) 55%, var(--line)); color: var(--text); }
 .notice.warn { border-color: color-mix(in srgb, var(--warn) 55%, var(--line)); color: var(--text); }
+.notice.ok { border-color: color-mix(in srgb, var(--ok) 55%, var(--line)); color: var(--text); }
 
 .toasts { position: fixed; bottom: 18px; right: 18px; display: flex; flex-direction: column; gap: 8px; z-index: 60; }
 .toast { background: var(--panel2); border: 1px solid var(--line); border-left: 3px solid var(--accent); padding: 10px 14px; border-radius: 8px; max-width: 420px; box-shadow: 0 8px 24px rgba(0,0,0,.35); font-size: 13px; }

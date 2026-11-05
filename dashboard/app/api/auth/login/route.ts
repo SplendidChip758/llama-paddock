@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
-  authEnabled, clearLoginFailures, clientIp, createSession, loadAuth, loginLockedFor, loginLockedGlobally, noteLoginFailure,
+  authEnabled, clearLoginFailures, clientIp, createSession, loginLockedFor, loginLockedGlobally, noteLoginFailure,
   sessionCookie, verifyLogin,
 } from "@/lib/auth";
 import { HttpError, handle, readBody } from "@/lib/server";
@@ -15,13 +15,14 @@ export const POST = handle(async (req: NextRequest) => {
   if (wait) throw new HttpError(429, `too many failed attempts, try again in ${Math.ceil(wait / 60)} min`);
 
   const { username, password } = await readBody<{ username?: unknown; password?: unknown }>(req);
-  if (!(await verifyLogin(String(username ?? ""), String(password ?? "")))) {
+  const user = await verifyLogin(String(username ?? ""), String(password ?? ""));
+  if (!user) {
     noteLoginFailure(ip);
     throw new HttpError(401, "wrong username or password");
   }
   clearLoginFailures(ip);
 
-  const res = NextResponse.json({ ok: true, must_change: loadAuth().must_change });
-  res.cookies.set(sessionCookie(req, createSession()));
+  const res = NextResponse.json({ ok: true, must_change: user.must_change });
+  res.cookies.set(sessionCookie(req, createSession(user.username)));
   return res;
 });

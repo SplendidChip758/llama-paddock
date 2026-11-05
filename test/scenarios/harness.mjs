@@ -295,10 +295,11 @@ export function metric(text, name, labels) {
 
 /**
  * Start a simulator, a data dir and a signed-in dashboard. `data` can be a function of the simulator,
- * for config that depends on its ports. `stop()` tears all of it down and, when a
+ * for config that depends on its ports. `seed(dataDir)` runs before the dashboard starts, to put files
+ * from an older version in place. `stop()` tears all of it down and, when a
  * test marked the stack as failed, prints the processes' recent output, since CI only shows the assertion.
  */
-export async function startStack({ sim: simOpts = {}, data: dataOpts = {} } = {}) {
+export async function startStack({ sim: simOpts = {}, data: dataOpts = {}, seed } = {}) {
   const stack = { sim: null, data: null, dashboard: null, client: null, failed: false };
   stack.stop = async () => {
     if (stack.failed) {
@@ -310,6 +311,7 @@ export async function startStack({ sim: simOpts = {}, data: dataOpts = {} } = {}
   try {
     stack.sim = await startSim(simOpts);
     stack.data = makeDataDir(stack.sim, typeof dataOpts === "function" ? dataOpts(stack.sim) : dataOpts);
+    seed?.(stack.data);
     stack.dashboard = await startDashboard(stack.data);
     stack.client = await new Client(stack.dashboard.url).login();
   } catch (e) {

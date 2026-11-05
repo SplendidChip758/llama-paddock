@@ -10,7 +10,7 @@ import { usePaddock } from "./PaddockProvider";
 import { Drawer } from "./ui";
 
 export function AlertsView({ host: hostFilter }: { host?: string }) {
-  const { alerts, alertsStoreError, instances, toast } = usePaddock();
+  const { alerts, alertsStoreError, instances, toast, readOnly } = usePaddock();
   const [rules, setRules] = useState<AlertRule[] | null>(null);
   const [channels, setChannels] = useState<NotifyChannel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +70,7 @@ export function AlertsView({ host: hostFilter }: { host?: string }) {
             {pending.length ? ` · ${pending.length} pending` : ""} · rules are checked on every poll
           </div>
         </div>
-        <button className="btn primary" onClick={() => setEditing("new")} disabled={!rules}>Add rule</button>
+        {!readOnly && <button className="btn primary" onClick={() => setEditing("new")} disabled={!rules}>Add rule</button>}
       </div>
 
       {alertsStoreError && (
@@ -82,7 +82,7 @@ export function AlertsView({ host: hostFilter }: { host?: string }) {
       <div className="card">
         {alerts.length ? (
           <div className="alertlist">
-            {alerts.map((a) => <AlertLine key={`${a.rule}/${a.instance}/${a.subject}`} a={a} host={hostName(a.instance)} actions />)}
+            {alerts.map((a) => <AlertLine key={`${a.rule}/${a.instance}/${a.subject}`} a={a} host={hostName(a.instance)} actions={!readOnly} />)}
           </div>
         ) : (
           <div className="empty">No alerts. Hosts that match a rule show up here, first as pending until the rule&apos;s duration has passed.</div>
@@ -107,7 +107,7 @@ export function AlertsView({ host: hostFilter }: { host?: string }) {
                   {rules.map((r, i) => (
                     <tr key={r.id} className={r.enabled ? "" : "off"}>
                       <td>
-                        <input type="checkbox" checked={r.enabled} disabled={busy} aria-label={`${r.enabled ? "Disable" : "Enable"} ${r.name}`}
+                        <input type="checkbox" checked={r.enabled} disabled={busy || readOnly} aria-label={`${r.enabled ? "Disable" : "Enable"} ${r.name}`}
                           onChange={() => save(rules.map((x, j) => (j === i ? { ...x, enabled: !x.enabled } : x)),
                             `${r.enabled ? "Disabled" : "Enabled"} ${r.name}`)} />
                       </td>
@@ -117,7 +117,7 @@ export function AlertsView({ host: hostFilter }: { host?: string }) {
                       <td>{notifyText(r)}</td>
                       <td>
                         <div className="actions">
-                          <button className="btn sm" onClick={() => setEditing(i)}>Edit</button>
+                          {!readOnly && <button className="btn sm" onClick={() => setEditing(i)}>Edit</button>}
                         </div>
                       </td>
                     </tr>
@@ -160,7 +160,7 @@ export function AlertsView({ host: hostFilter }: { host?: string }) {
 
 /** Silences and acknowledgements in force, with what each one covers. */
 function Silences({ rules, hostName }: { rules: AlertRule[]; hostName: (id: string) => string }) {
-  const { alerts } = usePaddock();
+  const { alerts, readOnly } = usePaddock();
   const [list, setList] = useState<AlertSilence[] | null>(null);
   const { busy, end } = useSilences();
   // refetch whenever the alert list changes: silences come and go with it
@@ -185,7 +185,7 @@ function Silences({ rules, hostName }: { rules: AlertRule[]; hostName: (id: stri
               </div>
               <div className="chips" style={{ justifyContent: "flex-end", alignItems: "center" }}>
                 <span className="chip">{silenceChip(s).text}</span>
-                <button className="btn sm" disabled={busy} onClick={() => end(s.id, "Silence ended")}>End</button>
+                {!readOnly && <button className="btn sm" disabled={busy} onClick={() => end(s.id, "Silence ended")}>End</button>}
               </div>
             </div>
           ))}

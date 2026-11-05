@@ -5,7 +5,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { api } from "@/lib/format";
 
 export function LoginForm({ next }: { next: string }) {
-  const [username, setUsername] = useState("admin");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -30,19 +30,19 @@ export function LoginForm({ next }: { next: string }) {
       {error && <div className="notice bad">{error}</div>}
       <label className="field">
         <span>Username</span>
-        <input type="text" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required />
+        <input type="text" autoComplete="username" autoFocus value={username} onChange={(e) => setUsername(e.target.value)} required />
       </label>
       <label className="field">
         <span>Password</span>
-        <input type="password" autoComplete="current-password" autoFocus value={password}
+        <input type="password" autoComplete="current-password" value={password}
           onChange={(e) => setPassword(e.target.value)} required />
       </label>
       <button className="btn primary wide" type="submit" disabled={busy}>
         {busy ? "Signing in…" : "Sign in"}
       </button>
       <div className="hint authfoot">
-        The first password is printed by the installer (or in the container log). Forgot it? Delete <code>auth.json</code> in
-        the data directory and restart.
+        The first admin password is printed by the installer (or in the container log). Forgot yours? An admin can reset it
+        under Users.
       </div>
     </form>
   );

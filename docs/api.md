@@ -8,20 +8,35 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 
 1. `POST /api/auth/login` with `{"username":"admin","password":"…"}`. Save the returned `paddock_session` cookie and send it on subsequent requests.
 2. If the response has `must_change: true`, call `POST /api/auth/password` with `{"password":"…"}` and save the replacement cookie. Other application endpoints return 403 until this is done. The new password must differ from the old one and contain at least eight characters.
-3. Sessions last seven days. Changing the password invalidates other sessions.
+3. Sessions last seven days. Changing the password invalidates other sessions, and so do an admin resetting it or removing the account.
 4. Failed logins return 401. After five failures from one address, or 20 from all addresses together, the login returns 429 for five minutes. See [Security](security.md).
-5. From a browser, requests other than `GET` must come from the dashboard's own origin, or they get 403. `curl` and scripts send no `Origin` or `Sec-Fetch-Site` header and are unaffected. See [Cross-site requests](security.md#cross-site-requests).
+5. Accounts have a [role](configuration.md#users-and-roles). A **viewer** may call every `GET` endpoint below except `/api/users`, plus `POST /api/instances/{id}/models/show`, `POST /api/instances/{id}/gpu-check` and its own `/api/auth` routes. Anything else answers 403 with `code: "forbidden"`. An **admin** may call everything.
+6. From a browser, requests other than `GET` must come from the dashboard's own origin, or they get 403. `curl` and scripts send no `Origin` or `Sec-Fetch-Site` header and are unaffected. See [Cross-site requests](security.md#cross-site-requests).
 
 | Method | Path | Body / result |
 |---|---|---|
 | POST | `/api/auth/login` | `{username, password}` → `{ok, must_change}` and a session cookie |
-| GET | `/api/auth/me` | `{auth, username, must_change, min_password}` when auth is enabled; `{auth: false}` otherwise |
+| GET | `/api/auth/me` | `{auth, username, role, must_change, min_password}` when auth is enabled; `{auth: false, role: "admin"}` otherwise |
 | POST | `/api/auth/password` | `{current, password}`; `current` is optional during the forced first-login change |
 | POST | `/api/auth/logout` | Clears the session cookie |
 | GET | `/api/healthz` | `{ok, version}`; no login required |
 | GET | `/metrics` | Prometheus metrics; needs the scrape token instead of a login, and is off unless configured. See [Prometheus](prometheus.md) |
 
-`PADDOCK_AUTH=off` disables dashboard authentication. Only use it when another layer protects access. See [Login](configuration.md#login). Unauthenticated API requests normally return 401, and failed requests use a JSON `detail` field.
+`PADDOCK_AUTH=off` disables dashboard authentication, and every request has admin rights. Only use it when another layer protects access. See [Login](configuration.md#login). Unauthenticated API requests normally return 401, and failed requests use a JSON `detail` field.
+
+## Users
+
+Admins only. With `PADDOCK_AUTH=off` these return 400. `{name}` is matched without regard to case.
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/users` | `{users}`: each `{username, role, must_change}` |
+| POST | `/api/users` | `{username, role}` → `{username, password}` (201). `role` is `admin` or `viewer` (default). `password` is a temporary one, returned only here, that must be changed at first sign-in. 409 if the name is taken |
+| PUT | `/api/users/{name}` | `{role}` → `{username, role, must_change}`; applies to the user's current sessions at once |
+| POST | `/api/users/{name}/reset` | → `{password}`: a new temporary password, returned only here; signs the user out |
+| DELETE | `/api/users/{name}` | Removes the account and signs it out |
+
+An admin can't change the role of, reset or remove their own account (400).
 
 ## Hosts
 

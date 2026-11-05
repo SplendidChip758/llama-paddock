@@ -61,6 +61,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-pa
 | No AMD or Apple GPU cards | GPU collection currently uses `nvidia-smi`; AMD and Apple support are planned. |
 | History disappears after restarting | Check write permissions and free space in the data directory. If SQLite cannot open, the dashboard logs a warning and falls back to in-memory history. |
 | Password changed in `.env` but login is unchanged | Environment credentials apply only before `auth.json` exists. Follow [password recovery](configuration.md#login). |
+| "your account is read-only" | The account is a viewer. An admin can change its role under **Users**. See [Users and roles](configuration.md#users-and-roles). |
 | Proxmox console shows `^[[1;1R` at login | For containers created by older installers, run `pct set <ctid> --cmode console` on the Proxmox host. |
 
 Dashboard logs: `journalctl -u llama-paddock` for systemd, or `docker compose logs llama-paddock` for Docker. Linux agent logs: `journalctl -u llama-paddock-agent`. On Windows, check Task Scheduler → `llama-paddock-agent`.

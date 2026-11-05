@@ -20,7 +20,7 @@ interface UptimeBrief {
 const UPTIME_REFRESH_MS = 60_000;
 
 export function Overview() {
-  const { instances, loaded, pollInterval } = usePaddock();
+  const { instances, loaded, pollInterval, readOnly } = usePaddock();
   const [adding, setAdding] = useState(false);
   const [uptime, setUptime] = useState<Record<string, UptimeBrief>>({});
   useEffect(() => {
@@ -35,12 +35,13 @@ export function Overview() {
   if (!instances.length) {
     return (
       <div className="welcome card">
-        <h1>Add your first Ollama host</h1>
+        <h1>{readOnly ? "No hosts yet" : "Add your first Ollama host"}</h1>
         <p className="sub">
-          Point the dashboard at an Ollama server. Install the agent on that host as well for GPU and host stats, environment
-          editing, restart and logs.
+          {readOnly
+            ? "An admin can add Ollama hosts to the dashboard. They show up here once they have."
+            : "Point the dashboard at an Ollama server. Install the agent on that host as well for GPU and host stats, environment editing, restart and logs."}
         </p>
-        <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>
+        {!readOnly && <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>}
         {editor}
       </div>
     );
@@ -61,7 +62,7 @@ export function Overview() {
             {instances.length} instance{instances.length === 1 ? "" : "s"} · refreshing every {pollInterval}s
           </div>
         </div>
-        <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>
+        {!readOnly && <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>}
       </div>
       {editor}
       <FleetHttpsOffer instances={instances} />

@@ -48,22 +48,25 @@ export function Header({ version }: { version: string }) {
           <span>Jobs</span>
           <span className={`pill ${running ? "live" : ""}`}>{running || jobs.length}</span>
         </button>
-        {me?.auth && me.username && <UserMenu username={me.username} />}
+        {me?.auth && me.username && <UserMenu username={me.username} role={me.role} />}
       </header>
       <JobsDrawer />
     </>
   );
 }
 
-function UserMenu({ username }: { username: string }) {
+function UserMenu({ username, role }: { username: string; role?: string | null }) {
   const signOut = async () => {
     await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     window.location.assign("/login");
   };
   return (
     <details className="usermenu">
-      <summary title="Account">{username}</summary>
+      <summary title={role === "viewer" ? "Account (read-only)" : "Account"}>
+        {username}{role === "viewer" && <span className="faint"> · viewer</span>}
+      </summary>
       <div className="menu">
+        {role === "admin" && <Link href="/users">Users</Link>}
         <Link href="/change-password">Change password</Link>
         <button onClick={signOut}>Sign out</button>
       </div>

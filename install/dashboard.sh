@@ -644,9 +644,10 @@ PORT=${PORT}
 HOSTNAME=0.0.0.0
 PADDOCK_CONFIG=${CFG_DIR}/config.yaml
 NEXT_TELEMETRY_DISABLED=1
-# Initial login. You must change the password on first sign-in; after that it
-# lives (hashed) in ${DATA_DIR}/auth.json and these two lines are ignored.
-# Forgot it? rm ${DATA_DIR}/auth.json && systemctl restart llama-paddock
+# First admin account. You must change the password on first sign-in; after that
+# accounts live (hashed) in ${DATA_DIR}/auth.json and these two lines are ignored.
+# Forgot it? Another admin can reset it under Users. If none can sign in:
+# rm ${DATA_DIR}/auth.json && systemctl restart llama-paddock (removes every account)
 PADDOCK_USERNAME=admin
 PADDOCK_PASSWORD=${ADMIN_PASSWORD}
 # PADDOCK_AUTH=off disables the login, e.g. behind an auth proxy.

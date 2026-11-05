@@ -52,7 +52,7 @@ export function MonitorTab({ st }: { st: InstanceSnapshot }) {
 }
 
 function PsTable({ st }: { st: InstanceSnapshot }) {
-  const { toast } = usePaddock();
+  const { toast, readOnly } = usePaddock();
   const [busy, setBusy] = useState<string | null>(null);
   if (!st.ollama_ok) return <div className="empty">Ollama is unreachable</div>;
   if (!st.ps.length) return <div className="empty">No models loaded</div>;
@@ -93,7 +93,7 @@ function PsTable({ st }: { st: InstanceSnapshot }) {
               </td>
               <td className="num">{untilText(m.expires_at)}</td>
               <td className="r">
-                <button className="btn sm" disabled={busy === m.name} onClick={() => unload(m.name)}>Unload</button>
+                {!readOnly && <button className="btn sm" disabled={busy === m.name} onClick={() => unload(m.name)}>Unload</button>}
               </td>
             </tr>
           ))}

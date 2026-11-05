@@ -48,7 +48,7 @@ function target(c: NotifyChannel) {
 }
 
 export function ChannelsSection({ channels, onSaved }: { channels: NotifyChannel[] | null; onSaved: (c: NotifyChannel[]) => void }) {
-  const { toast } = usePaddock();
+  const { toast, readOnly } = usePaddock();
   // index into channels, or "new"
   const [editing, setEditing] = useState<number | "new" | null>(null);
   const [busy, setBusy] = useState(false);
@@ -72,7 +72,7 @@ export function ChannelsSection({ channels, onSaved }: { channels: NotifyChannel
     <div className="section">
       <div className="card-head">
         <h2>Notifications</h2>
-        <button className="btn" onClick={() => setEditing("new")} disabled={!channels}>Add channel</button>
+        {!readOnly && <button className="btn" onClick={() => setEditing("new")} disabled={!channels}>Add channel</button>}
       </div>
       <div className="card">
         {channels === null ? (
@@ -93,7 +93,7 @@ export function ChannelsSection({ channels, onSaved }: { channels: NotifyChannel
                   return (
                     <tr key={c.id} className={c.enabled ? "" : "off"}>
                       <td>
-                        <input type="checkbox" checked={c.enabled} disabled={busy} aria-label={`${c.enabled ? "Disable" : "Enable"} ${c.name}`}
+                        <input type="checkbox" checked={c.enabled} disabled={busy || readOnly} aria-label={`${c.enabled ? "Disable" : "Enable"} ${c.name}`}
                           onChange={() => save(channels.map((x, j) => ({ ...toInput(x), enabled: j === i ? !x.enabled : x.enabled })),
                             `${c.enabled ? "Disabled" : "Enabled"} ${c.name}`)} />
                       </td>
@@ -102,7 +102,7 @@ export function ChannelsSection({ channels, onSaved }: { channels: NotifyChannel
                       <td className="chstatus">
                         {st.cls && <span className={`dot ${st.cls}`} />} <span className={st.cls === "bad" ? "" : "faint"}>{st.text}</span>
                       </td>
-                      <td><div className="actions"><button className="btn sm" onClick={() => setEditing(i)}>Edit</button></div></td>
+                      <td><div className="actions">{!readOnly && <button className="btn sm" onClick={() => setEditing(i)}>Edit</button>}</div></td>
                     </tr>
                   );
                 })}

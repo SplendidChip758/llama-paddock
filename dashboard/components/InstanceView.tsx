@@ -17,7 +17,7 @@ import { AgentKeyNotice, AgentPlainChip, HttpsOffer, agentEncrypted } from "./Ag
 import { HostAlertPill, HostSilence } from "./AlertBits";
 
 export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
-  const { instances, loaded, toast } = usePaddock();
+  const { instances, loaded, toast, readOnly } = usePaddock();
   const [restarting, setRestarting] = useState(false);
   const [editing, setEditing] = useState(false);
   const st = instances.find((i) => i.id === id);
@@ -68,11 +68,11 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
         <div className="row">
           <HostSilence id={st.id} name={st.name} />
           {st.source === "ui" ? (
-            <button className="btn" onClick={() => setEditing(true)}>Edit host</button>
+            !readOnly && <button className="btn" onClick={() => setEditing(true)}>Edit host</button>
           ) : (
             <span className="chip" title="Defined in config.yaml. Edit it there and restart the dashboard.">config.yaml</span>
           )}
-          {st.has_agent && (
+          {st.has_agent && !readOnly && (
             <button className="btn" onClick={restart} disabled={restarting}>
               {restarting ? "Restarting…" : "Restart Ollama"}
             </button>

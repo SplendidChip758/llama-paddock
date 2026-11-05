@@ -15,8 +15,8 @@ group named after it. Keep that format. -->
 
 ## Configure
 
-- [Configuration and login](configuration.md): `config.yaml`, environment variables, login and the data directory
-- [Security](security.md): what a login can do, exposing the dashboard, lockout, cross-site requests and agent tokens
+- [Configuration and login](configuration.md): `config.yaml`, environment variables, login, users and roles, and the data directory
+- [Security](security.md): what admins and viewers can do, exposing the dashboard, lockout, cross-site requests and agent tokens
   - [Reverse proxies](proxy.md): the dashboard behind a proxy, and Ollama behind a proxy that checks a key
 - [Prometheus and Grafana](prometheus.md): the `/metrics` endpoint, its scrape token, the metric list and a Grafana dashboard
 
