@@ -13,6 +13,7 @@ interface Toast {
 export interface Me {
   auth: boolean;
   username?: string | null;
+  role?: "admin" | "viewer" | null;
 }
 
 interface Ctx {
@@ -20,6 +21,8 @@ interface Ctx {
   /** Re-fetch the fleet now, e.g. after adding or editing a host. */
   refreshInstances: () => Promise<void>;
   me: Me | null;
+  /** A viewer account: hide the controls that change something (the server refuses them anyway). */
+  readOnly: boolean;
   loaded: boolean;
   pollInterval: number;
   jobs: JobInfo[];
@@ -126,7 +129,7 @@ export function PaddockProvider({ children }: { children: ReactNode }) {
   }, [refreshJobs]);
 
   return (
-    <PaddockCtx.Provider value={{ instances, refreshInstances, me, loaded, pollInterval, jobs, refreshJobs, toast, jobsOpen, setJobsOpen, jobsDoneTick, alerts, alertsStoreError }}>
+    <PaddockCtx.Provider value={{ instances, refreshInstances, me, readOnly: me?.role === "viewer", loaded, pollInterval, jobs, refreshJobs, toast, jobsOpen, setJobsOpen, jobsDoneTick, alerts, alertsStoreError }}>
       {children}
       <div className="toasts">
         {toasts.map((t) => (

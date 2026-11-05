@@ -6,7 +6,7 @@ import { usePaddock } from "./PaddockProvider";
 import { Drawer } from "./ui";
 
 export function JobLine({ j }: { j: JobInfo }) {
-  const { refreshJobs, toast } = usePaddock();
+  const { refreshJobs, toast, readOnly } = usePaddock();
   const p = j.total ? pct(j.completed, j.total) : j.state === "done" ? 100 : 0;
   const cancel = () => api(`/api/jobs/${j.id}`, { method: "DELETE" }).then(refreshJobs).catch((e) => toast(e.message, "bad"));
   return (
@@ -15,9 +15,11 @@ export function JobLine({ j }: { j: JobInfo }) {
         <div>
           <b className="mono">{j.model}</b> <span className="faint">· {j.kind} on {j.instance}</span>
         </div>
-        <button className="ghost sm" onClick={cancel} title={j.state === "running" ? "cancel" : "dismiss"}>
-          {j.state === "running" ? "Cancel" : "✕"}
-        </button>
+        {!readOnly && (
+          <button className="ghost sm" onClick={cancel} title={j.state === "running" ? "cancel" : "dismiss"}>
+            {j.state === "running" ? "Cancel" : "✕"}
+          </button>
+        )}
       </div>
       <div className="status">
         {j.error || j.status}

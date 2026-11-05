@@ -14,7 +14,7 @@ const STATE: Record<GpuCheck["state"], [string, string]> = {
 
 /** Whether Ollama uses the GPU nvidia-smi sees: one line while it does, the causes and fixes when it doesn't. */
 export function GpuCheckCard({ st }: { st: InstanceSnapshot }) {
-  const { toast } = usePaddock();
+  const { toast, readOnly } = usePaddock();
   const [busy, setBusy] = useState<string | null>(null);
   const c = st.gpu_check;
   if (!c) return null;
@@ -93,7 +93,7 @@ export function GpuCheckCard({ st }: { st: InstanceSnapshot }) {
       <ul className="gpucheck-fixes">
         {c.fixes.map((f) => (
           <li key={f.label}>
-            {f.action ? (
+            {f.action && !readOnly ? (
               <button className="btn sm" onClick={() => run(f)} disabled={!!busy}>{busy === f.action ? "Working…" : f.label}</button>
             ) : (
               <b>{f.label}</b>

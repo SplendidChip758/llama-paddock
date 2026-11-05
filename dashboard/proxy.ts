@@ -1,7 +1,23 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { SESSION_COOKIE, authEnabled, readSession, trustedProxies } from "./lib/auth";
+import { SESSION_COOKIE, authEnabled, readSession, trustedProxies, type Session } from "./lib/auth";
 
 const AUTH_PAGES = ["/login", "/change-password"];
+
+/** What any signed-in user may do to their own session and password. */
+const OWN_ACCOUNT = ["/api/auth/login", "/api/auth/logout", "/api/auth/password"];
+/** POST requests that only read, such as a model's details, which viewers need too. */
+const READ_ONLY_POSTS = [/^\/api\/instances\/[^/]+\/models\/show$/, /^\/api\/instances\/[^/]+\/gpu-check$/];
+
+/**
+ * Viewers see everything but change nothing. Checked here rather than in each route, so a new
+ * route is admin-only for writes unless it is listed above.
+ */
+function allowed(session: Session, method: string, pathname: string): boolean {
+  if (session.role === "admin") return true;
+  if (pathname === "/users" || pathname.startsWith("/api/users")) return false;
+  if (method === "GET" || method === "HEAD") return true;
+  return OWN_ACCOUNT.includes(pathname) || (method === "POST" && READ_ONLY_POSTS.some((re) => re.test(pathname)));
+}
 
 /**
  * Is a state-changing API request from this dashboard's own pages?
@@ -61,6 +77,11 @@ export function proxy(req: NextRequest) {
   if (session.mustChange && pathname !== "/change-password" && !pathname.startsWith("/api/auth/")) {
     if (isApi) return NextResponse.json({ detail: "password change required", code: "must_change" }, { status: 403 });
     return NextResponse.redirect(new URL("/change-password", req.url));
+  }
+
+  if (!allowed(session, req.method, pathname)) {
+    if (isApi) return NextResponse.json({ detail: "your account is read-only", code: "forbidden" }, { status: 403 });
+    return NextResponse.redirect(new URL("/", req.url));
   }
 
   return NextResponse.next();

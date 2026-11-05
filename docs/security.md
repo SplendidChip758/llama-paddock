@@ -4,7 +4,9 @@ What the dashboard and the agents trust, and how to expose them without handing 
 
 ## What a login can do
 
-A signed-in user can do everything the dashboard offers on every host: pull models from any registry, delete them, edit Ollama's environment and restart it. On a host with an agent, editing the environment and restarting Ollama comes close to running code on that host, which is why the agent only accepts the [variables Ollama reads](usage.md#environment). Treat the dashboard password like root on your Ollama hosts: use a long one, and don't reuse it.
+An **admin** can do everything the dashboard offers on every host: pull models from any registry, delete them, edit Ollama's environment and restart it. On a host with an agent, editing the environment and restarting Ollama comes close to running code on that host, which is why the agent only accepts the [variables Ollama reads](usage.md#environment). Treat an admin password like root on your Ollama hosts: use a long one, and don't reuse it.
+
+A **viewer** sees what an admin sees, including Ollama's environment, logs and the request log, but can't change anything. The dashboard enforces this on the server for every API request other than `GET`, not only by hiding buttons: a new endpoint is admin-only unless it is explicitly marked as read-only. Stored tokens, keys and passwords are never sent to the browser, whatever the role. Give people a viewer account unless they need to change things. See [Users and roles](configuration.md#users-and-roles).
 
 ## Exposing the dashboard
 

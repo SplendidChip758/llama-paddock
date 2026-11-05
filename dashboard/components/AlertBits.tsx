@@ -116,7 +116,7 @@ export function AlertLine({ a, host, actions }: { a: ActiveAlert; host: string; 
 
 /** "Silence host for…" on a host's page, for maintenance, or the silence in force with a way to end it. */
 export function HostSilence({ id, name }: { id: string; name: string }) {
-  const { alerts } = usePaddock();
+  const { alerts, readOnly } = usePaddock();
   const { busy, silence, end } = useSilences();
   const [current, setCurrent] = useState<AlertSilence | null>(null);
   useEffect(() => {
@@ -129,10 +129,11 @@ export function HostSilence({ id, name }: { id: string; name: string }) {
     return (
       <span className="row" style={{ gap: 6 }}>
         <span className="chip" title={current.note || undefined}>alerts silenced until {whenText(current.until!)}</span>
-        <button className="btn sm" disabled={busy} onClick={() => end(current.id, `Alerts on ${name} are no longer silenced`)}>End</button>
+        {!readOnly && <button className="btn sm" disabled={busy} onClick={() => end(current.id, `Alerts on ${name} are no longer silenced`)}>End</button>}
       </span>
     );
   }
+  if (readOnly) return null;
   return (
     <SilenceMenu label="Silence host for…" busy={busy}
       pick={(s) => silence({ instance: id, duration_s: s, note: "maintenance" }, `Silenced alerts on ${name}`)} />
