@@ -66,6 +66,8 @@
  * a prompt with keep_alive 0 loads, answers and unloads within the request, so no poll sees it loaded.
  * Pulling a name ending in "-cloud" or ":cloud" adds an Ollama cloud model: listed with
  * remote_host/remote_model, answering /api/generate, but never in /api/ps since it runs remotely.
+ * /api/generate and /api/chat stream a canned answer a word at a time, sim-1 fastest and each later
+ * host slower, and end with Ollama's timing stats (load, prompt and eval counts and durations).
  *   GET  /_sim/config.yaml              the same config.yaml as --write-config
  *
  * Request log: the simulated Ollama records each request it answers, as Ollama's log would (time,
@@ -252,6 +254,8 @@ function makeHost(n, o) {
     ollamaVersion: "0.12.6",
     agentVersion: repoAgentVersion(),
     pullSeconds: o.pullSeconds,
+    /** milliseconds per streamed token, so hosts compare differently side by side */
+    tokenMs: 20 + 10 * (n - 1),
     scenario: { ollama: "up", agent: "up", pull: "normal", create: "normal" },
     gpus: Array.from({ length: o.gpus[n - 1] }, (_, i) => ({
       index: i, uuid: `GPU-${hash(`${id}/${i}`).slice(0, 8)}-${hash(`${id}/${i}`).slice(8, 12)}-sim0-${hash(`${id}/${i}`).slice(12, 24)}`,
@@ -270,6 +274,8 @@ function makeHost(n, o) {
     requests: {},
     /** what Ollama's log would say about each request it answered: {t, status, duration_ms, client, method, path} */
     requestLog: [],
+    /** streamed answers that stopped early because the client hung up */
+    answersStopped: 0,
     restarts: 0,
     startedAt: Date.now(),
     pid: 1000 + n * 37,
@@ -478,13 +484,18 @@ async function create(h, body, res) {
   out.end();
 }
 
-async function generate(h, body, res) {
+const ANSWER = "This is a simulated response from llama-paddock's test host.";
+const ns = (ms) => Math.round(ms * 1e6);
+
+/** /api/generate and /api/chat: load the model if needed, then answer. `prompt` is the text to evaluate, if any. */
+async function answer(h, body, res, prompt, chat) {
   const m = needModel(h, body.model);
   const ka = keepAliveMs(body.keep_alive, h.env.OLLAMA_KEEP_ALIVE);
-  const base = { model: m.name, created_at: new Date().toISOString(), response: "", done: true };
+  const started = performance.now();
+  const base = { model: m.name, created_at: new Date().toISOString(), ...(chat ? { message: { role: "assistant", content: "" } } : { response: "" }), done: true };
   // a new load (or unload) replaces a runner that exited
   h.deadRunners.delete(m.name);
-  if (ka === 0 && !body.prompt) {
+  if (ka === 0 && !prompt) {
     h.loaded.delete(m.name);
     logLine(h, `unloaded ${m.name}`);
     return sendJson(res, 200, { ...base, done_reason: "unload" });
@@ -492,31 +503,50 @@ async function generate(h, body, res) {
   const cpuOnly = body.options?.num_gpu === 0 || /^num_gpu\s+"?0"?$/m.test(m.parameters ?? "");
   const ctx = Number(body.options?.num_ctx) || Number(/^num_ctx\s+"?(\d+)"?$/m.exec(m.parameters ?? "")?.[1]) ||
     Number(h.env.OLLAMA_CONTEXT_LENGTH) || 4096;
+  let loadMs = 0;
   // cloud models run remotely: Ollama forwards the request and loads nothing
   if (!m.remote_host && h.loaded.get(m.name)?.ctx !== ctx) {
     h.loaded.delete(m.name);
     await sleep(300);
+    loadMs = 300;
     if (cpuOnly || h.gpuLost || !h.gpus.length) logLine(h, "load_tensors: offloaded 0/29 layers to GPU");
     logLine(h, "llama runner started in 0.30 seconds");
     logLine(h, `loaded ${m.name}`);
   }
+  const words = ANSWER.split(/(?= )/);
+  const promptTokens = prompt ? prompt.split(/\s+/).filter(Boolean).length + 8 : 0;
+  const stats = (evalMs) => ({
+    total_duration: ns(performance.now() - started), load_duration: ns(loadMs),
+    prompt_eval_count: promptTokens, prompt_eval_duration: ns(promptTokens * 2),
+    eval_count: words.length, eval_duration: ns(evalMs),
+  });
+  const text = (t) => (chat ? { message: { role: "assistant", content: t } } : { response: t });
   if (ka === 0) {
     // answered, then unloaded at once: only the log shows the load
     h.loaded.delete(m.name);
     logLine(h, `unloaded ${m.name}`);
-    return sendJson(res, 200, { ...base, response: "This is a simulated response from llama-paddock's test host.", done_reason: "stop", eval_count: 12 });
+    return sendJson(res, 200, { ...base, ...text(ANSWER), done_reason: "stop", ...stats(words.length * h.tokenMs) });
   }
   if (!m.remote_host) h.loaded.set(m.name, { until: Date.now() + ka, ctx, cpuOnly });
-  if (!body.prompt) return sendJson(res, 200, { ...base, done_reason: "load" });
-  const text = "This is a simulated response from llama-paddock's test host.";
-  if (body.stream === false) return sendJson(res, 200, { ...base, response: text, done_reason: "stop", eval_count: 12 });
+  if (!prompt) return sendJson(res, 200, { ...base, done_reason: "load", total_duration: ns(performance.now() - started), load_duration: ns(loadMs) });
+  if (body.stream === false) return sendJson(res, 200, { ...base, ...text(ANSWER), done_reason: "stop", ...stats(words.length * h.tokenMs) });
   const out = ndjson(res);
-  for (const word of text.split(/(?= )/)) {
-    out.send({ model: m.name, created_at: new Date().toISOString(), response: word, done: false });
-    await sleep(30);
+  await sleep(promptTokens * 2);
+  const evalStart = performance.now();
+  for (const word of words) {
+    if (out.gone()) return void h.answersStopped++;
+    out.send({ model: m.name, created_at: new Date().toISOString(), ...text(word), done: false });
+    await sleep(h.tokenMs);
   }
-  out.send({ ...base, done_reason: "stop", eval_count: 12 });
+  out.send({ ...base, done_reason: "stop", ...stats(performance.now() - evalStart) });
   out.end();
+}
+
+const generate = (h, body, res) => answer(h, body, res, body.prompt ? String(body.prompt) : "", false);
+
+function chat(h, body, res) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  return answer(h, body, res, messages.map((x) => String(x?.content ?? "")).join(" "), true);
 }
 
 const ollamaRoutes = {
@@ -544,6 +574,7 @@ const ollamaRoutes = {
   "POST /api/pull": async (h, req, res) => pull(h, await readBody(req), res),
   "POST /api/create": async (h, req, res) => create(h, await readBody(req), res),
   "POST /api/generate": async (h, req, res) => generate(h, await readBody(req), res),
+  "POST /api/chat": async (h, req, res) => chat(h, await readBody(req), res),
   "DELETE /api/delete": async (h, req) => {
     const m = needModel(h, (await readBody(req)).model);
     h.models.delete(m.name);
@@ -1027,6 +1058,7 @@ function hostView(h, full = false) {
     pid: h.pid,
     dead_runners: [...h.deadRunners],
     requests: h.requests,
+    answers_stopped: h.answersStopped,
   };
 }
 

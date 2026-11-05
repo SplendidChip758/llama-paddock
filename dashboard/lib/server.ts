@@ -433,6 +433,49 @@ export async function ollama<T = any>(inst: Instance, method: string, path: stri
   return (text ? JSON.parse(text) : {}) as T;
 }
 
+/** POST to Ollama for a streamed answer; resolves once the response headers arrive. */
+export async function ollamaPost(inst: Instance, path: string, body: unknown, signal: AbortSignal): Promise<Response> {
+  let r: Response;
+  try {
+    r = await fetch(`${inst.ollama_url}${path}`, {
+      method: "POST",
+      headers: ollamaHeaders(inst, true),
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (e) {
+    if (signal.aborted) throw e;
+    throw new HttpError(502, `ollama unreachable: ${errText(e)}`);
+  }
+  const denied = ollamaAuthError(inst, r.status);
+  if (denied) throw new HttpError(502, denied);
+  if (!r.ok || !r.body) throw new HttpError(r.ok ? 502 : r.status, await upstreamError(r));
+  return r;
+}
+
+/** Ollama streams newline-delimited JSON objects. */
+export async function* ndjsonLines(r: Response): AsyncGenerator<any> {
+  const reader = r.body!.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line) yield JSON.parse(line);
+      }
+    }
+    if (buf.trim()) yield JSON.parse(buf);
+  } finally {
+    // a consumer that stops early (an error line, a cancelled chat) mustn't leave the upstream open
+    reader.cancel().catch(() => undefined);
+  }
+}
+
 /** The agent presented a key other than the pinned one, so something else may be answering at its address. */
 export class AgentKeyMismatch extends HttpError {
   constructor(public presented: string, expected: string) {
@@ -992,36 +1035,16 @@ export function startJob(kind: Job["kind"], inst: Instance, model: string, path:
 
 async function runJob(job: Job, inst: Instance) {
   try {
-    const r = await fetch(`${inst.ollama_url}${job.path}`, {
-      method: "POST",
-      headers: ollamaHeaders(inst, true),
-      body: JSON.stringify(job.body),
-      signal: job.abort.signal,
-    });
-    if (!r.ok || !r.body) throw new Error(ollamaAuthError(inst, r.status) ?? (await upstreamError(r)));
-
-    // Ollama streams newline-delimited JSON status objects.
-    const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buf = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += value;
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        const msg = JSON.parse(line);
-        if (msg.error) throw new Error(msg.error);
-        const statusChanged = !!msg.status && msg.status !== job.status;
-        if (msg.status) job.status = msg.status;
-        if (msg.total) {
-          job.total = msg.total;
-          job.completed = msg.completed ?? 0;
-        }
-        if (statusChanged || Date.now() - job.savedAt >= SAVE_PROGRESS_EVERY_MS) persistJob(job);
+    const r = await ollamaPost(inst, job.path, job.body, job.abort.signal);
+    for await (const msg of ndjsonLines(r)) {
+      if (msg.error) throw new Error(msg.error);
+      const statusChanged = !!msg.status && msg.status !== job.status;
+      if (msg.status) job.status = msg.status;
+      if (msg.total) {
+        job.total = msg.total;
+        job.completed = msg.completed ?? 0;
       }
+      if (statusChanged || Date.now() - job.savedAt >= SAVE_PROGRESS_EVERY_MS) persistJob(job);
     }
     job.state = "done";
     job.status = "success";

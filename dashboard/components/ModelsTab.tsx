@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ago, api, fmtBytes, instPath } from "@/lib/format";
 import type { InstanceSnapshot, TagModel } from "@/lib/types";
@@ -130,6 +131,7 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
                       <td className="faint">{ago(m.modified_at)}</td>
                       <td>
                         {!readOnly && <div className="actions">
+                          <Link className="btn sm" href={`/prompt?host=${encodeURIComponent(st.id)}&model=${encodeURIComponent(m.name)}`}>Prompt</Link>
                           <button className="btn sm" onClick={() => setEditing(m.name)}>Edit</button>
                           {loaded.has(m.name) ? (
                             <button className="btn sm" disabled={busy === m.name} onClick={() => act("unload", m.name)}>Unload</button>
