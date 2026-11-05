@@ -22,7 +22,7 @@ group named after it. Keep that format. -->
 
 ## Use
 
-- [Using the dashboard](usage.md): fleet overview, Monitor and History, Models, test prompts, the GPU/CPU split, Environment, Logs and jobs
+- [Using the dashboard](usage.md): fleet overview, Monitor and History, Models, test prompts, benchmarks, the GPU/CPU split, Environment, Logs and jobs
 - [GPU check](gpu-check.md): when Ollama falls back to the CPU while the GPU is there, why, and how to fix it
 - [Context and reloads](context-and-reloads.md): contexts cut short by clients, and models that load again and again
 - [Alerts](alerts.md): alert rules, durations, flapping and what happens when data is missing

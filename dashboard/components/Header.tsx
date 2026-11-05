@@ -39,6 +39,7 @@ export function Header({ version }: { version: string }) {
             );
           })}
         </nav>
+        <Link href="/benchmarks" className={`jobsbtn ${path === "/benchmarks" ? "active" : ""}`} title="Run and compare benchmarks">Benchmarks</Link>
         {!readOnly && <Link href="/prompt" className={`jobsbtn ${path === "/prompt" ? "active" : ""}`} title="Chat with a model and time the answer">Prompt</Link>}
         <Link href="/alerts" className={`jobsbtn ${path === "/alerts" ? "active" : ""}`}
           title={firing ? `${firing} alert${firing === 1 ? "" : "s"} firing` : "Alert rules"}>
