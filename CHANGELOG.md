@@ -1,3 +1,9 @@
+## [0.9.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.1...v0.9.0-dev.2) (2026-11-05)
+
+### Features
+
+* **dashboard:** add a test prompt page with tokens per second ([#127](https://github.com/SplendidChip758/llama-paddock/issues/127)) ([a2a5e73](https://github.com/SplendidChip758/llama-paddock/commit/a2a5e730c3285932fefd7221cae2dc85aa320f3f)), closes [#17](https://github.com/SplendidChip758/llama-paddock/issues/17)
+
 ## [0.9.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0...v0.9.0-dev.1) (2026-11-05)
 
 ### Features
