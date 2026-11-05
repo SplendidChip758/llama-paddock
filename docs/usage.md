@@ -61,6 +61,29 @@ Under the hood this calls Ollama's `POST /api/create` with `from` and `parameter
 
 A prompt loads the model like any other request, with the host's usual keep-alive, so it may unload another model that doesn't fit beside it. Running prompts needs an admin account.
 
+## Benchmarks
+
+**Benchmarks** in the header runs a fixed set of prompts against a model, several times, and keeps the results so you can compare hosts, models and quantizations, or one host over time. Pick a model, one or more hosts that have it (*All … with it* picks every host that has the model), the context, the number of repetitions and the model state, then *Run*. Each host's benchmark shows in the Jobs drawer while it runs, and hosts run at the same time.
+
+The prompt set has three prompts:
+
+| Prompt | Measures |
+|---|---|
+| Short prompt | A short question: time to first token and generation speed |
+| Long context | A generated inventory list of about 60% of the context (at most about 8,000 tokens) and a question about it: how fast the host reads a long prompt |
+| Long generation | A request to keep counting, cut off at 512 tokens: generation speed over a long answer |
+
+Every run sends the same options: the chosen context as `num_ctx`, temperature 0 and a fixed seed, so every host runs the model at the same size. Each prompt starts with a line unique to the run, because Ollama reuses the cached start of a prompt it has just read and would otherwise skip most of a repeated one.
+
+- **Warm** loads the model first (not timed), then times the answers: what a user of a busy host sees.
+- **Cold** unloads the model before every run, so each one includes loading it. The model file may still be in the host's disk cache, so this measures loading into memory, not reading from a cold disk.
+
+Each run records the figures of a [test prompt](#test-prompt), the model's VRAM and GPU/CPU split afterwards, and whether the model was loaded just before it. A run that found the model in the wrong state (for example, something else unloaded it during a warm benchmark) is shown but left out of the figures. The table shows the median of the runs; hover a figure for its range, and `±` is how much the runs varied.
+
+Tick results to compare them side by side. The best figure in each row (the highest rate or the shortest time) is in bold. Below the speeds are the conditions each ran under: model digest and quantization, prompt set, mode, context, Ollama, agent and dashboard versions, GPUs and driver, CPUs and RAM, the Ollama settings that change speed (flash attention, KV cache type, parallel requests and others) and any other models that were loaded. Rows that differ are highlighted, and a note warns when the model, quantization, prompt set, mode or context differ, since then the speeds don't measure the same thing. Each result also lists its warnings. *Show runs* lists every run.
+
+A benchmark keeps the host busy, and other requests to the host during it slow both down: run it when the host is otherwise idle. Results are saved in `paddock.db` until you delete them, also after the host is removed. A benchmark running when the dashboard restarts is marked interrupted and keeps its finished runs. Running a benchmark needs an admin account; viewers can see and compare the results. Without an agent on a host, its GPUs, driver and Ollama settings aren't recorded.
+
 ## GPU/CPU split
 
 Ollama keeps as much of a loaded model as fits in VRAM and puts the rest in system RAM, where the CPU runs it, usually far slower. The dashboard works out the split from Ollama's `/api/ps` (`size_vram` out of `size`, which includes the KV cache for the model's context) the same way on every page:
@@ -119,6 +142,6 @@ Metric history and job state are stored in `paddock.db` in the [data directory](
 
 Alert rules are checked against every poll; see [Alerts](alerts.md).
 
-Pulls and model creation run in the background and stay visible in the Jobs drawer across page refreshes. After a dashboard restart, running pulls resume if their host still exists. Running creates are marked interrupted; check the model list before trying again.
+Pulls and model creation run in the background and stay visible in the Jobs drawer across page refreshes. After a dashboard restart, running pulls resume if their host still exists. Running creates and benchmarks are marked interrupted; check the model list before trying a create again. A benchmark keeps the runs it finished.
 
 Removing a parameter in the model editor may not remove a value inherited from the base model. Set it explicitly to the value you want.

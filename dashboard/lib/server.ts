@@ -7,7 +7,7 @@ import {
   type Instance, type InstanceInput, type Settings,
 } from "./config";
 import {
-  deleteHistory, deleteJobs, loadJobs, maintainHistory, modelEvents, recordObservations, recordSamples, saveJob, type ObservedSpan,
+  deleteHistory, deleteJobs, interruptBenchmarks, loadJobs, maintainHistory, modelEvents, recordObservations, recordSamples, saveJob, type ObservedSpan,
 } from "./db";
 import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
 import { diagnoseGpu, isGpuLogLine, modelKey, ollamaRun, onCpu, readLog, type GpuEvidence } from "./gpucheck";
@@ -173,6 +173,11 @@ export function paddock(): Paddock {
       pollerStarted: false,
     };
     restoreJobs(g.__paddock);
+    try {
+      interruptBenchmarks();
+    } catch (e) {
+      console.error("[llama-paddock] marking interrupted benchmarks failed:", e);
+    }
     startNotifications((id) => g.__paddock?.instances.get(id)?.inst.name ?? id);
   }
   const p = g.__paddock;
@@ -972,7 +977,7 @@ async function readRunnerLog(st: InstanceState) {
   }
 }
 
-// ============================================================================ jobs (pull / create)
+// ============================================================================ jobs (pull / create / benchmark)
 export function jobInfo(j: Job): JobInfo {
   const { abort: _abort, path: _path, body: _body, savedAt: _savedAt, ...info } = j;
   return info;
@@ -1021,20 +1026,47 @@ export function listJobs(): JobInfo[] {
 }
 
 export function startJob(kind: Job["kind"], inst: Instance, model: string, path: string, body: unknown, detail = ""): JobInfo {
+  const job = addJob(kind, inst, model, path, body, detail);
+  void runJob(job, inst);
+  return jobInfo(job);
+}
+
+function addJob(kind: Job["kind"], inst: Instance, model: string, path: string, body: unknown, detail: string, id?: string): Job {
   const p = paddock();
   const job: Job = {
-    id: crypto.randomBytes(6).toString("hex"), kind, instance: inst.id, model, detail,
+    id: id ?? crypto.randomBytes(6).toString("hex"), kind, instance: inst.id, model, detail,
     status: "queued", state: "running", completed: 0, total: 0, error: null,
     started: Date.now() / 1000, finished: null, abort: new AbortController(), path, body, savedAt: 0,
   };
   p.jobs.set(job.id, job);
   persistJob(job);
-  void runJob(job, inst);
+  return job;
+}
+
+/** What a task reports as it goes: shown in the Jobs drawer like a pull's progress. */
+export type TaskProgress = (p: { status?: string; completed?: number; total?: number }) => void;
+
+/**
+ * A job that is more than one Ollama request, such as a benchmark. It shows in the Jobs drawer and
+ * can be cancelled there, which aborts `signal`. After a restart it is marked interrupted, like a create.
+ */
+export function startTask(
+  kind: Job["kind"], inst: Instance, model: string, detail: string, id: string,
+  work: (progress: TaskProgress, signal: AbortSignal) => Promise<void>,
+): JobInfo {
+  const job = addJob(kind, inst, model, "", null, detail, id);
+  const progress: TaskProgress = (x) => {
+    if (x.status !== undefined) job.status = x.status;
+    if (x.completed !== undefined) job.completed = x.completed;
+    if (x.total !== undefined) job.total = x.total;
+    persistJob(job);
+  };
+  void tracked(job, () => work(progress, job.abort.signal));
   return jobInfo(job);
 }
 
-async function runJob(job: Job, inst: Instance) {
-  try {
+function runJob(job: Job, inst: Instance) {
+  return tracked(job, async () => {
     const r = await ollamaPost(inst, job.path, job.body, job.abort.signal);
     for await (const msg of ndjsonLines(r)) {
       if (msg.error) throw new Error(msg.error);
@@ -1046,6 +1078,13 @@ async function runJob(job: Job, inst: Instance) {
       }
       if (statusChanged || Date.now() - job.savedAt >= SAVE_PROGRESS_EVERY_MS) persistJob(job);
     }
+  });
+}
+
+/** Run a job's work and record how it ended. */
+async function tracked(job: Job, work: () => Promise<void>) {
+  try {
+    await work();
     job.state = "done";
     job.status = "success";
   } catch (e) {

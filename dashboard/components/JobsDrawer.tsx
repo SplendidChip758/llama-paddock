@@ -23,7 +23,7 @@ export function JobLine({ j }: { j: JobInfo }) {
       </div>
       <div className="status">
         {j.error || j.status}
-        {j.total ? ` · ${fmtBytes(j.completed)} / ${fmtBytes(j.total)}` : ""}
+        {j.total ? (j.kind === "benchmark" ? ` · ${j.completed} / ${j.total} runs` : ` · ${fmtBytes(j.completed)} / ${fmtBytes(j.total)}`) : ""}
       </div>
       {j.detail && <div className="hint" style={{ marginBottom: 6 }}>{j.detail}</div>}
       <div className="bar">

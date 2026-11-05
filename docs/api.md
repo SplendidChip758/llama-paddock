@@ -237,6 +237,10 @@ A transition is `{id, t, rule, name, kind, instance, subject, state, value, deta
 | POST | `/api/instances/{id}/models/delete` | `{model}` |
 | POST | `/api/instances/{id}/models/copy` | `{source, destination}` |
 | POST | `/api/instances/{id}/chat` | `{model, messages, options?, keep_alive?, think?}` → the answer as newline-delimited JSON events; see [Test prompts](#test-prompts) |
+| GET | `/api/benchmarks` | `{benchmarks}`, newest first, without their runs. `?instance=<id>`, `?model=<name>`, `?limit=` 1–500 (default 100); see [Benchmarks](#benchmarks) |
+| POST | `/api/benchmarks` | `{model, instances, num_ctx?, repeat?, mode?, cases?}` → `{benchmarks}`, one per host, each started as a job |
+| GET | `/api/benchmarks/{bid}` | One benchmark with its `runs` |
+| DELETE | `/api/benchmarks/{bid}` | Cancels a running benchmark, keeping its finished runs, or deletes a finished one |
 | GET | `/api/jobs` | `{jobs}` containing job status and progress |
 | DELETE | `/api/jobs/{jid}` | Cancels a running job, or removes a finished job from the list |
 
@@ -255,6 +259,29 @@ Errors before the answer starts (an unknown model, an unreachable host, a bad bo
 | `{type: "error", detail}` | The answer failed partway; nothing follows |
 
 `stats` holds `ttft_ms` (from sending the request to the first token, timed by the dashboard, so it includes loading the model and reading the prompt), `wall_ms` (to the last line), Ollama's own `load_ms`, `prompt_tokens`, `prompt_ms`, `eval_ms`, `total_ms` and `tokens`, the rates `prompt_tps` and `tps` in tokens per second, and `done_reason` (`stop`, or `length` when `num_predict` cut it off). Ollama's figures are `null` if it left them out. Closing the connection stops the host generating. Viewers can't send prompts, since a prompt loads models.
+
+### Benchmarks
+
+`POST /api/benchmarks` runs the built-in prompt set against `model` on each host in `instances` (host IDs). The hosts run at the same time; a host already running a benchmark is refused with 409. Options:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `num_ctx` | `4096` | Context sent with every run, 512–262144 |
+| `repeat` | `3` | Runs of each prompt, 1–10 |
+| `mode` | `warm` | `warm` loads the model once and leaves that load out; `cold` unloads it before every run |
+| `cases` | all | Any of `short`, `long_context`, `long_generation` |
+
+Each benchmark is also a job (`kind: "benchmark"`, with `completed` and `total` counting runs), so it shows in the Jobs drawer and `DELETE /api/jobs/{jid}` cancels it too. A model the host doesn't have, or an Ollama cloud model, fails that host's benchmark with an `error`, not the request.
+
+A benchmark is `{id, batch, instance, instance_name, model, state, error, started, finished, spec, conditions, summary, warnings}`, plus `runs` from `GET /api/benchmarks/{bid}`. Benchmarks started together share a `batch`. `state` is `running`, `done`, `error` or `cancelled`; results are saved after every run, so a running benchmark's summary grows as it goes.
+
+- `spec`: `{set, cases, repeat, mode, num_ctx}`. `set` is the prompt set's version: results from different sets don't compare.
+- `conditions`: `digest`, `quantization`, `parameter_size`, `family`, `format`, `ollama_version`, `agent_version`, `dashboard_version`, `platform`, `context` (what Ollama loaded the model with), `env` (Ollama settings that change speed or memory, such as `OLLAMA_FLASH_ATTENTION` and `OLLAMA_KV_CACHE_TYPE`; unset ones are left out), `gpus` (`{name, mem_total_mib, driver}`), `cpu_count`, `mem_total` and `other_models` (loaded when it started). Anything the dashboard couldn't find out is `null`; `env`, `gpus`, `cpu_count` and `mem_total` need an agent.
+- `runs`: `{case, rep, t, state, stats, size, size_vram, split, context}`. `stats` is the same as a [test prompt](#test-prompts)'s. `state` is whether the model was loaded at the asked context just before the run (`warm`) or not (`cold`). `size`, `size_vram`, `split` and `context` come from `/api/ps` right after the run.
+- `summary`: per case, `{case, runs, excluded, tps, prompt_tps, ttft_ms, load_ms, prompt_tokens, tokens, size_vram, split}`. The four timings are `{median, min, max, cv}` over the runs whose `state` matches the mode, with `cv` the coefficient of variation in percent (`null` with one run). `excluded` counts the runs left out.
+- `warnings`: sentences on what makes the figures less comparable, such as other loaded models, a partial GPU/CPU split, runs that varied by more than 10%, or a model that changed during the runs.
+
+Results are kept until deleted: history retention doesn't remove them, and neither does removing the host. A benchmark running when the dashboard stops is marked `error` (`interrupted: the dashboard restarted`) and keeps its finished runs. Viewers can read results but not run or delete them.
 
 ## Environment, restart and logs
 

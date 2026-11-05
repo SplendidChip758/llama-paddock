@@ -458,7 +458,8 @@ export type JobState ="running" | "done" | "error" | "cancelled";
 
 export interface JobInfo {
   id: string;
-  kind: "pull" | "create";
+  /** benchmark: completed and total count runs, not bytes */
+  kind: "pull" | "create" | "benchmark";
   instance: string;
   model: string;
   detail: string;
@@ -517,6 +518,107 @@ export type PromptEvent =
   | { type: "token"; content: string; thinking?: string }
   | { type: "done"; stats: PromptStats }
   | { type: "error"; detail: string };
+
+// ============================================================================ benchmarks (#32)
+/** short: a short question · long_context: reading a long prompt · long_generation: writing a long answer */
+export type BenchCase = "short" | "long_context" | "long_generation";
+/** cold: the model is unloaded before every run, so each run includes loading it · warm: it is loaded first */
+export type BenchMode = "cold" | "warm";
+
+/** What was asked for. With the prompt set version, it is what makes two benchmarks comparable. */
+export interface BenchSpec {
+  /** version of the built-in prompt set; results from different sets don't compare */
+  set: string;
+  cases: BenchCase[];
+  repeat: number;
+  mode: BenchMode;
+  /** context sent as num_ctx with every run, so every host runs the model at the same size */
+  num_ctx: number;
+}
+
+/** One timed answer. */
+export interface BenchRun {
+  case: BenchCase;
+  /** 1-based repetition */
+  rep: number;
+  t: number;
+  /** whether the model was loaded at this context just before the run, as /api/ps showed it */
+  state: BenchMode;
+  stats: PromptStats;
+  /** the model's entry in /api/ps right after the run; null when it wasn't listed */
+  size: number | null;
+  size_vram: number | null;
+  split: ModelSplit | null;
+  context: number | null;
+}
+
+/** The host and model a benchmark ran on. null: not known, e.g. no agent to ask. */
+export interface BenchConditions {
+  digest: string | null;
+  quantization: string | null;
+  parameter_size: string | null;
+  family: string | null;
+  format: string | null;
+  ollama_version: string | null;
+  agent_version: string | null;
+  dashboard_version: string;
+  platform: Platform | null;
+  /** the context Ollama loaded the model with, from /api/ps */
+  context: number | null;
+  /** Ollama settings that change speed or memory use; unset ones are left out. null without an agent */
+  env: Record<string, string> | null;
+  gpus: { name: string; mem_total_mib: number | null; driver: string }[] | null;
+  cpu_count: number | null;
+  mem_total: number | null;
+  /** other models loaded when it started: they share VRAM with the benchmarked one */
+  other_models: string[];
+}
+
+export interface BenchStat {
+  median: number;
+  min: number;
+  max: number;
+  /** coefficient of variation in percent (standard deviation / mean); null with fewer than two runs */
+  cv: number | null;
+}
+
+/** One case over all of its runs in the benchmark's mode. */
+export interface BenchCaseSummary {
+  case: BenchCase;
+  runs: number;
+  /** runs left out because the model wasn't in the state the mode asks for (e.g. something unloaded it) */
+  excluded: number;
+  tps: BenchStat | null;
+  prompt_tps: BenchStat | null;
+  ttft_ms: BenchStat | null;
+  load_ms: BenchStat | null;
+  prompt_tokens: number | null;
+  tokens: number | null;
+  /** the most VRAM the model used, and its split in the last run */
+  size_vram: number | null;
+  split: ModelSplit | null;
+}
+
+export interface BenchmarkInfo {
+  id: string;
+  /** benchmarks started together on several hosts share a batch */
+  batch: string;
+  instance: string;
+  /** the host's name when it ran, kept after the host is renamed or removed */
+  instance_name: string;
+  model: string;
+  state: JobState;
+  error: string | null;
+  started: number;
+  finished: number | null;
+  spec: BenchSpec;
+  conditions: BenchConditions | null;
+  summary: BenchCaseSummary[];
+  /** things that make the figures less comparable */
+  warnings: string[];
+  /** only in GET /api/benchmarks/{bid} */
+  runs?: BenchRun[];
+}
 
 export interface EnvState {
   platform?: Platform;
