@@ -7,7 +7,7 @@ Progress is tracked in [GitHub milestones](https://github.com/SplendidChip758/ll
 | | Milestone | Theme | Version |
 |---|---|---|---|
 | M1 | [Foundations](#m1-foundations) | Reliable history, secure connections, automated checks, Grafana | 0.x |
-| M2 | [Model workbench](#m2-model-workbench) | Find, size, create and benchmark models | 0.x / 1.x |
+| M2 | [Model workbench](#m2-model-workbench) | Find, size, create and benchmark models | 0.x |
 | M3 | [Alerts & diagnostics](#m3-alerts--diagnostics) | Find out when something breaks, and why | core 0.x; extensions 1.x |
 | M4 | [Access & displays](#m4-access--displays) | Permissions first, then more screens and themes | 0.x / 1.x |
 | M5 | [Updates](#m5-updates--10) | Tested upgrades and recovery; optional Ollama updates | core ends with **1.0** |
@@ -24,7 +24,7 @@ Versions are cut by semantic-release from commit messages, so a milestone usuall
 
 - **0.x (now).** Anything may change. Breaking changes only bump the minor version.
 - **1.0** follows the M5 core and the release checklist below. It promises that supported stable upgrades within 1.x preserve configuration, data and API compatibility without hand-editing files or repairing migrations. Starting an update, running the documented Docker update command, or approving an update is still a normal operator action.
-- **Milestone completion and 1.0 readiness are separate.** M2's advanced workbench, M4's wall display/PWA/custom themes, and M5's Ollama updater can finish after 1.0. Their full milestone scope remains below; none is a release blocker.
+- **Milestone completion and 1.0 readiness are separate.** M4's wall display/PWA/custom themes and M5's Ollama updater can finish after 1.0. Their full milestone scope remains below; neither is a release blocker. M2 is the exception: the whole model workbench ships before 1.0.
 - **After 1.0**, new features are minor releases, however big they are. Platforms (M6), the gateway (M7) and fleet operations (M8) are additions, so they ship as 1.x. They don't depend on each other, so their numbers aren't a strict order: work on them can overlap.
 - **The major version goes up (2.0, 3.0, …)** when an upgrade breaks the supported compatibility contract, for example:
   - the dashboard can no longer talk to agents from the previous major, and they can't update themselves
@@ -35,15 +35,16 @@ Versions are cut by semantic-release from commit messages, so a milestone usuall
 
 ### Delivery order
 
-Milestone numbers group related work; they are not a strict queue. Finish M1, including the simulator and the data needed for diagnostics, then prioritize M3 alerts and GPU/context diagnostics. Bring forward M2's split display and basic prompt/benchmark comparison where useful. Complete M4's users, scoped tokens, audit log and core accessibility before M5's privileged update controls.
+Milestone numbers group related work; they are not a strict queue. Finish M1, including the simulator and the data needed for diagnostics, then prioritize M3 alerts and GPU/context diagnostics. Complete M4's users, scoped tokens, audit log and core accessibility before M5's privileged update controls. The full M2 workbench is also required for 1.0. It doesn't depend on M4 or M5, so it can be built alongside them.
 
-After the 1.0 checklist passes, fleet actions and settings profiles (M8) can ship independently of new platforms (M6) and the gateway (M7). Library browsing, advanced fit filters, display customization and gateway optimization should not hold up dependable monitoring or recovery.
+After the 1.0 checklist passes, fleet actions and settings profiles (M8) can ship independently of new platforms (M6) and the gateway (M7). Display customization and gateway optimization should not hold up dependable monitoring or recovery.
 
 ### 1.0 release checklist
 
-This is the release gate; [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) tracks its implementation and verification. A milestone's full **done when** line is not an extra 1.0 gate.
+This is the release gate; [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) tracks its implementation and verification. A milestone's full **done when** line is not an extra 1.0 gate, except where an item below names it.
 
 - M1's done-when checks pass, including verified connections and simulator regression checks. History and observed availability/model events survive restarts; missing observations remain unknown, and persistence failures are visible.
+- M2's done-when checks pass: a model can be found in the library and created, a reproducible benchmark compares two hosts, and fit estimates state their assumptions and confidence. Unknown estimates and remote cloud models are clearly identified.
 - Core M3 alerts and GPU/context diagnostics have reproducible simulator checks, including firing, resolution, flapping and observation gaps.
 - M4 users, scoped API tokens and audit records work; permissions are enforced on the server, viewer/display credentials cannot mutate state, and existing login data migrates. Core controls work with a keyboard and expose accessible names.
 - The agent protocol has a documented compatibility range independent of dashboard/agent release numbers. CI covers supported older agents, incompatible agents, and upgrade order.
@@ -69,7 +70,7 @@ Several later features need these: alerts and benchmarks need stored data, and t
 
 ## M2: Model workbench
 
-Everything about choosing and tuning a model for your hardware. Ship split visibility and a basic prompt/benchmark comparison first. The full workbench can finish in 1.x; library browsing, uploads and fit filters do not gate 1.0.
+Everything about choosing and tuning a model for your hardware. Ship split visibility and a basic prompt/benchmark comparison first. The whole workbench, including library browsing, uploads and fit filters, is required for 1.0.
 
 - **GPU/CPU split everywhere.** The Monitor tab already shows the split for each loaded model. Show it on the fleet overview and in the Models tab too, and flag any model that isn't fully on the GPU, with a hint on what to change. Ollama's cloud models get their own badge, since prompts sent to them leave your network.
 - **Create a new model from scratch.** A **New model** button instead of only Edit or Copy. The base can be a library model (pulled if missing), a Hugging Face GGUF or an uploaded GGUF. Set parameters, system prompt and template, or start from presets.
@@ -79,7 +80,7 @@ Everything about choosing and tuning a model for your hardware. Ship split visib
 - **Benchmarks.** Run a standard prompt set and save prompt/generation tok/s, time to first token, load time, VRAM and split. Record model digest/quantization, context, parallelism, cache settings, hardware, Ollama/driver versions and cold versus warm state. Use repeated runs and show variation so comparisons across hosts and over time are meaningful; benchmarks are opt-in workloads.
 - **"Fits on this GPU" filter.** Use the estimates and their confidence at the selected host/context/concurrency. Keep models with insufficient metadata identifiable rather than presenting a guaranteed fit; show measured speed only with the benchmark conditions.
 
-**Done when:** you can find and create a model, compare a reproducible benchmark on two hosts, and assess fit with explicit assumptions and confidence. Unknown estimates and remote cloud models are clearly identified. This full scope may complete after 1.0.
+**Done when:** you can find and create a model, compare a reproducible benchmark on two hosts, and assess fit with explicit assumptions and confidence. Unknown estimates and remote cloud models are clearly identified. These checks are part of the 1.0 checklist.
 
 ## M3: Alerts & diagnostics
 
@@ -117,7 +118,7 @@ The core is safe upgrades and recovery on supported installations. The 1.0 check
 - **Dashboard updates.** Check for a compatible newer release on the install's channel and show release notes. Installer installs use an admin-only, narrowly scoped privileged updater, a consistent full backup and post-update health checks. Docker installs show the image-update command; test that path and document its backup/restore steps. Do not promise one-click updates for unsupported installation methods.
 - **Backup and restore.** Provide an encrypted configuration export for moving hosts, credentials, settings and users to a new install. Separately take a consistent full pre-update backup, including the database/history and required config/auth files, with schema/application versions. A config-only export is not an update rollback. Test restoration with the matching application version and provide a CLI recovery path when the UI is unavailable.
 - **Ollama updates.** Optional after the 1.0 core: show versions, support pinning, stage updates and offer rollback to the recorded previous version after failed health/GPU checks. State supported install/runtime modes explicitly; Docker and externally managed installs show instructions until a tested update adapter exists.
-- **Prepare 1.0.** Verify the release checklist above and record the results in [#34](https://github.com/SplendidChip758/llama-paddock/issues/34), then make the deliberate semantic-release change. Optional workbench/display features and Ollama updates are not blockers.
+- **Prepare 1.0.** Verify the release checklist above and record the results in [#34](https://github.com/SplendidChip758/llama-paddock/issues/34), then make the deliberate semantic-release change. Optional display features and Ollama updates are not blockers.
 
 **Done when:** the core agent/dashboard upgrade and recovery paths pass the 1.0 checklist, including the documented Docker command path and restoration to a fresh install. Then 1.0 is tagged. The optional Ollama updater completes separately when its supported platforms pass update, pinning and rollback checks.
 
