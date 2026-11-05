@@ -68,6 +68,7 @@ function UserMenu({ username, role }: { username: string; role?: string | null }
       </summary>
       <div className="menu">
         {role === "admin" && <Link href="/users">Users</Link>}
+        <Link href="/tokens">API tokens</Link>
         <Link href="/change-password">Change password</Link>
         <button onClick={signOut}>Sign out</button>
       </div>
