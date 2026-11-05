@@ -98,7 +98,7 @@ Small fixes and docs don't need an issue.
 
 ### Choosing what to work on
 
-Milestone numbers aren't a queue. Follow ROADMAP.md's **Delivery order**: finish M1, then M3 alerts and diagnostics, then the M4 core (users, scoped tokens, audit log, accessibility) before M5's update controls. [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) holds the 1.0 release checklist. Work that the checklist names comes before items marked as not blocking 1.0 (M2's advanced workbench, M4's wall display, PWA and themes, M5's Ollama updater, M6 to M8).
+Milestone numbers aren't a queue. Follow ROADMAP.md's **Delivery order**: finish M1, then M3 alerts and diagnostics, then the M4 core (users, scoped tokens, audit log, accessibility) before M5's update controls. The whole M2 workbench is also required for 1.0 and can be built alongside. [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) holds the 1.0 release checklist. Work that the checklist names comes before items marked as not blocking 1.0 (M4's wall display, PWA and themes, M5's Ollama updater, M6 to M8).
 
 ## Code conventions
 
