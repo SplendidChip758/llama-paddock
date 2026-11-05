@@ -1,3 +1,10 @@
+## [0.8.0-dev.11](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.10...v0.8.0-dev.11) (2026-11-05)
+
+### Bug Fixes
+
+* **dashboard:** remove the scrollbar beside the host tabs ([#121](https://github.com/SplendidChip758/llama-paddock/issues/121)) ([eed2e3c](https://github.com/SplendidChip758/llama-paddock/commit/eed2e3c89f2c0f771cf0e273779e7b9d441bb263))
+* **install:** install the newest prerelease on the dev channel ([#120](https://github.com/SplendidChip758/llama-paddock/issues/120)) ([e001b88](https://github.com/SplendidChip758/llama-paddock/commit/e001b88d2a1a35f060a9b671c730eaafbe308558))
+
 ## [0.8.0-dev.10](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.9...v0.8.0-dev.10) (2026-11-04)
 
 ### Features
