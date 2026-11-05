@@ -1,3 +1,9 @@
+## [0.9.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.2...v0.9.0-dev.3) (2026-11-05)
+
+### Features
+
+* **dashboard:** add scoped API tokens for scripts and integrations ([#128](https://github.com/SplendidChip758/llama-paddock/issues/128)) ([88ba0ce](https://github.com/SplendidChip758/llama-paddock/commit/88ba0ce4ac0b0d7d66992a2d50fd6667c78d0872)), closes [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) [#11](https://github.com/SplendidChip758/llama-paddock/issues/11) [#26](https://github.com/SplendidChip758/llama-paddock/issues/26) [#84](https://github.com/SplendidChip758/llama-paddock/issues/84)
+
 ## [0.9.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.1...v0.9.0-dev.2) (2026-11-05)
 
 ### Features
