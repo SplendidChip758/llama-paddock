@@ -566,7 +566,12 @@ const ollamaRoutes = {
       template: m.template,
       ...(m.system ? { system: m.system } : {}),
       details: m.details,
-      model_info: { "general.architecture": m.arch, "general.parameter_count": m.params, [`${m.arch}.context_length`]: m.ctx },
+      // the shape behind the KV cache the simulator charges: 32 layers × 8 KV heads × (128 + 128) × 2 bytes = 128 KiB per token
+      model_info: {
+        "general.architecture": m.arch, "general.parameter_count": m.params, [`${m.arch}.context_length`]: m.ctx,
+        [`${m.arch}.block_count`]: 32, [`${m.arch}.embedding_length`]: 4096, [`${m.arch}.attention.head_count`]: 32,
+        [`${m.arch}.attention.head_count_kv`]: 8, [`${m.arch}.vocab_size`]: 128256,
+      },
       capabilities: m.capabilities,
       modified_at: m.modified_at,
     };

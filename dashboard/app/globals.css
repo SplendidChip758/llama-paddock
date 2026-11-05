@@ -388,3 +388,9 @@ tr.selected td { background: var(--bg2); }
 .bench-compare tr.bench-group th { text-align: left; padding-top: 14px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .bench-compare tr.bench-differs td { background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .bench-warnings { margin: 0; padding-left: 16px; font-size: 12.5px; color: var(--muted); max-width: 38ch; }
+.fitpanel .hint { margin-top: 4px; }
+.fit-assumptions { margin: 6px 0 0; padding-left: 20px; font-size: 13px; color: var(--muted); }
+.fit-assumptions li + li { margin-top: 4px; }
+.fit-hosts { width: 100%; margin-top: 6px; font-size: 13px; border-collapse: collapse; }
+.fit-hosts td { padding: 4px 8px 4px 0; vertical-align: top; }
+.fit-hosts td:nth-child(2) { white-space: nowrap; }

@@ -7,7 +7,7 @@ import {
   type Instance, type InstanceInput, type Settings,
 } from "./config";
 import {
-  deleteHistory, deleteJobs, interruptBenchmarks, loadJobs, maintainHistory, modelEvents, recordObservations, recordSamples, saveJob, trimAudit,
+  deleteHistory, deleteJobs, interruptBenchmarks, loadJobs, maintainHistory, modelEvents, recordModelSizes, recordObservations, recordSamples, saveJob, trimAudit,
   type ObservedSpan,
 } from "./db";
 import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
@@ -16,12 +16,13 @@ import { HttpError } from "./http-error";
 import {
   RELOAD_WINDOW_S, contextCheck, loadStats, reloadChurn, unseenLoads, type LoadStats, type ModelInfo,
 } from "./modelcheck";
+import { fitEnv, settingsKey } from "./fit";
 import { nativeContext, parseParameters } from "./params";
 import { startNotifications } from "./notify";
 import { forgetRequests, syncRequests } from "./requests";
 import { isCloudModel, withSplit } from "./split";
 import type {
-  AgentGpuCheck, AgentStats, EnvState, GpuCheck, GpuFixAction, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, LoadedModel, PsModel,
+  AgentGpuCheck, AgentStats, EnvState, FitHost, FitMeasurement, GpuCheck, GpuFixAction, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, LoadedModel, PsModel,
   ReloadChurn,
 } from "./types";
 
@@ -96,6 +97,8 @@ class InstanceState {
   runner_log: { t: number; starts: number[] } | null = null;
   runner_log_reading = false;
   runner_log_next = 0;
+  /** the size last recorded for each model, context and settings; see recordSizes() */
+  sizes_recorded = new Map<string, number>();
 
   constructor(public inst: Instance) {}
 
@@ -767,6 +770,11 @@ async function pollLoop(p: Paddock) {
     const gapAfter = 3 * p.settings.poll_interval + 30;
     const changes = observed.map((st) => observe(st, gapAfter));
     observed.forEach((st, i) => trackModels(st, changes[i].events));
+    try {
+      recordModelSizes(observed.flatMap(newSizes));
+    } catch (e) {
+      console.error("[llama-paddock] saving model sizes failed:", e);
+    }
     for (const st of observed) {
       if (wantsGpuEvidence(st)) void refreshGpuEvidence(st);
       refreshModelState(st, p.settings.poll_interval);
@@ -981,6 +989,51 @@ async function readRunnerLog(st: InstanceState) {
     st.runner_log = null;
     if (e instanceof HttpError && e.status === 404) st.runner_log_next = Date.now() + RUNNER_LOG_UNSUPPORTED_RETRY_MS;
   }
+}
+
+// ============================================================================ fit estimates
+/**
+ * Loaded models whose size at this context and these settings hasn't been recorded yet, as fit
+ * estimates calibrate against them. Waits for an agent's environment, which decides the settings.
+ */
+function newSizes(st: InstanceState): (FitMeasurement & { digest: string })[] {
+  if (!st.ollama_ok || (st.inst.agent_url && !st.ollama_env)) return [];
+  const settings = settingsKey(fitEnv(st.env()));
+  const out: (FitMeasurement & { digest: string })[] = [];
+  for (const m of st.ps) {
+    const ctx = m.context_length;
+    if (!m.digest || !ctx || !(m.size > 0) || typeof m.size_vram !== "number" || isCloudModel(m)) continue;
+    const key = `${m.digest}|${ctx}|${settings}`;
+    if (st.sizes_recorded.get(key) === m.size) continue;
+    st.sizes_recorded.set(key, m.size);
+    out.push({ instance: st.inst.id, digest: m.digest, context: ctx, settings, size: m.size, size_vram: m.size_vram, t: st.updated! });
+  }
+  return out;
+}
+
+/** A host as fit estimates see it: GPUs, RAM, Ollama's settings and the other loaded models. */
+export function fitHost(st: InstanceState, digest: string | null): FitHost {
+  const stats = st.agent_ok ? st.stats : null;
+  let gpus: FitHost["gpus"] = null;
+  if (stats) {
+    const other = new Map<string, number>();
+    for (const p of stats.nvidia.processes ?? []) {
+      if (/ollama/i.test(p.name) || !p.mem_mib) continue;
+      other.set(p.gpu_uuid, (other.get(p.gpu_uuid) ?? 0) + p.mem_mib * 1024 * 1024);
+    }
+    gpus = stats.nvidia.available
+      ? stats.nvidia.gpus.filter((g) => g.mem_total_mib).map((g) => ({ index: g.index, name: g.name, total: g.mem_total_mib! * 1024 * 1024, other: other.get(g.uuid) ?? 0 }))
+      : [];
+  }
+  const mem = stats?.system.mem;
+  return {
+    id: st.inst.id,
+    name: st.inst.name,
+    gpus,
+    ram: mem ? { total: mem.total, available: Math.min(mem.total, mem.available + (stats!.system.ollama_process?.rss_total ?? 0)) } : null,
+    env: fitEnv(st.env()),
+    loaded: st.ps.filter((m) => m.digest !== digest && !isCloudModel(m)).map((m) => ({ name: m.name, size: m.size, size_vram: m.size_vram ?? 0 })),
+  };
 }
 
 // ============================================================================ jobs (pull / create / benchmark)

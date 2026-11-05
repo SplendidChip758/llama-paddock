@@ -12,7 +12,7 @@ const OWN_ACCOUNT = ["/api/auth/login", "/api/auth/logout", "/api/auth/password"
 /** /api/tokens checks ownership itself: a viewer manages their own tokens, an admin anyone's. */
 const OWN_TOKENS = /^\/api\/tokens(\/|$)/;
 /** POST requests that only read, such as a model's details, which viewers need too. */
-const READ_ONLY_POSTS = [/^\/api\/instances\/[^/]+\/models\/show$/, /^\/api\/instances\/[^/]+\/gpu-check$/];
+const READ_ONLY_POSTS = [/^\/api\/instances\/[^/]+\/models\/(show|fit)$/, /^\/api\/instances\/[^/]+\/gpu-check$/];
 
 /** Pages and APIs that viewers can't even read: accounts, and the audit log of who did what. */
 const ADMIN_ONLY = /^\/(api\/)?(users|audit)(\/|$)/;
