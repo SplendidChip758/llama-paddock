@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
-import { requireSession } from "@/lib/auth";
+import { requireSession, usernamesById } from "@/lib/auth";
+import { audit } from "@/lib/audit";
 import { deleteCredential, getCredential } from "@/lib/credentials";
 import { HttpError, handle, json } from "@/lib/server";
 
@@ -12,5 +13,7 @@ export const DELETE = handle(async (req: NextRequest, ctx: RouteContext<"/api/to
   const cred = getCredential(id);
   if (!cred || (cred.user !== session.id && session.role !== "admin")) throw new HttpError(404, "no such token");
   deleteCredential(id);
+  const owner = cred.user === session.id ? "" : `, owned by ${usernamesById().get(cred.user) ?? "a removed user"}`;
+  audit(req, { action: "token.revoke", target: cred.name, detail: `${cred.kind} token ${cred.id}${owner}` });
   return json({ ok: true });
 });

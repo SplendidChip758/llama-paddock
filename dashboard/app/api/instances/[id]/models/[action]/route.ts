@@ -2,6 +2,8 @@ import { HttpError, getInstance, handle, json, listJobs, ollama, readBody, start
 import { MODEL_NAME_RE, coerceParam, nativeContext, parseParameters } from "@/lib/params";
 import type { ParamValue, ShowResult } from "@/lib/types";
 import type { Instance } from "@/lib/config";
+import { audit } from "@/lib/audit";
+import type { AuditAction } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -83,10 +85,31 @@ const actions: Record<string, (inst: Instance, body: Body) => Promise<unknown>> 
   },
 };
 
+/** What each changing action records: the model it acted on, and a detail without prompts. */
+const audited: Record<string, (b: Body) => { target: unknown; detail?: string }> = {
+  pull: (b) => ({ target: b.model }),
+  create: (b) => ({
+    target: b.model,
+    detail: [
+      `from ${String(b.from)}`,
+      Object.keys((b.parameters ?? {}) as object).length ? `parameters ${Object.keys(b.parameters as object).join(", ")}` : "",
+      typeof b.system === "string" ? "system prompt set" : "",
+    ].filter(Boolean).join("; "),
+  }),
+  copy: (b) => ({ target: b.destination, detail: `from ${String(b.source)}` }),
+  delete: (b) => ({ target: b.model }),
+  load: (b) => ({ target: b.model, detail: b.keep_alive !== undefined ? `keep_alive ${JSON.stringify(b.keep_alive)}` : "" }),
+  unload: (b) => ({ target: b.model }),
+};
+
 export const POST = handle(async (req: Request, ctx: RouteContext<"/api/instances/[id]/models/[action]">) => {
   const { id, action } = await ctx.params;
   const inst = getInstance(id);
   const fn = actions[action];
   if (!fn) throw new HttpError(404, `unknown action ${action}`);
-  return json(await fn(inst, await readBody<Body>(req)));
+  const body = await readBody<Body>(req);
+  const result = await fn(inst, body);
+  const what = audited[action]?.(body);
+  if (what) audit(req, { action: `model.${action}` as AuditAction, instance: id, target: String(what.target), detail: what.detail });
+  return json(result);
 });

@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { requireSession, usernamesById } from "@/lib/auth";
 import { createCredential, listCredentials, tokenInfo, type Credential } from "@/lib/credentials";
+import { audit } from "@/lib/audit";
 import { HttpError, handle, json, readBody } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -27,5 +28,7 @@ export const POST = handle(async (req: NextRequest) => {
     kind: kind as Credential["kind"], user: session.id, role: session.role,
     name: body.name, scopes: body.scopes ?? ["api:read"], expiresDays: body.expires_days,
   });
+  const exp = credential.expires ? `, expires ${new Date(credential.expires * 1000).toISOString().slice(0, 10)}` : ", no expiry";
+  audit(req, { action: "token.create", target: credential.name, detail: `${credential.kind} token ${credential.id}, ${credential.scopes.join(" ")}${exp}` });
   return json({ ...tokenInfo(credential), token }, 201);
 });

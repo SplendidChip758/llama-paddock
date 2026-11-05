@@ -16,7 +16,7 @@ group named after it. Keep that format. -->
 ## Configure
 
 - [Configuration and login](configuration.md): `config.yaml`, environment variables, login, users and roles, and the data directory
-- [Security](security.md): what admins and viewers can do, API tokens, exposing the dashboard, lockout, cross-site requests and agent tokens
+- [Security](security.md): what admins and viewers can do, API tokens, the audit log, exposing the dashboard, lockout, cross-site requests and agent tokens
   - [Reverse proxies](proxy.md): the dashboard behind a proxy, and Ollama behind a proxy that checks a key
 - [Prometheus and Grafana](prometheus.md): the `/metrics` endpoint, its scrape token, the metric list and a Grafana dashboard
 
@@ -30,7 +30,7 @@ group named after it. Keep that format. -->
 
 ## Reference
 
-- [API](api.md): the dashboard's JSON API, API tokens for scripts and Home Assistant, and the agent API
+- [API](api.md): the dashboard's JSON API, API tokens for scripts and Home Assistant, the audit log, and the agent API
 - [Architecture](architecture.md): components, ports and source layout
 
 For contributors: [contributing](../CONTRIBUTING.md), the [roadmap](../ROADMAP.md), [agent instructions](../AGENTS.md), the [security policy](../SECURITY.md) and the [Code of Conduct](../CODE_OF_CONDUCT.md).

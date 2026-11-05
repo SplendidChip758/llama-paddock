@@ -6,7 +6,21 @@ What the dashboard and the agents trust, and how to expose them without handing 
 
 An **admin** can do everything the dashboard offers on every host: pull models from any registry, delete them, edit Ollama's environment and restart it. On a host with an agent, editing the environment and restarting Ollama comes close to running code on that host, which is why the agent only accepts the [variables Ollama reads](usage.md#environment). Treat an admin password like root on your Ollama hosts: use a long one, and don't reuse it.
 
-A **viewer** sees what an admin sees, including Ollama's environment, logs and the request log, but can't change anything. The dashboard enforces this on the server for every API request other than `GET`, not only by hiding buttons: a new endpoint is admin-only unless it is explicitly marked as read-only. Stored tokens, keys and passwords are never sent to the browser, whatever the role. Give people a viewer account unless they need to change things. See [Users and roles](configuration.md#users-and-roles).
+A **viewer** sees what an admin sees, including Ollama's environment, logs and the request log, but can't change anything, manage users or read the [audit log](#audit-log). The dashboard enforces this on the server for every API request other than `GET`, not only by hiding buttons: a new endpoint is admin-only unless it is explicitly marked as read-only. Stored tokens, keys and passwords are never sent to the browser, whatever the role. Give people a viewer account unless they need to change things. See [Users and roles](configuration.md#users-and-roles).
+
+## Audit log
+
+Admins can see who changed what under **Audit log** in the account menu, filtered by user, host and action, or read it from [`/api/audit`](api.md#audit-log). Viewers can't see it, with a session or a token. It records:
+
+- sign-ins and failed sign-ins, password changes, and changes to users and API tokens
+- hosts added, edited or removed, agent keys accepted, and agents switched to HTTPS
+- Ollama restarts, GPU fixes and environment changes
+- model pulls, creates, copies, deletes, loads and unloads, and cancelled jobs
+- alert rule, channel and silence changes, benchmarks started, cancelled or deleted, and request client names
+
+Each record has the time, the user, the API token if the change came with one, the client address, the host, what was acted on and a short detail. The detail says **which** environment variables changed, never their values, and that a token, key or password changed, never what to. Prompts are never recorded, so the test prompt isn't logged. A failed sign-in names the account only when it exists: the text typed as a username might be a password. Saving a list of rules, channels or client names that didn't change records nothing.
+
+With `PADDOCK_AUTH=off` changes are still recorded, with the client address but no user. Records are kept for `audit_retention_days` ([settings](configuration.md#dashboard-settings), default 365) in `paddock.db`. Anyone who can write to the data directory can change them, so keep a copy elsewhere if the log has to stand up as evidence.
 
 ## Exposing the dashboard
 

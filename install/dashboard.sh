@@ -617,6 +617,7 @@ write_config() {
 poll_interval: 3        # seconds between polls of every host
 history_points: 400     # recent samples shown in sparklines
 history_retention_days: 30  # metric history kept in /var/lib/llama-paddock
+audit_retention_days: 365   # audit log of who changed what
 
 # Prometheus /metrics is off until a scrape token is set: put
 # PADDOCK_METRICS_TOKEN=<random> in llama-paddock.env, or see docs/prometheus.md.

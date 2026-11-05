@@ -14,13 +14,16 @@ const OWN_TOKENS = /^\/api\/tokens(\/|$)/;
 /** POST requests that only read, such as a model's details, which viewers need too. */
 const READ_ONLY_POSTS = [/^\/api\/instances\/[^/]+\/models\/show$/, /^\/api\/instances\/[^/]+\/gpu-check$/];
 
+/** Pages and APIs that viewers can't even read: accounts, and the audit log of who did what. */
+const ADMIN_ONLY = /^\/(api\/)?(users|audit)(\/|$)/;
+
 /**
  * Viewers see everything but change nothing. Checked here rather than in each route, so a new
  * route is admin-only for writes unless it is listed above.
  */
 function allowed(session: Session, method: string, pathname: string): boolean {
   if (session.role === "admin") return true;
-  if (pathname === "/users" || pathname.startsWith("/api/users")) return false;
+  if (ADMIN_ONLY.test(pathname)) return false;
   if (method === "GET" || method === "HEAD") return true;
   return OWN_ACCOUNT.includes(pathname) || OWN_TOKENS.test(pathname) || (method === "POST" && READ_ONLY_POSTS.some((re) => re.test(pathname)));
 }

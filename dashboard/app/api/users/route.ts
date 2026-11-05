@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { addUser, listUsers, requireAdmin } from "@/lib/auth";
+import { audit } from "@/lib/audit";
 import { handle, json, readBody } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -15,5 +16,6 @@ export const POST = handle(async (req: NextRequest) => {
   const { username, role } = await readBody<{ username?: unknown; role?: unknown }>(req);
   const name = String(username ?? "").trim();
   const password = addUser(name, role ?? "viewer");
+  audit(req, { action: "user.add", target: name, detail: `role ${String(role ?? "viewer")}` });
   return json({ username: name, password }, 201);
 });

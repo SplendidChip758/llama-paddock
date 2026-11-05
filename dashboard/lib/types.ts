@@ -630,3 +630,70 @@ export interface EnvState {
   /** Names the agent lets the dashboard set (a trailing * allows a prefix). Agents before 0.6.0 accept any name. */
   allowed?: string[];
 }
+
+// ============================================================================ audit log
+/** What the audit log records, grouped by the part before the dot (the Action filter's groups). */
+export const AUDIT_ACTIONS = {
+  "auth.login": "Signed in",
+  "auth.login_failed": "Failed sign-in",
+  "auth.password": "Changed own password",
+  "user.add": "Added user",
+  "user.role": "Changed role",
+  "user.reset": "Reset password",
+  "user.remove": "Removed user",
+  "token.create": "Created token",
+  "token.revoke": "Revoked token",
+  "host.add": "Added host",
+  "host.edit": "Edited host",
+  "host.remove": "Removed host",
+  "host.agent_https": "Switched agent to HTTPS",
+  "host.agent_key": "Accepted agent key",
+  "ollama.restart": "Restarted Ollama",
+  "ollama.gpu_fix": "Ran a GPU fix",
+  "env.change": "Changed environment",
+  "model.pull": "Pulled model",
+  "model.create": "Created model",
+  "model.copy": "Copied model",
+  "model.delete": "Deleted model",
+  "model.load": "Loaded model",
+  "model.unload": "Unloaded model",
+  "job.cancel": "Cancelled or cleared job",
+  "alert.rules": "Changed alert rules",
+  "alert.channels": "Changed alert channels",
+  "alert.silence": "Silenced alerts",
+  "alert.unsilence": "Ended a silence",
+  "benchmark.start": "Started benchmark",
+  "benchmark.cancel": "Cancelled benchmark",
+  "benchmark.delete": "Deleted benchmark",
+  "settings.client_names": "Renamed request clients",
+} as const;
+export type AuditAction = keyof typeof AUDIT_ACTIONS;
+
+export const AUDIT_GROUPS: Record<string, string> = {
+  auth: "Sign-in", user: "Users", token: "API tokens", host: "Hosts", ollama: "Ollama service", env: "Environment",
+  model: "Models", job: "Jobs", alert: "Alerts", benchmark: "Benchmarks", settings: "Settings",
+};
+
+/**
+ * One audit record. Never holds prompts, passwords, tokens or environment values: only names,
+ * which env keys changed and the like.
+ */
+export interface AuditEntry {
+  id: number;
+  /** unix seconds */
+  t: number;
+  /** who: null when the login is off (PADDOCK_AUTH=off) or a failed sign-in names no account */
+  user: string | null;
+  /** the API token the request came with, by name and id; null for a browser session */
+  credential: string | null;
+  credential_id: string | null;
+  /** the client address, as the brute-force guard sees it */
+  ip: string | null;
+  action: AuditAction;
+  /** host id and its name at the time, kept after the host is renamed or removed */
+  instance: string | null;
+  instance_name: string | null;
+  /** what was acted on: a model, user, token, rule… */
+  target: string | null;
+  detail: string;
+}

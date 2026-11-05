@@ -1,11 +1,11 @@
-// SQLite in the data directory (paddock.db): metric history, job state and saved benchmarks, so they survive a restart.
+// SQLite in the data directory (paddock.db): metric history, job state, saved benchmarks and the audit log, so they survive a restart.
 // Uses node:sqlite (built into Node >= 22.13), so there is no native module to build per platform.
 import "server-only";
 import fs from "node:fs";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { dataDir, dataFile } from "./store";
 import type {
-  AgentRequest, AlertKind, AlertSilence, AlertTransition, BenchConditions, BenchRun, BenchSpec, HistoryPoint, HostEvent, JobInfo, JobState,
+  AgentRequest, AlertKind, AlertSilence, AuditEntry, AlertTransition, BenchConditions, BenchRun, BenchSpec, HistoryPoint, HostEvent, JobInfo, JobState,
   RequestCount,
 } from "./types";
 
@@ -93,6 +93,15 @@ const MIGRATIONS: string[] = [
     spec TEXT NOT NULL, conditions TEXT, runs TEXT NOT NULL, warnings TEXT NOT NULL
   );
   CREATE INDEX benchmarks_started ON benchmarks (started);
+  `,
+  `
+  -- audit: who changed what. user: null with the login off. credential, credential_id: the API token used, null for a browser.
+  -- detail never holds prompts, passwords, tokens or env values. Kept for audit_retention_days.
+  CREATE TABLE audit (
+    id INTEGER PRIMARY KEY, t REAL NOT NULL, user TEXT, credential TEXT, credential_id TEXT, ip TEXT, action TEXT NOT NULL,
+    instance TEXT, instance_name TEXT, target TEXT, detail TEXT NOT NULL
+  );
+  CREATE INDEX audit_t ON audit (t);
   `,
 ];
 
@@ -679,6 +688,53 @@ export function deleteBenchmark(id: string) {
 /** Benchmarks still marked running when the dashboard starts were cut off by the restart. */
 export function interruptBenchmarks(now = Date.now() / 1000) {
   db().prepare("UPDATE benchmarks SET state = 'error', error = 'interrupted: the dashboard restarted', finished = ? WHERE state = 'running'").run(now);
+}
+
+// ============================================================================ audit log
+export function insertAudit(e: Omit<AuditEntry, "id">): number {
+  return Number(db().prepare(`INSERT INTO audit (t, user, credential, credential_id, ip, action, instance, instance_name, target, detail)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(e.t, e.user, e.credential, e.credential_id, e.ip, e.action, e.instance, e.instance_name, e.target, e.detail).lastInsertRowid);
+}
+
+export interface AuditFilter {
+  user?: string;
+  instance?: string;
+  /** an action ("model.delete"), or a group of them ("model") */
+  action?: string;
+  /** only entries older than this id: the next page */
+  before?: number;
+}
+
+/** Newest first. Every filter matches exactly, except a group action that matches all of its actions. */
+export function listAudit(f: AuditFilter, limit: number): AuditEntry[] {
+  const where: string[] = [];
+  const args: SQLInputValue[] = [];
+  if (f.user) where.push("user = ? COLLATE NOCASE"), args.push(f.user);
+  if (f.instance) where.push("instance = ?"), args.push(f.instance);
+  if (f.action) {
+    if (f.action.includes(".")) where.push("action = ?"), args.push(f.action);
+    else where.push("action LIKE ? ESCAPE '\\'"), args.push(`${f.action.replace(/[\\%_]/g, "\\$&")}.%`);
+  }
+  if (f.before) where.push("id < ?"), args.push(f.before);
+  const sql = `SELECT * FROM audit ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY id DESC LIMIT ?`;
+  return db().prepare(sql).all(...args, limit) as unknown as AuditEntry[];
+}
+
+/** The users and hosts that appear in the log, for the page's filters. */
+export function auditFacets() {
+  const d = db();
+  const users = (d.prepare("SELECT DISTINCT user FROM audit WHERE user IS NOT NULL ORDER BY user COLLATE NOCASE").all() as { user: string }[]).map((r) => r.user);
+  // the latest name each host had
+  const instances = d.prepare(`SELECT a.instance AS id, a.instance_name AS name FROM audit a
+    JOIN (SELECT max(id) AS id FROM audit WHERE instance IS NOT NULL GROUP BY instance) l ON l.id = a.id
+    ORDER BY a.instance_name COLLATE NOCASE`).all() as { id: string; name: string | null }[];
+  return { users, instances };
+}
+
+/** Drop records past the audit retention. Run with the history maintenance. */
+export function trimAudit(retentionDays: number, now = Date.now() / 1000) {
+  db().prepare("DELETE FROM audit WHERE t < ?").run(now - retentionDays * DAY);
 }
 
 // ============================================================================ jobs

@@ -1,5 +1,6 @@
 import type { NextRequest } from "next/server";
 import { notSelf, requireAdmin, resetPassword } from "@/lib/auth";
+import { audit } from "@/lib/audit";
 import { handle, json } from "@/lib/server";
 
 export const dynamic = "force-dynamic";
@@ -9,5 +10,7 @@ export const POST = handle(async (req: NextRequest, ctx: RouteContext<"/api/user
   const session = requireAdmin(req);
   const { name } = await ctx.params;
   notSelf(session, name, "reset the password of");
-  return json({ password: resetPassword(name) });
+  const password = resetPassword(name);
+  audit(req, { action: "user.reset", target: name, detail: "signed out everywhere, temporary password issued" });
+  return json({ password });
 });

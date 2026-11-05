@@ -11,6 +11,7 @@ Copy [`config.example.yaml`](../config.example.yaml) to `config.yaml`. With Dock
 | `poll_interval` | `3` | Seconds between polls of each instance |
 | `history_points` | `400` | Recent samples returned for sparklines (about 20 minutes at 3 seconds) |
 | `history_retention_days` | `30` | Days of metric history, host events and alert transitions to retain; must be positive |
+| `audit_retention_days` | `365` | Days of [audit log](security.md#audit-log) to retain; must be positive |
 | `metrics_token` | unset | Bearer token for the Prometheus [`/metrics`](prometheus.md) endpoint; falls back to `PADDOCK_METRICS_TOKEN`. Without a token or `metrics_open`, `/metrics` is off |
 | `metrics_open` | `false` | `true` serves `/metrics` without a token; ignored when a token is set |
 | `instances` | `[]` | Declarative hosts; read-only in the UI |
@@ -63,8 +64,8 @@ Each person can have their own account, with one of two roles:
 
 | Role | Can |
 |---|---|
-| **admin** | Everything: add and edit hosts, pull and delete models, edit Ollama's environment, restart it, manage alerts and users |
-| **viewer** | See everything an admin sees, but change nothing. The buttons that change something are hidden, and the server refuses those requests with 403 |
+| **admin** | Everything: add and edit hosts, pull and delete models, edit Ollama's environment, restart it, manage alerts and users, read the [audit log](security.md#audit-log) |
+| **viewer** | See everything an admin sees except users and the audit log, but change nothing. The buttons that change something are hidden, and the server refuses those requests with 403 |
 
 Admins manage accounts under **Users** in the account menu:
 
@@ -87,6 +88,6 @@ Dashboards from before user accounts had a single login. On upgrade it becomes t
 | Docker Compose | `paddock-data` volume, mounted at `/data` |
 | Source | The path set by `PADDOCK_DATA_DIR` |
 
-`hosts.json` stores hosts added in the UI, including agent tokens, proxy keys and pinned agent keys. `agent-pins.json` stores the agent keys pinned for `config.yaml` hosts without an `agent_fingerprint`. `auth.json` stores the user accounts, their password hashes and roles, and the session signing secret. `credentials.json` stores the [API tokens](api.md#api-tokens): their names, owners, scopes, expiry and hashes, never the tokens themselves. `alert-rules.json` stores the [alert rules](alerts.md) once they have been changed in the dashboard, and `alert-channels.json` the [notification channels](alerts.md#notifications), including their webhook URLs and passwords. `request-clients.json` stores the names given to client addresses in the [request log](usage.md#requests). `paddock.db` stores metric history, host availability and model load events, alerts firing and resolving, alert silences, the request log, and jobs; SQLite may also create `paddock.db-wal` and `paddock.db-shm`.
+`hosts.json` stores hosts added in the UI, including agent tokens, proxy keys and pinned agent keys. `agent-pins.json` stores the agent keys pinned for `config.yaml` hosts without an `agent_fingerprint`. `auth.json` stores the user accounts, their password hashes and roles, and the session signing secret. `credentials.json` stores the [API tokens](api.md#api-tokens): their names, owners, scopes, expiry and hashes, never the tokens themselves. `alert-rules.json` stores the [alert rules](alerts.md) once they have been changed in the dashboard, and `alert-channels.json` the [notification channels](alerts.md#notifications), including their webhook URLs and passwords. `request-clients.json` stores the names given to client addresses in the [request log](usage.md#requests). `paddock.db` stores metric history, host availability and model load events, alerts firing and resolving, alert silences, the request log, saved benchmarks, the [audit log](security.md#audit-log), and jobs; SQLite may also create `paddock.db-wal` and `paddock.db-shm`.
 
 Keep these files private (mode 600 on Linux) and retain the directory across upgrades. See [Backups](operations.md#backups) for copying SQLite data safely. Agent configuration is separate: [Linux](agent-linux.md) and [Windows](agent-windows.md#settings-and-updates).
