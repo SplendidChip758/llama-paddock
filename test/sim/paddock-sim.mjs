@@ -9,7 +9,7 @@
  * Each simulated host gets two ports, because the dashboard addresses hosts by
  * URL: one serves Ollama's HTTP API (the parts the dashboard uses), the other the
  * agent API of agent/linux/paddock-agent.mjs (/health, /stats, /env, /logs,
- * /service/restart, with the same bearer-token rule). Like the agents, the agent
+ * /service/restart, /gpu-check, /gpu/reload-uvm, /runner-starts, with the same bearer-token rule). Like the agents, the agent
  * port serves HTTPS with a self-signed certificate (a new key per host and run)
  * and plain HTTP. A third port serves the control API, which switches failure
  * scenarios at runtime.
@@ -40,11 +40,46 @@
  *                 | "drop" (connection cut mid-stream)
  *        create:  "normal" | "stall" | "fail"
  *        pull_seconds, ollama_key (string or null), agent_token,
- *        ollama_version, agent_version (null: /stats leaves the version out, like agents before 0.6.0)
+ *        ollama_version, agent_version (null: /stats leaves the version out, like agents before 0.6.0;
+ *                     below 0.8.0 there is no /gpu-check, /gpu/reload-uvm or /runner-starts either, as in those agents)
  *        agent_http:  false = HTTPS only (PADDOCK_AGENT_HTTP=off), true = both (default)
  *        agent_tls:   false = no HTTPS and no fingerprint, like agents before 0.7.0
  *        agent_key:   "new" = replace the agent's key, as the installer's PADDOCK_AGENT_NEW_KEY does
+ *        ps_size_vram: false = leave size_vram out of /api/ps, so the dashboard can't tell the split
+ *        gpu_temp:    °C every GPU reports instead of the simulated curve (null: back to the curve)
+ *        vram_pct:    share of each GPU's memory in use, 0-100 (null: what the loaded models take)
+ *        disk_pct:    how full the root filesystem is, 0-100 (null: what the models take)
+ *        models_disk_pct:  report OLLAMA_MODELS (or /srv/ollama/models) as a filesystem of its own,
+ *                     this full (null: no separate filesystem, as before)
+ *        crash:       "ollama" = Ollama's process dies and systemd starts a new one (new pid, models
+ *                     unloaded); "runner" = the runner of the first loaded model exits while
+ *                     /api/ps still lists the model, until it's loaded or unloaded again
+ *        gpu_lost:    Ollama loses the GPU, as after a suspend and resume: it logs CUDA error 999, and
+ *                     loaded and newly loaded models run on the CPU while nvidia-smi still sees the
+ *                     GPUs. The value is what brings the GPU back: "restart" (restarting Ollama) or
+ *                     "uvm" (only POST /gpu/reload-uvm). false: the GPU is back at once
+ *
+ * Models: loading with a num_ctx whose KV cache doesn't fit in the GPUs puts the rest in system RAM
+ * (a partial GPU/CPU split), as does a host without GPUs or num_gpu 0 in the request's options or the
+ * Modelfile (all on the CPU). A load's context is options.num_ctx, else num_ctx in the Modelfile, else
+ * OLLAMA_CONTEXT_LENGTH, else 4096; a new one reloads the model. Every load logs "llama runner started", and
+ * a prompt with keep_alive 0 loads, answers and unloads within the request, so no poll sees it loaded.
+ * Pulling a name ending in "-cloud" or ":cloud" adds an Ollama cloud model: listed with
+ * remote_host/remote_model, answering /api/generate, but never in /api/ps since it runs remotely.
  *   GET  /_sim/config.yaml              the same config.yaml as --write-config
+ *
+ * Request log: the simulated Ollama records each request it answers, as Ollama's log would (time,
+ * status, duration, client, method, path), and the agent serves them on GET /requests?since=…
+ * A request with an X-Sim-Client header is recorded as coming from that address, so tests can
+ * play several client machines from one.
+ *
+ * Webhook receiver, for the dashboard's notification channels (any name; point a Webhook, Discord
+ * or Slack channel at http://<bind>:<base-port>/_sim/webhook/<name>):
+ *   POST   /_sim/webhook/<name>         records the message (and logs its summary); 204
+ *   GET    /_sim/webhook/<name>         {received: [{t, headers, body}]}
+ *   POST   /_sim/webhook/<name>/fail    {status, times = 1, retry_after?}: answer the next `times`
+ *                                       messages with that status (and a Retry-After header)
+ *   DELETE /_sim/webhook/<name>         forget what was received and any failures still set
  */
 import http from "node:http";
 import https from "node:https";
@@ -144,9 +179,13 @@ const FAMILIES = [
   { match: /./, family: "llama", arch: "llama", ctx: 131072, caps: ["completion", "tools"] },
 ];
 
+const CLOUD_NAME = /[:-]cloud$/;
+
 /** A model as /api/tags would list it, made up from its name. */
 function makeModel(name, extra = {}) {
   name = fullName(name);
+  // a cloud model is a small stub pointing at the remote model; its size is the stub's
+  const cloud = CLOUD_NAME.test(name) ? { remote_model: name.replace(CLOUD_NAME, "").replace(/:$/, ""), remote_host: "https://ollama.com:443", size: 384 } : {};
   const f = FAMILIES.find((x) => x.match.test(name));
   const params = Number(/(\d+(?:\.\d+)?)b\b/i.exec(name)?.[1] ?? (1 + unit(name) * 7).toFixed(1));
   return {
@@ -167,11 +206,15 @@ function makeModel(name, extra = {}) {
     template: "{{ .System }}\n{{ .Prompt }}",
     system: null,
     params: params * 1e9,
+    ...cloud,
     ...extra,
   };
 }
 
-const tagView = (m) => ({ name: m.name, model: m.model, modified_at: m.modified_at, size: m.size, digest: m.digest, details: m.details });
+const tagView = (m) => ({
+  name: m.name, model: m.model, ...(m.remote_host ? { remote_model: m.remote_model, remote_host: m.remote_host } : {}),
+  modified_at: m.modified_at, size: m.size, digest: m.digest, details: m.details,
+});
 
 // ------------------------------------------------------------------ host state
 const SEED_MODELS = ["llama3.2:3b", "qwen2.5-coder:7b", "nomic-embed-text:latest"];
@@ -214,15 +257,19 @@ function makeHost(n, o) {
       index: i, uuid: `GPU-${hash(`${id}/${i}`).slice(0, 8)}-${hash(`${id}/${i}`).slice(8, 12)}-sim0-${hash(`${id}/${i}`).slice(12, 24)}`,
     })),
     models: new Map(SEED_MODELS.map((name) => [name, makeModel(name)])),
-    /** name → { until: ms timestamp or Infinity, ctx } */
+    /** name → { until: ms timestamp or Infinity, ctx, cpuOnly: options.num_gpu was 0 } */
     loaded: new Map(),
     /** model → bytes already downloaded, so a pull that was cut off resumes (Ollama keeps partial blobs) */
     partial: new Map(),
     env: { OLLAMA_HOST: "0.0.0.0:11434", OLLAMA_KEEP_ALIVE: "5m" },
     log: [],
+    /** the log since Ollama last started, as the agent's /gpu-check reads it from the journal */
+    runLog: [],
     pulls: [],
     activePulls: 0,
     requests: {},
+    /** what Ollama's log would say about each request it answered: {t, status, duration_ms, client, method, path} */
+    requestLog: [],
     restarts: 0,
     startedAt: Date.now(),
     pid: 1000 + n * 37,
@@ -230,17 +277,44 @@ function makeHost(n, o) {
     servers: {},
     agentTls: true,
     agentHttp: true,
+    psSizeVram: true,
+    /** runtime-switchable readings for the alert scenarios; null = simulated */
+    gpuTemp: null,
+    vramPct: null,
+    diskPct: null,
+    modelsDiskPct: null,
+    /** loaded models whose runner process has exited */
+    deadRunners: new Set(),
+    /** false, or what brings the GPU back: "restart" or "uvm" */
+    gpuLost: false,
   };
   // the first host has something loaded, so the dashboard shows VRAM in use right away
   if (n === 1) h.loaded.set("llama3.2:3b", { until: Infinity, ctx: 4096 });
-  logLine(h, `Listening on [::]:11434 (version ${h.ollamaVersion})`);
+  ollamaStarted(h);
   return h;
 }
 
-function logLine(h, msg, level = "INFO") {
+function logLine(h, msg, level = "INFO", attrs = "") {
   const ts = new Date().toISOString().replace(/\.\d+Z$/, "+0000");
-  h.log.push(`${ts} ${h.hostname} ollama[${h.pid}]: time=${new Date().toISOString()} level=${level} msg="${msg.replace(/"/g, "'")}"`);
-  if (h.log.length > 2000) h.log.splice(0, h.log.length - 2000);
+  const line = `${ts} ${h.hostname} ollama[${h.pid}]: time=${new Date().toISOString()} level=${level} msg="${msg.replace(/"/g, "'")}"${attrs}`;
+  for (const log of [h.log, h.runLog]) {
+    log.push(line);
+    if (log.length > 2000) log.splice(0, log.length - 2000);
+  }
+}
+
+/** What Ollama logs when it starts, including its GPU discovery (in the wording of Ollama 0.12). */
+function ollamaStarted(h) {
+  h.runLog = [];
+  logLine(h, `Listening on [::]:11434 (version ${h.ollamaVersion})`);
+  if (h.gpuLost || !h.gpus.length) {
+    logLine(h, "no compatible GPUs were discovered");
+    logLine(h, "inference compute", "INFO", ' id=cpu library=cpu compute="" name=cpu description=cpu total="62.7 GiB" available="58.1 GiB"');
+    return;
+  }
+  for (const g of h.gpus) {
+    logLine(h, "inference compute", "INFO", ` id=${g.uuid} library=CUDA compute=8.6 name=CUDA${g.index} description="${GPU_MODEL.name}" driver=12.8 total="24.0 GiB" available="23.5 GiB"`);
+  }
 }
 
 /** Loaded models as /api/ps reports them; drops the ones whose keep_alive ran out. */
@@ -253,11 +327,12 @@ function psModels(h) {
     const m = h.models.get(name);
     if (!m || l.until <= now) {
       h.loaded.delete(name);
+      h.deadRunners.delete(name);
       continue;
     }
     // file size plus KV cache for the context; spills into system RAM once the GPUs are full
     const size = m.size + l.ctx * 128 * 1024;
-    const size_vram = Math.max(0, Math.min(size, vramFree));
+    const size_vram = l.cpuOnly || h.gpuLost ? 0 : Math.max(0, Math.min(size, vramFree));
     vramFree -= size_vram;
     out.push({
       name, model: name, size, digest: m.digest, details: m.details, size_vram, context_length: l.ctx,
@@ -407,16 +482,31 @@ async function generate(h, body, res) {
   const m = needModel(h, body.model);
   const ka = keepAliveMs(body.keep_alive, h.env.OLLAMA_KEEP_ALIVE);
   const base = { model: m.name, created_at: new Date().toISOString(), response: "", done: true };
-  if (ka === 0) {
+  // a new load (or unload) replaces a runner that exited
+  h.deadRunners.delete(m.name);
+  if (ka === 0 && !body.prompt) {
     h.loaded.delete(m.name);
     logLine(h, `unloaded ${m.name}`);
     return sendJson(res, 200, { ...base, done_reason: "unload" });
   }
-  if (!h.loaded.has(m.name)) {
+  const cpuOnly = body.options?.num_gpu === 0 || /^num_gpu\s+"?0"?$/m.test(m.parameters ?? "");
+  const ctx = Number(body.options?.num_ctx) || Number(/^num_ctx\s+"?(\d+)"?$/m.exec(m.parameters ?? "")?.[1]) ||
+    Number(h.env.OLLAMA_CONTEXT_LENGTH) || 4096;
+  // cloud models run remotely: Ollama forwards the request and loads nothing
+  if (!m.remote_host && h.loaded.get(m.name)?.ctx !== ctx) {
+    h.loaded.delete(m.name);
     await sleep(300);
+    if (cpuOnly || h.gpuLost || !h.gpus.length) logLine(h, "load_tensors: offloaded 0/29 layers to GPU");
+    logLine(h, "llama runner started in 0.30 seconds");
     logLine(h, `loaded ${m.name}`);
   }
-  h.loaded.set(m.name, { until: Date.now() + ka, ctx: Number(body.options?.num_ctx) || 4096 });
+  if (ka === 0) {
+    // answered, then unloaded at once: only the log shows the load
+    h.loaded.delete(m.name);
+    logLine(h, `unloaded ${m.name}`);
+    return sendJson(res, 200, { ...base, response: "This is a simulated response from llama-paddock's test host.", done_reason: "stop", eval_count: 12 });
+  }
+  if (!m.remote_host) h.loaded.set(m.name, { until: Date.now() + ka, ctx, cpuOnly });
   if (!body.prompt) return sendJson(res, 200, { ...base, done_reason: "load" });
   const text = "This is a simulated response from llama-paddock's test host.";
   if (body.stream === false) return sendJson(res, 200, { ...base, response: text, done_reason: "stop", eval_count: 12 });
@@ -436,7 +526,7 @@ const ollamaRoutes = {
   },
   "GET /api/version": (h) => ({ version: h.ollamaVersion }),
   "GET /api/tags": (h) => ({ models: [...h.models.values()].map(tagView) }),
-  "GET /api/ps": (h) => ({ models: psModels(h) }),
+  "GET /api/ps": (h) => ({ models: psModels(h).map(({ size_vram, ...m }) => (h.psSizeVram ? { ...m, size_vram } : m)) }),
   "POST /api/show": async (h, req) => {
     const body = await readBody(req);
     const m = needModel(h, body.model ?? body.name);
@@ -477,10 +567,23 @@ function ollamaAuthorized(h, req) {
   return a.toLowerCase().startsWith("bearer ") && a.slice(7).trim() === h.ollamaKey;
 }
 
+/** Requests the simulated log keeps per host. */
+const REQUEST_LOG_MAX = 20_000;
+
 async function handleOllama(h, req, res) {
   const url = new URL(req.url, "http://ollama");
   const key = `${req.method} ${url.pathname}`;
   h.requests[`ollama ${key}`] = (h.requests[`ollama ${key}`] ?? 0) + 1;
+  const started = performance.now();
+  const client = String(req.headers["x-sim-client"] || req.socket.remoteAddress || "").replace(/^::ffff:/, "");
+  // logged when the answer is done, as gin does (a request cut off midway is still logged)
+  res.once("close", () => {
+    h.requestLog.push({
+      t: Date.now() / 1000, status: res.statusCode, duration_ms: Math.round((performance.now() - started) * 1000) / 1000,
+      client, method: req.method, path: url.pathname,
+    });
+    if (h.requestLog.length > REQUEST_LOG_MAX) h.requestLog.splice(0, h.requestLog.length - REQUEST_LOG_MAX);
+  });
   if (h.scenario.ollama === "hang") return void h.hung.add(res);
   if (h.scenario.ollama === "error") return sendJson(res, 500, { error: "simulated internal server error" });
   // like a reverse proxy in front of Ollama: plain 401, before Ollama sees the request
@@ -605,9 +708,10 @@ function agentStats(h) {
     const util = busy ? Math.round(20 + 75 * wave(t, 23, g.index * 0.3 + h.n * 0.17)) : Math.round(3 * wave(t, 7, g.index));
     return {
       index: g.index, uuid: g.uuid, name: GPU_MODEL.name, driver: "570.124.06", pstate: busy ? "P2" : "P8",
-      temp_c: Math.round(34 + util * 0.42), fan_pct: Math.round(30 + util * 0.5), util_pct: util,
+      temp_c: h.gpuTemp ?? Math.round(34 + util * 0.42), fan_pct: Math.round(30 + util * 0.5), util_pct: util,
       mem_util_pct: busy ? Math.round(util * 0.6) : 0,
-      mem_used_mib: Math.round(Math.min(GPU_MODEL.mem, 310 + vramPerGpu)), mem_total_mib: GPU_MODEL.mem,
+      mem_used_mib: h.vramPct != null ? Math.round((GPU_MODEL.mem * h.vramPct) / 100) : Math.round(Math.min(GPU_MODEL.mem, 310 + vramPerGpu)),
+      mem_total_mib: GPU_MODEL.mem,
       power_w: Math.round((22 + util * 3.1) * 100) / 100, power_limit_w: GPU_MODEL.power,
       sm_clock_mhz: busy ? Math.round(1600 + 300 * wave(t, 11, g.index)) : 210, sm_clock_max_mhz: GPU_MODEL.smMax,
       mem_clock_mhz: busy ? 9751 : 405, pcie_gen: busy ? 4 : 1, pcie_width: 16,
@@ -619,7 +723,10 @@ function agentStats(h) {
   const memTotal = 64 * GiB;
   const memUsed = Math.round(6 * GiB + ps.reduce((s, m) => s + (m.size - m.size_vram), 0) + 0.5 * GiB * wave(t, 60));
   const diskTotal = 500 * GiB;
-  const diskUsed = 40 * GiB + [...h.models.values()].reduce((s, m) => s + m.size, 0) + [...h.partial.values()].reduce((s, b) => s + b, 0);
+  const modelBytes = [...h.models.values()].reduce((s, m) => s + (m.remote_host ? 0 : m.size), 0) + [...h.partial.values()].reduce((s, b) => s + b, 0);
+  const disk = (path, total, used) => ({ path, total, used, free: total - used, pct: Math.round((used / total) * 1000) / 10 });
+  const disks = [disk("/", diskTotal, h.diskPct != null ? Math.round((diskTotal * h.diskPct) / 100) : 40 * GiB + modelBytes)];
+  if (h.modelsDiskPct != null) disks.push(disk(h.env.OLLAMA_MODELS || "/srv/ollama/models", 2000 * GiB, Math.round((2000 * GiB * h.modelsDiskPct) / 100)));
   const service = ollamaUp
     ? { active: "active", sub: "running", since: new Date(h.startedAt).toUTCString(), main_pid: h.pid, restarts: String(h.restarts) }
     : { active: "failed", sub: "failed", since: new Date(h.startedAt).toUTCString(), main_pid: null, restarts: String(h.restarts) };
@@ -637,10 +744,12 @@ function agentStats(h) {
       load: [cpu / 100 * cores, cpu / 100 * cores * 0.9, cpu / 100 * cores * 0.8].map((x) => Math.round(x * 100) / 100),
       mem: { total: memTotal, used: memUsed, available: memTotal - memUsed, pct: Math.round((memUsed / memTotal) * 1000) / 10 },
       swap: { total: 8 * GiB, used: 0, pct: 0 },
-      disks: [{ path: "/", total: diskTotal, used: diskUsed, free: diskTotal - diskUsed, pct: Math.round((diskUsed / diskTotal) * 1000) / 10 }],
+      disks,
       // a pull downloads at ~100 MB/s
       net: { rx_bps: Math.round(2e4 + 5e4 * wave(t, 17) + h.activePulls * 1e8), tx_bps: Math.round(1e4 + 3e4 * wave(t, 19)) },
-      ollama_process: ollamaUp ? { pid: h.pid, rss_total: 450 * MiB + ps.reduce((s, m) => s + (m.size - m.size_vram), 0), runners: ps.length } : null,
+      ollama_process: ollamaUp
+        ? { pid: h.pid, rss_total: 450 * MiB + ps.reduce((s, m) => s + (m.size - m.size_vram), 0), runners: ps.filter((m) => !h.deadRunners.has(m.name)).length }
+        : null,
     },
     nvidia: h.gpus.length ? { available: true, gpus, processes } : { available: false, error: "nvidia-smi not found", gpus: [], processes: [] },
     service,
@@ -655,15 +764,33 @@ const BASE_UNIT_ENV = { PATH: "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin
 
 async function restartOllama(h) {
   logLine(h, "Stopping ollama.service...");
+  if (h.gpuLost === "restart") h.gpuLost = false;
+  await newOllamaProcess(h);
+  return { ok: true, stderr: "" };
+}
+
+/** The real agent's POST /gpu/reload-uvm on a bare-metal host: Ollama stops, nvidia_uvm reloads, Ollama starts. */
+async function reloadUvm(h) {
+  if (!h.gpus.length) throw new HttpErr(409, "the NVIDIA kernel driver isn't loaded on this host");
+  logLine(h, "Stopping ollama.service...");
+  h.gpuLost = false;
+  await newOllamaProcess(h);
+  const steps = ["systemctl stop ollama.service", "modprobe -r nvidia_uvm", "modprobe nvidia_uvm", "systemctl start ollama.service"];
+  return { ok: true, steps: steps.map((cmd) => ({ cmd, ok: true, stderr: "" })), stderr: "" };
+}
+
+/** Ollama stops and starts again with a new process, as after systemctl restart or a crash that systemd recovers. */
+async function newOllamaProcess(h) {
   h.restarts++;
   h.loaded.clear();
+  h.deadRunners.clear();
   // a restart brings a crashed Ollama back, like systemctl restart would
   await setOllama(h, "down");
   await sleep(500);
   h.startedAt = Date.now();
+  h.pid += 2;
   await setOllama(h, "up");
-  logLine(h, `Listening on [::]:11434 (version ${h.ollamaVersion})`);
-  return { ok: true, stderr: "" };
+  ollamaStarted(h);
 }
 
 const agentRoutes = {
@@ -697,6 +824,28 @@ const agentRoutes = {
     const lines = Math.max(10, Math.min(Number(url.searchParams.get("lines")) || 200, 2000));
     return { lines: h.log.slice(-lines) };
   },
+  "GET /gpu-check": (h) => ({
+    ts: Date.now() / 1000, platform: "linux",
+    // the agents' GPU_LOG_RE
+    log: { source: "journal", lines: h.runLog.filter((l) => /cuda|cudart|nvcuda|nvml|nvidia|rocm|\bhip\b|amdgpu|gpu|vram|inference compute|offload|library=/i.test(l)) },
+    nvidia_uvm: { driver: h.gpus.length > 0, module: h.gpus.length > 0, device: h.gpus.length > 0, container: false, can_reload: h.gpus.length > 0 },
+  }),
+  "POST /gpu/reload-uvm": (h) => reloadUvm(h),
+  "GET /runner-starts": (h, _req, url) => {
+    const now = Date.now() / 1000;
+    const since = Math.max(now - 86400, Math.min(Number(url.searchParams.get("since")) || now - 3600, now));
+    const starts = h.log.filter((l) => /llama runner started in/.test(l)).map((l) => Date.parse(/time=(\S+)/.exec(l)[1]) / 1000).filter((t) => t >= since);
+    return { ts: now, starts };
+  },
+  // the agents' answer shape; the simulated log has no lines in an unknown format, so nothing is skipped
+  "GET /requests": (h, _req, url) => {
+    const now = Date.now() / 1000;
+    const s = Number(url.searchParams.get("since"));
+    const since = Number.isFinite(s) && s > 0 ? s : now - 3600;
+    const requests = h.requestLog.filter((x) => x.t > since && x.t <= now).slice(0, 5000);
+    const more = requests.length === 5000;
+    return { requests, until: more ? requests[requests.length - 1].t : now, more, skipped: 0 };
+  },
 };
 
 const agentFingerprint = (h) => (h.agentTls ? h.tls.fingerprint : null);
@@ -719,7 +868,8 @@ async function handleAgent(h, req, res) {
     return sendJson(res, 426, { detail: "this agent only accepts HTTPS: use https:// in the agent URL", fingerprint: agentFingerprint(h) });
   }
   const route = agentRoutes[key];
-  if (!route) return sendJson(res, 404, { detail: "not found" });
+  const before080 = !h.agentVersion || /^0\.[0-7]\./.test(h.agentVersion);
+  if (!route || (before080 && /^\/(gpu|runner-starts)/.test(url.pathname))) return sendJson(res, 404, { detail: "not found" });
   if (url.pathname !== "/health" && !agentAuthorized(h, req)) return sendJson(res, 401, { detail: "invalid agent token" });
   try {
     sendJson(res, 200, await route(h, req, url));
@@ -778,7 +928,7 @@ async function applyScenario(h, patch) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new HttpErr(400, "body must be a JSON object");
   const known = [
     ...Object.keys(SCENARIO_VALUES), "pull_seconds", "ollama_key", "agent_token", "ollama_version", "agent_version",
-    "agent_http", "agent_tls", "agent_key",
+    "agent_http", "agent_tls", "agent_key", "ps_size_vram", "gpu_temp", "vram_pct", "disk_pct", "models_disk_pct", "crash", "gpu_lost",
   ];
   for (const [k, v] of Object.entries(patch)) {
     if (!known.includes(k)) throw new HttpErr(400, `unknown field ${k}; known: ${known.join(", ")}`);
@@ -796,6 +946,7 @@ async function applyScenario(h, patch) {
   if (patch.ollama_version !== undefined) h.ollamaVersion = String(patch.ollama_version);
   if (patch.agent_version !== undefined) h.agentVersion = patch.agent_version ? String(patch.agent_version) : null;
   if (patch.agent_tls !== undefined) h.agentTls = !!patch.agent_tls;
+  if (patch.ps_size_vram !== undefined) h.psSizeVram = !!patch.ps_size_vram;
   if (patch.agent_http !== undefined) {
     if (!patch.agent_http && !h.agentTls) throw new HttpErr(400, "agent_http can't be off without agent_tls: the agents refuse to start then");
     h.agentHttp = !!patch.agent_http;
@@ -806,6 +957,35 @@ async function applyScenario(h, patch) {
     h.servers.agent.useKey();
     // like an agent restart: connections made with the old key end
     h.servers.agent.closeAllConnections();
+  }
+  const reading = (k, max) => {
+    const v = patch[k];
+    if (v === null) return null;
+    if (typeof v !== "number" || !(v >= 0 && v <= max)) throw new HttpErr(400, `${k} must be a number from 0 to ${max}, or null`);
+    return v;
+  };
+  if (patch.gpu_temp !== undefined) h.gpuTemp = reading("gpu_temp", 150);
+  if (patch.vram_pct !== undefined) h.vramPct = reading("vram_pct", 100);
+  if (patch.disk_pct !== undefined) h.diskPct = reading("disk_pct", 100);
+  if (patch.models_disk_pct !== undefined) h.modelsDiskPct = reading("models_disk_pct", 100);
+  if (patch.crash !== undefined) {
+    if (patch.crash === "ollama") {
+      logLine(h, "ollama.service: Main process exited, code=killed, status=9/KILL", "ERROR");
+      await newOllamaProcess(h);
+    } else if (patch.crash === "runner") {
+      const first = psModels(h)[0];
+      if (!first) throw new HttpErr(409, "no model is loaded, so there is no runner to exit");
+      h.deadRunners.add(first.name);
+      logLine(h, `llama runner for ${first.name} terminated: signal: segmentation fault`, "ERROR");
+    } else throw new HttpErr(400, 'crash must be "ollama" or "runner"');
+  }
+  if (patch.gpu_lost !== undefined) {
+    if (![false, "restart", "uvm"].includes(patch.gpu_lost)) throw new HttpErr(400, 'gpu_lost must be false, "restart" or "uvm"');
+    if (patch.gpu_lost && !h.gpus.length) throw new HttpErr(409, "this host has no GPU to lose");
+    if (patch.gpu_lost && !h.gpuLost) {
+      logLine(h, "error looking up nvidia GPU memory", "WARN", ' error="cuda driver library failed to get device context 999"');
+    }
+    h.gpuLost = patch.gpu_lost;
   }
   if (patch.pull) h.scenario.pull = patch.pull;
   if (patch.create) h.scenario.create = patch.create;
@@ -832,6 +1012,9 @@ function hostView(h, full = false) {
     ollama_version: h.ollamaVersion,
     agent_version: h.agentVersion,
     scenario: { ...h.scenario },
+    ps_size_vram: h.psSizeVram,
+    readings: { gpu_temp: h.gpuTemp, vram_pct: h.vramPct, disk_pct: h.diskPct, models_disk_pct: h.modelsDiskPct },
+    gpu_lost: h.gpuLost,
   };
   if (!full) return view;
   return {
@@ -841,6 +1024,8 @@ function hostView(h, full = false) {
     partial: Object.fromEntries(h.partial),
     pulls: h.pulls,
     restarts: h.restarts,
+    pid: h.pid,
+    dead_runners: [...h.deadRunners],
     requests: h.requests,
   };
 }
@@ -861,9 +1046,51 @@ function configYaml() {
   return lines.join("\n") + "\n";
 }
 
+// ------------------------------------------------------------------ webhook receiver
+/** name → { received: [{t, headers, body}], fail: [{status, retry_after}] } */
+const webhooks = new Map();
+const webhook = (name) => {
+  if (!webhooks.has(name)) webhooks.set(name, { received: [], fail: [] });
+  return webhooks.get(name);
+};
+
+async function handleWebhook(req, res, name, action) {
+  const w = webhook(name);
+  if (req.method === "GET" && !action) return sendJson(res, 200, { received: w.received });
+  if (req.method === "DELETE" && !action) {
+    webhooks.delete(name);
+    return sendJson(res, 200, { ok: true });
+  }
+  if (req.method === "POST" && action === "fail") {
+    const b = await readBody(req);
+    const status = Number(b.status), times = Number(b.times ?? 1);
+    if (!Number.isInteger(status) || status < 400 || status > 599) throw new HttpErr(400, "status must be an HTTP error status");
+    for (let i = 0; i < times; i++) w.fail.push({ status, retry_after: b.retry_after ?? null });
+    return sendJson(res, 200, { failing: w.fail.length });
+  }
+  if (req.method === "POST" && !action) {
+    const f = w.fail.shift();
+    if (f) {
+      console.log(`paddock-sim: webhook ${name}: answered ${f.status}`);
+      res.writeHead(f.status, { "Content-Type": "application/json", ...(f.retry_after != null ? { "Retry-After": String(f.retry_after) } : {}) });
+      return res.end(JSON.stringify({ message: "simulated failure" }));
+    }
+    const body = await readBody(req);
+    const { authorization, "content-type": contentType, "user-agent": userAgent } = req.headers;
+    w.received.push({ t: Date.now() / 1000, headers: { authorization, "content-type": contentType, "user-agent": userAgent }, body });
+    // Discord sends embeds, Slack text, the generic webhook a summary
+    console.log(`paddock-sim: webhook ${name}: ${body.summary ?? body.embeds?.[0]?.title ?? body.text ?? "(message)"}`);
+    res.writeHead(204);
+    return res.end();
+  }
+  throw new HttpErr(405, "see the header of test/sim/paddock-sim.mjs");
+}
+
 async function handleControl(req, res) {
   const url = new URL(req.url, "http://control");
   try {
+    const wh = /^\/_sim\/webhook\/([A-Za-z0-9_.-]+)(?:\/(fail))?$/.exec(url.pathname);
+    if (wh) return await handleWebhook(req, res, wh[1], wh[2]);
     if (req.method === "GET" && (url.pathname === "/_sim" || url.pathname === "/_sim/hosts")) {
       return sendJson(res, 200, { hosts: [...hosts.values()].map((h) => hostView(h)) });
     }

@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { api, fmtBytes, fmtDur, fmtMiB, fmtNum, instPath, level, pct, untilText } from "@/lib/format";
-import type { GpuProcess, GpuStats, HistoryPoint, InstanceSnapshot, ServiceStatus, SystemStats } from "@/lib/types";
+import { isOffloaded, splitHint, splitText } from "@/lib/split";
+import type { GpuProcess, GpuStats, HistoryPoint, InstanceSnapshot, LoadedModel, ServiceStatus, SystemStats } from "@/lib/types";
+import { Availability } from "./Availability";
 import { HistoryCharts } from "./HistoryCharts";
 import { usePaddock } from "./PaddockProvider";
-import { Meter, SparkCell, Stat } from "./ui";
+import { CloudBadge, Meter, SparkCell, Stat } from "./ui";
 
 export function MonitorTab({ st }: { st: InstanceSnapshot }) {
   const [hist, setHist] = useState<HistoryPoint[]>([]);
@@ -44,6 +46,7 @@ export function MonitorTab({ st }: { st: InstanceSnapshot }) {
         </div>
       )}
       <HistoryCharts st={st} />
+      <Availability st={st} />
     </>
   );
 }
@@ -71,38 +74,59 @@ function PsTable({ st }: { st: InstanceSnapshot }) {
       <table>
         <thead>
           <tr>
-            <th>Model</th><th>Params</th><th>Quant</th><th className="r">Context</th><th className="r">Size</th>
+            <th>Model</th><th>Params</th><th>Quant</th><th className="r">Context <span className="faint">(active / max)</span></th><th className="r">Size</th>
             <th style={{ minWidth: 180 }}>Processor</th><th>Unloads</th><th />
           </tr>
         </thead>
         <tbody>
-          {st.ps.map((m) => {
-            const gp = pct(m.size_vram, m.size);
-            const proc = gp >= 99.5 ? "100% GPU" : gp <= 0.5 ? "100% CPU" : `${(100 - gp).toFixed(0)}% CPU / ${gp.toFixed(0)}% GPU`;
-            return (
-              <tr key={m.name}>
-                <td><span className="name">{m.name}</span></td>
-                <td>{m.details?.parameter_size ?? "–"}</td>
-                <td>{m.details?.quantization_level ?? "–"}</td>
-                <td className="r num">{fmtNum(m.context_length)}</td>
-                <td className="r num">{fmtBytes(m.size)}</td>
-                <td>
-                  <div className="faint" style={{ fontSize: 12, marginBottom: 4 }}>{proc} · {fmtBytes(m.size_vram)} VRAM</div>
-                  <div className="bar split">
-                    <i style={{ width: `${gp}%` }} />
-                    <i className="cpu" style={{ width: `${100 - gp}%` }} />
-                  </div>
-                </td>
-                <td className="num">{untilText(m.expires_at)}</td>
-                <td className="r">
-                  <button className="btn sm" disabled={busy === m.name} onClick={() => unload(m.name)}>Unload</button>
-                </td>
-              </tr>
-            );
-          })}
+          {st.ps.map((m) => (
+            <tr key={m.name}>
+              <td>
+                <span className="name">{m.name}</span> {m.split.state === "cloud" && <CloudBadge />}
+              </td>
+              <td>{m.details?.parameter_size ?? "–"}</td>
+              <td>{m.details?.quantization_level ?? "–"}</td>
+              <td className="r num"><ContextCell m={m} /></td>
+              <td className="r num">{fmtBytes(m.size)}</td>
+              <td>
+                <Processor m={m} />
+              </td>
+              <td className="num">{untilText(m.expires_at)}</td>
+              <td className="r">
+                <button className="btn sm" disabled={busy === m.name} onClick={() => unload(m.name)}>Unload</button>
+              </td>
+            </tr>
+          ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Keep allocation separate from usage: Ollama doesn't report tokens consumed here. */
+function ContextCell({ m }: { m: LoadedModel }) {
+  return (
+    <span title="Allocated context / model maximum, in tokens. Settings and explanations are on the Diagnostics tab.">
+      {fmtNum(m.context_length)}
+      {m.context?.max != null && <span className="faint"> / {fmtNum(m.context.max)}</span>}
+    </span>
+  );
+}
+
+/** The processor column: Ollama's own wording ("38% CPU / 62% GPU") and a bar for the split. */
+function Processor({ m }: { m: LoadedModel }) {
+  const s = m.split;
+  if (s.state === "cloud") return <div className="split-label">runs remotely · no local VRAM</div>;
+  if (s.gpu_pct == null) return <div className="split-label" title={splitHint(s) ?? undefined}>{splitText(s)}</div>;
+  return (
+    <>
+      <div className={`split-label ${isOffloaded(s) ? "warn" : ""}`}>{splitText(s, true)} · {fmtBytes(m.size_vram)} VRAM</div>
+      {/* the text above says the same, so the bar is decoration for screen readers */}
+      <div className="bar split" aria-hidden="true">
+        <i style={{ width: `${s.gpu_pct}%` }} />
+        <i className="cpu" style={{ width: `${100 - s.gpu_pct}%` }} />
+      </div>
+    </>
   );
 }
 

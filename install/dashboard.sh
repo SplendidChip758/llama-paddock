@@ -524,13 +524,33 @@ resolve_release() {
   local api="https://api.github.com/repos/${REPO}/releases"
   case $VERSION in
     latest) api+="/latest" ;;
-    dev) api+="?per_page=30" ;;  # newest first, prereleases included
+    dev) api+="?per_page=30" ;;  # prereleases included
     *) api+="/tags/${VERSION}" ;;
   esac
   local json; json=$(curl -fsSL -H "Accept: application/vnd.github+json" "$api" 2>/dev/null) || return 0
+  # The list isn't reliably newest first (it once put v0.8.0-dev.10 after dev.8), so pick
+  # the highest version, not the first entry
   read -r RELEASE_TAG ASSET_URL < <(node -e '
     let r = JSON.parse(require("fs").readFileSync(0, "utf8"));
-    if (Array.isArray(r)) r = r.find((x) => !x.draft) || {};
+    const ver = (t) => {
+      const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(t || "");
+      return m ? [+m[1], +m[2], +m[3], m[4] ? m[4].split(".") : null] : null;
+    };
+    const cmp = (a, b) => {
+      for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+      if (!a[3] || !b[3]) return (a[3] ? -1 : 0) - (b[3] ? -1 : 0);
+      for (let i = 0; i < Math.max(a[3].length, b[3].length); i++) {
+        const x = a[3][i], y = b[3][i];
+        if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+        if (x === y) continue;
+        return /^\d+$/.test(x) && /^\d+$/.test(y) ? x - y : x < y ? -1 : 1;
+      }
+      return 0;
+    };
+    if (Array.isArray(r)) {
+      r = r.filter((x) => !x.draft && ver(x.tag_name))
+        .sort((x, y) => cmp(ver(y.tag_name), ver(x.tag_name)))[0] || {};
+    }
     const a = (r.assets || []).find((x) => /^llama-paddock-dashboard-.*\.tar\.gz$/.test(x.name));
     console.log(r.tag_name || "", a ? a.browser_download_url : "");
   ' <<<"$json") || true

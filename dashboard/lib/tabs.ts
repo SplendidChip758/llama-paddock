@@ -4,6 +4,8 @@ export const TABS = [
   ["models", "Models"],
   ["env", "Environment"],
   ["logs", "Logs"],
+  ["requests", "Requests"],
+  ["diagnostics", "Diagnostics"],
 ] as const;
 
 export type Tab = (typeof TABS)[number][0];

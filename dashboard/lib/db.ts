@@ -4,7 +4,7 @@ import "server-only";
 import fs from "node:fs";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { dataDir, dataFile } from "./store";
-import type { HistoryPoint, HostEvent, JobInfo } from "./types";
+import type { AgentRequest, AlertKind, AlertSilence, AlertTransition, HistoryPoint, HostEvent, JobInfo, RequestCount } from "./types";
 
 const DB_FILE = "paddock.db";
 
@@ -51,6 +51,35 @@ const MIGRATIONS: string[] = [
     up INTEGER, error TEXT, model TEXT, digest TEXT, context_length INTEGER, size_vram INTEGER
   );
   CREATE INDEX events_instance_t ON events (instance, t);
+  `,
+  `
+  -- alert_transitions: alerts firing and resolving. The latest row per (rule, instance, subject) with
+  -- state = 'firing' is an alert that is still firing, so it carries on after a restart.
+  CREATE TABLE alert_transitions (
+    id INTEGER PRIMARY KEY, t REAL NOT NULL, rule TEXT NOT NULL, name TEXT NOT NULL, kind TEXT NOT NULL,
+    instance TEXT NOT NULL, subject TEXT NOT NULL, state TEXT NOT NULL, value REAL, detail TEXT NOT NULL,
+    flapping INTEGER NOT NULL
+  );
+  CREATE INDEX alert_transitions_key ON alert_transitions (rule, instance, subject, id);
+  CREATE INDEX alert_transitions_t ON alert_transitions (t);
+  `,
+  `
+  -- alert_silences: alerts muted for a while. rule, instance, subject: what it matches, null = anything.
+  -- until_resolved = 1: an acknowledgement, removed when its alert resolves; until is then null.
+  CREATE TABLE alert_silences (
+    id INTEGER PRIMARY KEY, created REAL NOT NULL, rule TEXT, instance TEXT, subject TEXT,
+    until REAL, until_resolved INTEGER NOT NULL, note TEXT NOT NULL
+  );
+  `,
+  `
+  -- requests: Ollama's request log as the agents read it. t: when it finished. model: the one model
+  -- loaded then, or null when that isn't clear. The unique key drops lines read twice.
+  CREATE TABLE requests (
+    id INTEGER PRIMARY KEY, instance TEXT NOT NULL, t REAL NOT NULL, status INTEGER NOT NULL,
+    duration_ms REAL NOT NULL, client TEXT NOT NULL, method TEXT NOT NULL, path TEXT NOT NULL, model TEXT,
+    UNIQUE (instance, t, client, method, path, status, duration_ms)
+  );
+  CREATE INDEX requests_instance_t ON requests (instance, t);
   `,
 ];
 
@@ -211,6 +240,9 @@ export function deleteHistory(instance: string) {
     d.prepare("DELETE FROM gpu_samples WHERE instance = ?").run(instance);
     d.prepare("DELETE FROM observed WHERE instance = ?").run(instance);
     d.prepare("DELETE FROM events WHERE instance = ?").run(instance);
+    d.prepare("DELETE FROM alert_transitions WHERE instance = ?").run(instance);
+    d.prepare("DELETE FROM alert_silences WHERE instance = ?").run(instance);
+    d.prepare("DELETE FROM requests WHERE instance = ?").run(instance);
   });
 }
 
@@ -249,6 +281,8 @@ export function maintainHistory(retentionDays: number, now = Date.now() / 1000) 
       d.prepare("DELETE FROM gpu_samples WHERE res = ? AND t < ?").run(res, cutoff);
     }
     trimEvents(d, Math.floor(now - retentionDays * DAY));
+    trimAlertTransitions(d, Math.floor(now - retentionDays * DAY));
+    d.prepare("DELETE FROM requests WHERE t < ?").run(Math.floor(now - retentionDays * DAY));
   });
 }
 
@@ -298,6 +332,12 @@ function toEvent(r: EventRow): HostEvent {
   if (r.context_length !== null) e.context_length = r.context_length;
   if (r.size_vram !== null) e.size_vram = r.size_vram;
   return e;
+}
+
+/** A host's model load and unload events since `since`, in time order: what the reload warnings count. */
+export function modelEvents(instance: string, since: number): HostEvent[] {
+  return (db().prepare("SELECT * FROM events WHERE instance = ? AND t >= ? AND kind IN ('load', 'unload') ORDER BY t, id")
+    .all(instance, since) as unknown as EventRow[]).map(toEvent);
 }
 
 /** What a host looked like at some point in an observed span: null = not known yet in that span. */
@@ -417,6 +457,163 @@ export function eventHistory(instance: string, range: HistoryRange, hasAgent: bo
     initial,
     events: all.filter((e) => e.t >= from),
   };
+}
+
+// ============================================================================ alert transitions
+interface TransitionRow {
+  id: number; t: number; rule: string; name: string; kind: string; instance: string; subject: string;
+  state: string; value: number | null; detail: string; flapping: number;
+}
+
+const toTransition = (r: TransitionRow): AlertTransition => ({
+  id: r.id, t: r.t, rule: r.rule, name: r.name, kind: r.kind as AlertKind, instance: r.instance, subject: r.subject,
+  state: r.state as AlertTransition["state"], value: r.value, detail: r.detail, flapping: !!r.flapping,
+});
+
+/** Append transitions in one transaction; each gets its id here. */
+export function recordAlertTransitions(list: AlertTransition[]) {
+  if (!list.length) return;
+  tx((d) => {
+    const add = d.prepare(`INSERT INTO alert_transitions (t, rule, name, kind, instance, subject, state, value, detail, flapping)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const x of list) {
+      x.id = Number(add.run(x.t, x.rule, x.name, x.kind, x.instance, x.subject, x.state, x.value, x.detail, x.flapping ? 1 : 0).lastInsertRowid);
+    }
+  });
+}
+
+/** The latest transition of every alert whose latest transition is "firing": what was firing when the dashboard stopped. */
+export function firingAlerts(): AlertTransition[] {
+  const rows = db().prepare(`SELECT a.* FROM alert_transitions a
+    JOIN (SELECT max(id) AS id FROM alert_transitions GROUP BY rule, instance, subject) l ON l.id = a.id
+    WHERE a.state = 'firing'`).all() as unknown as TransitionRow[];
+  return rows.map(toTransition);
+}
+
+/** Firing transitions since `since`, for telling flapping alerts apart after a restart. */
+export function recentFirings(since: number): AlertTransition[] {
+  return (db().prepare("SELECT * FROM alert_transitions WHERE state = 'firing' AND t >= ? ORDER BY id").all(since) as unknown as TransitionRow[])
+    .map(toTransition);
+}
+
+/** Transitions in id order: after `after`, or else the latest `limit`. */
+export function alertTransitions(after: number | null, limit: number): AlertTransition[] {
+  const d = db();
+  const rows = after === null
+    ? (d.prepare("SELECT * FROM (SELECT * FROM alert_transitions ORDER BY id DESC LIMIT ?) ORDER BY id").all(limit) as unknown as TransitionRow[])
+    : (d.prepare("SELECT * FROM alert_transitions WHERE id > ? ORDER BY id LIMIT ?").all(after, limit) as unknown as TransitionRow[]);
+  return rows.map(toTransition);
+}
+
+/** Drop transitions past the retention, except the one that says an alert is still firing. */
+function trimAlertTransitions(d: DatabaseSync, cutoff: number) {
+  d.prepare(`DELETE FROM alert_transitions WHERE t < ? AND id NOT IN (
+    SELECT a.id FROM alert_transitions a
+    JOIN (SELECT max(id) AS id FROM alert_transitions GROUP BY rule, instance, subject) l ON l.id = a.id
+    WHERE a.state = 'firing'
+  )`).run(cutoff);
+}
+
+// ============================================================================ alert silences
+interface SilenceRow {
+  id: number; created: number; rule: string | null; instance: string | null; subject: string | null;
+  until: number | null; until_resolved: number; note: string;
+}
+
+const toSilence = (r: SilenceRow): AlertSilence => ({
+  id: r.id, created: r.created, rule: r.rule, instance: r.instance, subject: r.subject,
+  until: r.until, until_resolved: !!r.until_resolved, note: r.note,
+});
+
+export const loadSilences = (): AlertSilence[] =>
+  (db().prepare("SELECT * FROM alert_silences ORDER BY id").all() as unknown as SilenceRow[]).map(toSilence);
+
+/** Store a silence; it gets its id here. */
+export function insertSilence(x: AlertSilence) {
+  x.id = Number(db().prepare("INSERT INTO alert_silences (created, rule, instance, subject, until, until_resolved, note) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(x.created, x.rule, x.instance, x.subject, x.until, x.until_resolved ? 1 : 0, x.note).lastInsertRowid);
+}
+
+export function deleteSilences(ids: number[]) {
+  if (!ids.length) return;
+  tx((d) => {
+    const del = d.prepare("DELETE FROM alert_silences WHERE id = ?");
+    for (const id of ids) del.run(id);
+  });
+}
+
+// ============================================================================ requests
+/**
+ * The models loaded on a host at time `t`, as the poller saw them, or null when that isn't known
+ * (the dashboard wasn't watching, or Ollama was unreachable). The poller only sees a load on the
+ * poll after it, so events up to `t + lag` count: a request ends while its model is loaded.
+ */
+export function modelsAt(instance: string, t: number, lag: number): Set<string> | null {
+  const d = db();
+  const span = d.prepare("SELECT start, end FROM observed WHERE instance = ? AND start <= ? AND end >= ? ORDER BY start DESC LIMIT 1")
+    .get(instance, t, t) as { start: number; end: number } | undefined;
+  if (!span) return null;
+  const rows = d.prepare("SELECT * FROM events WHERE instance = ? AND t >= ? AND t <= ? ORDER BY t, id")
+    .all(instance, span.start, Math.min(span.end, t + lag)) as unknown as EventRow[];
+  const state = emptyState();
+  for (const r of rows) applyEvent(state, toEvent(r));
+  return state.ollama ? new Set(state.models.keys()) : null;
+}
+
+/** Store requests; ones already stored (read twice) are dropped. */
+export function insertRequests(instance: string, rows: (AgentRequest & { model: string | null })[]) {
+  if (!rows.length) return;
+  tx((d) => {
+    const add = d.prepare(`INSERT OR IGNORE INTO requests (instance, t, status, duration_ms, client, method, path, model)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    for (const r of rows) add.run(instance, r.t, r.status, r.duration_ms, r.client, r.method, r.path, r.model);
+  });
+}
+
+/** The newest stored request's time, where reading a host's log carries on after a restart. */
+export function lastRequestT(instance: string): number | null {
+  return (db().prepare("SELECT max(t) AS t FROM requests WHERE instance = ?").get(instance) as { t: number | null }).t;
+}
+
+interface RequestRow extends AgentRequest {
+  model: string | null;
+}
+
+const COUNTS = "count(*) AS count, sum(status >= 400) AS errors, avg(duration_ms) AS avg_ms, max(duration_ms) AS max_ms";
+const counts = (r: Record<string, unknown>): RequestCount => ({
+  count: Number(r.count), errors: Number(r.errors ?? 0), avg_ms: Math.round(Number(r.avg_ms ?? 0) * 10) / 10, max_ms: Number(r.max_ms ?? 0),
+});
+
+/** Totals, buckets of `bucket` seconds, the busiest clients, endpoints and models, and the slowest and latest requests. */
+export function requestStats(instance: string, from: number, to: number, bucket: number) {
+  const d = db();
+  const where = "FROM requests WHERE instance = ? AND t >= ? AND t <= ?";
+  const args = [instance, from, to];
+  const total = counts(d.prepare(`SELECT ${COUNTS} ${where}`).get(...args) as Record<string, unknown>);
+  // bucket is inlined: node:sqlite binds numbers as REAL, and a bound divisor wouldn't truncate
+  const buckets = (d.prepare(`SELECT CAST(t / ${bucket} AS INTEGER) * ${bucket} AS b, count(*) AS count, sum(status >= 400) AS errors ${where} GROUP BY b ORDER BY b`)
+    .all(...args) as { b: number; count: number; errors: number }[]).map((r) => ({ t: r.b, count: r.count, errors: r.errors }));
+  const clients = (d.prepare(`SELECT client, ${COUNTS}, max(t) AS last ${where} GROUP BY client ORDER BY count DESC LIMIT 50`).all(...args) as Record<string, unknown>[])
+    .map((r) => ({ client: String(r.client), last: Number(r.last), ...counts(r) }));
+  const endpoints = (d.prepare(`SELECT method, path, ${COUNTS} ${where} GROUP BY method, path ORDER BY count DESC LIMIT 50`).all(...args) as Record<string, unknown>[])
+    .map((r) => ({ method: String(r.method), path: String(r.path), ...counts(r) }));
+  const models = (d.prepare(`SELECT model, ${COUNTS} ${where} AND model IS NOT NULL GROUP BY model ORDER BY count DESC LIMIT 50`).all(...args) as Record<string, unknown>[])
+    .map((r) => ({ model: String(r.model), ...counts(r) }));
+  const pick = "SELECT t, status, duration_ms, client, method, path, model";
+  const slowest = d.prepare(`${pick} ${where} ORDER BY duration_ms DESC LIMIT 10`).all(...args) as unknown as RequestRow[];
+  const recent = d.prepare(`${pick} ${where} ORDER BY t DESC, id DESC LIMIT 50`).all(...args) as unknown as RequestRow[];
+  return { total, buckets, clients, endpoints, models, slowest, recent };
+}
+
+/** One page of a host's requests from `from` to `to`, latest or slowest first, and how many there are in all. */
+export function requestLog(instance: string, from: number, to: number, sort: "latest" | "slowest", offset: number, limit: number) {
+  const d = db();
+  const where = "FROM requests WHERE instance = ? AND t >= ? AND t <= ?";
+  const order = sort === "slowest" ? "duration_ms DESC, id DESC" : "t DESC, id DESC";
+  const total = Number((d.prepare(`SELECT count(*) AS n ${where}`).get(instance, from, to) as { n: number }).n);
+  const requests = d.prepare(`SELECT t, status, duration_ms, client, method, path, model ${where} ORDER BY ${order} LIMIT ? OFFSET ?`)
+    .all(instance, from, to, limit, offset) as unknown as RequestRow[];
+  return { total, requests };
 }
 
 // ============================================================================ jobs

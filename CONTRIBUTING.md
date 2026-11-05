@@ -58,6 +58,11 @@ The control API changes a host's behavior while everything runs:
 | `create` | `normal`, `stall`, `fail` |
 | `ollama_key`, `agent_token` | require a different key (or `null` for none) or token, like a rotated credential |
 | `pull_seconds`, `ollama_version`, `agent_version` | download speed; versions to report (`agent_version: null` leaves it out of `/stats`, like agents before 0.6.0) |
+| `ps_size_vram` | `false` leaves `size_vram` out of `/api/ps`, so the GPU/CPU split is unknown |
+| `gpu_temp`, `vram_pct`, `disk_pct`, `models_disk_pct` | readings for the alert rules: every GPU's °C, each GPU's memory in use (%), the root filesystem (%), and a separate filesystem for `OLLAMA_MODELS` (%). `null` goes back to the simulated values |
+| `crash` | `ollama`: the Ollama process dies and a new one starts (new pid, models unloaded); `runner`: the first loaded model's runner exits while `/api/ps` still lists the model |
+
+Loading a model with a `num_ctx` too large for the GPUs' free memory gives it a partial GPU/CPU split, and `options.num_gpu: 0` or a host without GPUs puts it all on the CPU. Pulling a name ending in `-cloud` or `:cloud` adds an Ollama cloud model, listed with `remote_host` and never shown as loaded.
 
 ```bash
 curl -X POST localhost:11700/_sim/hosts/sim-2/scenario -d '{"ollama":"down"}'
@@ -66,9 +71,24 @@ curl -X POST localhost:11700/_sim/hosts/sim-1/scenario -d '{"pull":"fail","agent
 
 A pull that is cut off keeps its partial download in the simulator, and the next pull of that model resumes from it, as Ollama does.
 
+The simulated Ollama keeps a request log, served by the agent's `GET /requests` as Ollama's log would give it. A request with an `X-Sim-Client: <address>` header is logged as coming from that address, so one machine can play several clients:
+
+```bash
+curl -H 'X-Sim-Client: 192.168.30.20' localhost:11701/api/tags
+```
+
+The control API also receives webhooks, for trying [notification channels](docs/alerts.md#notifications) without Discord or Slack: point a Webhook, Discord or Slack channel at `http://localhost:11700/_sim/webhook/<name>` (any name). The simulator logs each message's summary.
+
+| Endpoint | Does |
+|---|---|
+| `POST /_sim/webhook/<name>` | Records the message; 204 |
+| `GET /_sim/webhook/<name>` | `{received: [{t, headers, body}]}` |
+| `POST /_sim/webhook/<name>/fail` | `{status, times, retry_after}`: answer the next `times` messages (default 1) with that error status, and a `Retry-After` header if given |
+| `DELETE /_sim/webhook/<name>` | Forgets what was received and any failures still set |
+
 ### Scenario tests
 
-`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, availability and model load events (including the gap a restart leaves), and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
+`test/scenarios/*.test.mjs` start the simulator and the built standalone dashboard with a temporary data directory, sign in through the API (including the forced first password change), and check behavior through the dashboard's JSON API and `/metrics`: unavailable hosts, rejected credentials, interrupted and cancelled downloads, dashboard restart recovery, availability and model load events (including the gap a restart leaves), alert rules (durations, firing and resolving, flapping, unreachable hosts, crashes, missing observations and restarts), alert silences and acknowledgements, notification channels (webhook, Discord, Slack and email messages, per-rule channels, retries, secrets), availability timelines (outages, unobserved gaps), the request log (per client, endpoint and model, monitoring calls left out, the real agent reading a log file), and the real Linux agent (in `PADDOCK_DRY_RUN` mode) against the simulated one. CI runs them after the build. Locally:
 
 ```bash
 cd dashboard
@@ -193,7 +213,7 @@ Each branch accepts one merge method, enforced by its ruleset:
 
 To ship what's on `dev`:
 
-1. Open a PR from `dev` into `main` and merge it (merge commit).
+1. Open a PR from `dev` into `main` and merge it (merge commit). The `ci` and `pr-title` checks only start if the last commit on `dev` isn't a `chore(release): … [skip ci]` commit, because GitHub skips workflows for a head commit with `[skip ci]`. Every releasing merge to `dev` ends with one. If the PR's required checks stay at "Expected — Waiting for status to be reported", merge a small non-releasing PR (`docs:`, `test:`, `ci:` or `chore:`) into `dev` first. A `feat` or `fix` would only add another release commit on top. Keep the literal `[skip ci]` out of your own commit messages too: a squash merge copies them into the commit on `dev`, which blocks the checks the same way.
 2. The release workflow on `main` publishes `vX.Y.Z` with a changelog covering everything since the last stable release.
 3. The same workflow then merges `main` back into `dev` (the `backmerge` job). This brings the `chore(release)` commit and the new tag into `dev`, so the next prerelease counts up from the new version instead of reusing it. If that merge conflicts, the job fails and opens a PR from a `backmerge/vX.Y.Z` branch instead. Its description explains how to resolve and merge it.
 

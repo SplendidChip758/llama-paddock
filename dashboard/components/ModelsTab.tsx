@@ -6,6 +6,7 @@ import type { InstanceSnapshot, TagModel } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
 import { JobLine } from "./JobsDrawer";
 import { ModelEditor } from "./ModelEditor";
+import { CloudBadge, SplitChip, SplitHint } from "./ui";
 
 export function ModelsTab({ st }: { st: InstanceSnapshot }) {
   const { toast, jobs, setJobsOpen, refreshJobs, jobsDoneTick } = usePaddock();
@@ -29,7 +30,7 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
     load();
   }, [load, jobsDoneTick]);
 
-  const loaded = new Set(st.ps.map((m) => m.name));
+  const loaded = new Map(st.ps.map((m) => [m.name, m]));
   const running = jobs.filter((j) => j.instance === st.id && j.state === "running");
 
   const pull = async (e: React.FormEvent) => {
@@ -72,7 +73,8 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
     }
   };
 
-  const total = (models ?? []).reduce((a, m) => a + (m.size || 0), 0);
+  // cloud models report the size of the remote model, which takes no space here
+  const total = (models ?? []).reduce((a, m) => a + (m.cloud ? 0 : m.size || 0), 0);
 
   return (
     <>
@@ -109,32 +111,38 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
                 <tr><th>Name</th><th>Family</th><th>Params</th><th>Quant</th><th className="r">Size</th><th>Modified</th><th /></tr>
               </thead>
               <tbody>
-                {models.map((m) => (
-                  <tr key={m.name}>
-                    <td>
-                      <span className="name">{m.name}</span> {loaded.has(m.name) && <span className="chip ok">loaded</span>}
-                    </td>
-                    <td>{m.details?.family ?? "–"}</td>
-                    <td>{m.details?.parameter_size ?? "–"}</td>
-                    <td>{m.details?.quantization_level ?? "–"}</td>
-                    <td className="r num">{fmtBytes(m.size)}</td>
-                    <td className="faint">{ago(m.modified_at)}</td>
-                    <td>
-                      <div className="actions">
-                        <button className="btn sm" onClick={() => setEditing(m.name)}>Edit</button>
-                        {loaded.has(m.name) ? (
-                          <button className="btn sm" disabled={busy === m.name} onClick={() => act("unload", m.name)}>Unload</button>
-                        ) : (
-                          <button className="btn sm" disabled={busy === m.name} onClick={() => act("load", m.name)}>
-                            {busy === m.name ? "Loading…" : "Load"}
-                          </button>
-                        )}
-                        <button className="ghost sm" onClick={() => act("copy", m.name)}>Copy</button>
-                        <button className="danger sm" onClick={() => act("delete", m.name)}>Delete</button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {models.map((m) => {
+                  const lm = loaded.get(m.name);
+                  return (
+                    <tr key={m.name}>
+                      <td>
+                        <span className="name">{m.name}</span> {m.cloud && <CloudBadge remoteHost={m.remote_host} />}{" "}
+                        {/* a cloud model's split chip would only say "cloud" again */}
+                        {lm && (lm.split.state === "cloud" ? <span className="chip ok">loaded</span> : <SplitChip m={lm} label="loaded" />)}
+                        {lm && <SplitHint m={lm} />}
+                      </td>
+                      <td>{m.details?.family ?? "–"}</td>
+                      <td>{m.details?.parameter_size ?? "–"}</td>
+                      <td>{m.details?.quantization_level ?? "–"}</td>
+                      <td className="r num">{m.cloud ? "–" : fmtBytes(m.size)}</td>
+                      <td className="faint">{ago(m.modified_at)}</td>
+                      <td>
+                        <div className="actions">
+                          <button className="btn sm" onClick={() => setEditing(m.name)}>Edit</button>
+                          {loaded.has(m.name) ? (
+                            <button className="btn sm" disabled={busy === m.name} onClick={() => act("unload", m.name)}>Unload</button>
+                          ) : (
+                            <button className="btn sm" disabled={busy === m.name} onClick={() => act("load", m.name)}>
+                              {busy === m.name ? "Loading…" : "Load"}
+                            </button>
+                          )}
+                          <button className="ghost sm" onClick={() => act("copy", m.name)}>Copy</button>
+                          <button className="danger sm" onClick={() => act("delete", m.name)}>Delete</button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

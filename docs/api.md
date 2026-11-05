@@ -27,19 +27,30 @@ Dashboard requests use a session cookie, not the agent bearer token. Send JSON b
 
 | Method | Path | Body / result |
 |---|---|---|
-| GET | `/api/instances` | `{poll_interval, instances}` with latest status, stats, loaded models, the Ollama `version` and the `agent_version` (`null` if unknown) |
+| GET | `/api/instances` | `{poll_interval, instances}` with latest status, stats, loaded models, the Ollama `version` and the `agent_version` (`null` if unknown). Each loaded model has `split` and, once its `/api/show` has been read, `context`; each host has `gpu_check` and `reload_churn`. See [Context and reloads](context-and-reloads.md) |
 | GET | `/api/instances/{id}/history` | Recent samples or a requested range; see [History](#history) |
 | GET | `/api/instances/{id}/events` | Availability and model load events over a range; see [Events](#events) |
+| GET | `/api/instances/{id}/requests?range=…` | The host's requests from Ollama's log; see [Requests](#requests) |
+| GET | `/api/instances/{id}/requests/log?range=…&sort=…` | One page of the host's requests, latest or slowest first; see [Requests](#requests) |
+| GET | `/api/request-clients` | `{names}`: names given to client addresses, `{"192.168.30.20": "open-webui"}` |
+| PUT | `/api/request-clients` | `{names}` → `{names}`; replaces them all, and a blank name removes one |
+| GET | `/api/instances/{id}/uptime?range=…` | Ollama's and the agent's availability as timelines and outages; see [Uptime](#uptime) |
+| GET | `/api/uptime?range=…` | `{range, hosts}`: every host's `coverage` and, for `ollama` and `agent`, `up_pct` and the number of `outages` |
 | POST | `/api/instances` | Host fields below → `{id}` (201) |
 | PUT | `/api/instances/{id}` | Host fields below → `{id}` |
-| DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history and events |
+| DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history, events and alert transitions; its firing alerts resolve |
 | POST | `/api/test-connection` | Host fields plus optional existing `id` → separate `ollama` and `agent` results; `agent.fingerprint` is the key the agent presented (`https://`) or reports (`http://`) |
 | POST | `/api/instances/{id}/agent-key` | `{fingerprint}` → pins that key for an `https://` agent, e.g. after its key was replaced; 409 when `config.yaml` sets it |
+| GET | `/api/instances/{id}/gpu-check` | `{check}`: the [GPU check](gpu-check.md) as of the last poll, the same as `gpu_check` in `/api/instances`; `null` without an agent, an NVIDIA GPU or Ollama answering |
+| POST | `/api/instances/{id}/gpu-check` | Reads Ollama's log and settings again → `{check}` |
+| POST | `/api/instances/{id}/gpu-check/fix` | `{action}`: `restart` or `reload_uvm` (Linux agents from 0.8.0, as root, outside a container) → the agent's `{ok, stderr}` |
 | POST | `/api/instances/{id}/agent-https` | Switches a UI host's `http://` agent URL to `https://`, pinning the key the agent reports → `{id, agent_url, agent_fingerprint}`; 409 for `config.yaml` hosts or agents that don't report a key |
 
 Host fields are `name`, `ollama_url`, `ollama_proxy_key`, `agent_url`, `agent_token`, `agent_fingerprint` and `tags`. `agent_fingerprint` applies to `https://` agent URLs: `SHA256:<base64>` as the agent installer prints it (bare base64 and hex are accepted too). Blank pins the key the agent presents on the first connection; omitted keeps the stored pin. `ollama_url` is required. `tags` accepts an array or comma-separated string. Use the ID returned by creation or listed in `/api/instances` in later requests.
 
-Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Likewise a blank or omitted `ollama_proxy_key` keeps the stored key; send `clear_ollama_proxy_key: true` to remove it. The 0.7.0 prereleases called it `ollama_api_key`, which is still accepted. Neither secret is ever returned: `/api/instances` reports `has_token` and `has_ollama_proxy_key` instead. Changing either endpoint or the token clears that host's metric history and events; changing only the proxy key, the agent URL's scheme or the pinned key keeps them.
+Updates replace host fields, so send all values you want to retain. A blank or omitted `agent_token` keeps the stored token when an agent URL is supplied; clearing the agent URL removes its token. Likewise a blank or omitted `ollama_proxy_key` keeps the stored key; send `clear_ollama_proxy_key: true` to remove it. The 0.7.0 prereleases called it `ollama_api_key`, which is still accepted. Neither secret is ever returned: `/api/instances` reports `has_token` and `has_ollama_proxy_key` instead. Changing either endpoint or the token clears that host's metric history, events and alert transitions; changing only the proxy key, the agent URL's scheme or the pinned key keeps them.
+
+Each loaded model in `ps` (Ollama's `/api/ps` entry) also has `split`: `{state, gpu_pct, cpu_bytes}`. `state` is `gpu` (all in VRAM), `partial` (some in system RAM, run by the CPU), `cpu` (none in VRAM), `cloud` (an Ollama cloud model) or `unknown` (Ollama left out `size` or `size_vram`, or they don't add up). `gpu_pct` is the share in VRAM, 0–100, rounded and never 0 or 100 for `partial`; it and `cpu_bytes` are `null` for `cloud` and `unknown`. See [GPU/CPU split](usage.md#gpucpu-split).
 
 For agent encryption, `/api/instances` reports per host `agent_fingerprint` (the pinned key, or `null`), `agent_fingerprint_in_config`, `agent_key_changed` (the key the agent presented instead of the pinned one: the dashboard stops calling the agent until it's accepted) and `agent_https_fingerprint` (the key an `http://` agent reports, so it can be switched). See [encrypted agent connections](security.md#encrypted-agent-connections). Config-defined hosts cannot be updated or removed through the API (409); edit the YAML instead.
 
@@ -58,6 +69,39 @@ Add `?range=…` for `{range, resolution, points}` over a longer interval:
 | `30d` | `900` |
 
 Available points depend on how long the dashboard has collected data and the [retention setting](configuration.md#dashboard-settings). An unsupported range returns 400.
+
+## Requests
+
+`GET /api/instances/{id}/requests?range=1h|24h|7d|30d` (default `24h`) returns the host's [request log](usage.md#requests):
+
+| Field | Meaning |
+|---|---|
+| `total` | `{count, errors, avg_ms, max_ms}` over the range; `errors` counts statuses of 400 and above |
+| `buckets`, `bucket_s` | `[{t, count, errors}]` per `bucket_s` seconds (60, 900, 10800 or 43200 by range); empty buckets are left out |
+| `clients` | The 50 busiest clients: `{client, name, last}` plus the counts. `name` is from `/api/request-clients`, or `null` |
+| `endpoints` | The 50 busiest `{method, path}` plus the counts |
+| `models` | Requests matched to a model (the one loaded at the time), plus the counts |
+| `slowest`, `recent` | The 10 slowest and 50 latest requests: `{t, status, duration_ms, client, method, path, model}` |
+| `sync` | `{last_ok, error, unsupported, skipped}`: the last successful read of the agent's log, the last error, whether the agent is too old to read it, and lines skipped in an unknown format |
+
+Times are unix seconds. Monitoring calls (`GET /api/ps`, `/api/version`, `/`) aren't stored.
+
+`GET /api/instances/{id}/requests/log` pages through every request in a range. It takes `range` as above, `sort` (`latest` or `slowest`, default `latest`), `offset` (default 0), `limit` (1–100, default 25) and `to`, the range's end in unix seconds (default now). Pass the `to` from the first page with every later one, so requests that arrive meanwhile don't shift the pages. It returns `{range, sort, from, to, offset, limit, total, requests}`: `total` counts the requests on every page, and each request has the fields of `recent` above.
+
+## Uptime
+
+`GET /api/instances/{id}/uptime?range=24h|7d|30d` (default `30d`) returns `{range, from, to, coverage, ollama, agent}`. `agent` is `null` for a host without an agent. Each of `ollama` and `agent` is:
+
+| Field | Meaning |
+|---|---|
+| `up_pct` | Share of the observed, known time it was up: `up_s / (up_s + down_s)`, or `null` with neither |
+| `up_s`, `down_s` | Seconds up and down |
+| `unknown_s` | Seconds watched before its state was first seen, such as after a dashboard start |
+| `unobserved_s` | Seconds the dashboard wasn't polling the host |
+| `segments` | `[{start, end, state, error?}]` in time order, `state` being `up`, `down`, `unknown` or `unobserved`; `error` is why it was down |
+| `outages` | The down segments as `[{start, end, error, ongoing}]`, newest first; `ongoing` is true while the last poll still saw it down |
+
+Unobserved and unknown time count neither as up nor as down. Times are unix seconds.
 
 ## Events
 
@@ -90,11 +134,46 @@ Events are observations, not exact usage. `t` is the poll in which a change was 
 
 Events follow `history_retention_days`. When an observed span is older than the retention, the state at the cutoff is kept as `first` events, so a long span still starts with a known state.
 
+## Alerts
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/alerts` | `{active, store_error}`: alerts that are pending or firing, and the last error saving transitions (`null` when fine) |
+| GET | `/api/alerts/rules` | `{rules}` |
+| PUT | `/api/alerts/rules` | `{rules}` → `{rules}`; replaces the whole list. Rules left out are deleted, and their firing alerts resolve |
+| GET | `/api/alerts/channels` | `{channels}`: [notification channels](alerts.md#notifications), without their secrets |
+| PUT | `/api/alerts/channels` | `{channels}` → `{channels}`; replaces the whole list. A blank `url`, `token` or `email.password` keeps the stored one |
+| POST | `/api/alerts/channels/test` | `{channel}` → `{ok, detail}`: sends a test message with these settings, saved or not; with an existing `id`, blank secrets use the stored ones |
+| GET | `/api/alerts/silences` | `{silences}` in force |
+| POST | `/api/alerts/silences` | `{rule, instance, subject, duration_s, note}` → `{silence}` (201); see below |
+| DELETE | `/api/alerts/silences/{id}` | Ends a silence or acknowledgement early |
+| GET | `/api/alerts/transitions?after=…&limit=…` | `{transitions}` in order: alerts firing and resolving after the transition id `after`, or else the latest `limit` (1–1000, default 200) |
+
+A rule is `{id, name, kind, enabled, threshold, for_s, clear_s, hosts, channels}`:
+
+| Field | Meaning |
+|---|---|
+| `id` | Letters, digits, `_`, `.` or `-`. Omit it for a new rule to get one made from the name. Keep it when editing: alerts belong to the rule's ID |
+| `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable`, `ollama_crash`, `gpu_lost`, `context_short` or `reload_churn` (loads per hour, at most 10000); see [Alerts](alerts.md#rules) |
+| `threshold` | Above 0, at most 150 for `gpu_temp` and 100 for the percentages; `null` for the kinds without one |
+| `for_s`, `clear_s` | Whole seconds, 0 to 86400: how long the condition has to hold before firing, and be gone before resolving |
+| `hosts` | Host IDs, or `null` for every host including ones added later |
+| `channels` | Channel IDs to notify, `null` (or left out) for every channel including ones added later, or `[]` for none |
+| `enabled` | `false` keeps the rule without checking it |
+
+An active alert is `{rule, name, kind, instance, subject, state, since, fired_at, value, detail, unknown, flapping, silence}`. `subject` tells apart several alerts of one rule on a host: `gpu0`, `gpu1`, … for GPUs, the path for disks, empty otherwise. `state` is `pending` (the condition holds, but not yet for `for_s`) or `firing`. `since` is when the condition was first seen and `fired_at` when it fired. `unknown: true` means the last poll had no data for it, so it can neither fire nor resolve until data comes back; see [Missing data](alerts.md#missing-data). `value` is the reading in the threshold's unit, or `null`. `silence` is the silence or acknowledgement covering it, or `null`.
+
+A silence is `{id, created, rule, instance, subject, until, until_resolved, note}`. `rule`, `instance` and `subject` say what it covers; `null` (or left out) covers any, but a silence needs a `rule`, an `instance`, or both. Give `duration_s` (60 to 2592000) to silence for a while, or `until_resolved: true` with all three of `rule`, `instance` and `subject` to acknowledge one active alert until it resolves (409 if it isn't active). Silences end by themselves; see [Silences](alerts.md#silences).
+
+A channel is `{id, name, type, enabled, send_resolved, url, token, email}`, with `type` `webhook`, `discord`, `slack` or `email`. `url` is for the first three, `token` (sent as `Authorization: Bearer`) for `webhook` only, and `email` is `{host, port, security, username, password, from, to}` with `security` `starttls` (default), `tls` or `none`. `clear_token: true` and `email.clear_password: true` remove a stored secret. Responses leave the secrets out: they show `url_hint` (the URL up to its host), `has_token` and `email.has_password`, plus `status`: `{last_ok, last_error, last_error_at, queued}` since the dashboard started. The JSON the generic webhook receives is described under [Notifications](alerts.md#the-webhooks-json).
+
+A transition is `{id, t, rule, name, kind, instance, subject, state, value, detail, flapping}` with `state` `firing` or `resolved`. The rule's name and kind are copied, so they stay readable after the rule changes. Poll with `after` set to the last `id` you saw to follow new transitions. Transitions follow `history_retention_days`, except the latest one of an alert that is still firing.
+
 ## Models and jobs
 
 | Method | Path | Body / result |
 |---|---|---|
-| GET | `/api/instances/{id}/models` | Installed models from Ollama |
+| GET | `/api/instances/{id}/models` | Installed models from Ollama's `/api/tags`, each with `cloud`: `true` for an Ollama cloud model (Ollama reports `remote_host`, or the tag ends in `cloud`) |
 | POST | `/api/instances/{id}/models/show` | `{model}` → details, parsed parameters, system prompt and native context length |
 | POST | `/api/instances/{id}/models/pull` | `{model}` → background job |
 | POST | `/api/instances/{id}/models/create` | `{model, from, parameters?, system?}` → background job |
@@ -160,5 +239,9 @@ The agent listens separately, normally on port 11435, for HTTPS and (unless `PAD
 | PUT | `/env` | `{vars, restart?}`; replace managed variables on the allowlist, removing omitted ones; preserve variables outside the list. Restarts unless `restart` is `false`. See [preserving settings](#preserve-existing-environment-settings) |
 | POST | `/service/restart` | Restart Ollama |
 | GET | `/logs?lines=500` | Ollama log tail |
+| GET | `/gpu-check` | `{ts, platform, log, nvidia_uvm?}`: the GPU-related lines of Ollama's log since it last started (`log.lines`, and `log.error` when it can't be read), and on Linux the `nvidia_uvm` state (agents from 0.8.0) |
+| GET | `/runner-starts?since=…` | `{ts, starts}`: the times (unix seconds, the agent's clock) Ollama logged a model runner starting since `since` (at most a day back; default an hour), and `error` when the log can't be read (agents from 0.8.0) |
+| POST | `/gpu/reload-uvm` | Linux, as root, outside a container: stops Ollama, reloads `nvidia_uvm` and starts Ollama → `{ok, steps, stderr}`; 409 where it can't. The Windows agent answers 400 (agents from 0.8.0) |
+| GET | `/requests?since=…` | `{requests, until, more, skipped}`: the request lines in Ollama's log after `since` (unix seconds), at most 5000. A log file has whole-second times, so agents reading one (Windows, `PADDOCK_OLLAMA_LOG`) also return the lines from the second `since` falls in; drop the ones you already have. Ask again from `until` while `more` is true; `skipped` counts lines in an unknown format (agents from 0.8.0) |
 
 Both agents implement these routes. Installation and configuration: [Linux](agent-linux.md) · [Windows](agent-windows.md).

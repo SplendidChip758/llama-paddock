@@ -12,6 +12,10 @@
  *   PUT  /env               {vars, restart} — set/remove them, optionally restart Ollama
  *   POST /service/restart   restart the Ollama app with the current environment
  *   GET  /logs?lines=N      tail of %LOCALAPPDATA%\Ollama\server.log
+ *   GET  /gpu-check         GPU lines from server.log since Ollama started, for the dashboard's GPU check
+ *   POST /gpu/reload-uvm    Linux only: answers 400 here
+ *   GET  /runner-starts?since=T  when Ollama started model runners, from server.log
+ *   GET  /requests?since=T  Ollama's request log lines after T (unix seconds)
  * The port serves HTTPS with the agent's own key, and plain HTTP unless PADDOCK_AGENT_HTTP=off.
  *
  * Why user variables: Ollama for Windows reads the account's environment
@@ -45,7 +49,7 @@ import crypto from "node:crypto";
 import { execFile, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const VERSION = "0.7.0";
+const VERSION = "0.8.0-dev.11";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const fileCfg = (() => {
   const file = path.join(HERE, "agent.json");
@@ -405,6 +409,179 @@ function tailFile(file, lines) {
   }
 }
 
+// ------------------------------------------------------------------ GPU check
+// Ollama falls back to the CPU without an error when it can't use the GPU. The dashboard compares
+// where models are loaded with nvidia-smi, and these lines from Ollama's log since its last start
+// give it the evidence: discovery at startup, CUDA/ROCm errors later. The dashboard decides what
+// the lines mean, so newer Ollama wording only needs a dashboard update.
+// Keep GPU_LOG_RE and gpuLogLines() the same in both agents.
+const GPU_LOG_RE = /cuda|cudart|nvcuda|nvml|nvidia|rocm|\bhip\b|amdgpu|gpu|vram|inference compute|offload|library=/i;
+const GPU_LOG_KEEP = 150;
+
+function gpuLogLines(lines) {
+  const hits = lines.filter((l) => GPU_LOG_RE.test(l) && !l.includes("[GIN]")).map((l) => (l.length > 500 ? `${l.slice(0, 500)}…` : l));
+  // the start of the run holds discovery, the end the latest errors
+  return hits.length > 2 * GPU_LOG_KEEP ? [...hits.slice(0, GPU_LOG_KEEP), ...hits.slice(-GPU_LOG_KEEP)] : hits;
+}
+
+/** Ollama for Windows starts a new server.log each time it starts, so the file is the current run. */
+function gpuLog() {
+  const HEAD = 4 * 1024 * 1024, TAIL = 16 * 1024 * 1024;
+  let fd;
+  try {
+    fd = fs.openSync(LOG_FILE, "r");
+    const size = fs.fstatSync(fd).size;
+    const read = (pos, len) => {
+      const buf = Buffer.alloc(len);
+      fs.readSync(fd, buf, 0, len, pos);
+      return buf.toString("utf8").split(/\r?\n/);
+    };
+    // a long run's log is read at both ends: discovery is at the start, the latest errors at the end
+    const lines = size <= HEAD + TAIL ? read(0, size) : [...read(0, HEAD).slice(0, -1), ...read(size - TAIL, TAIL).slice(1)];
+    return { source: "server.log", lines: gpuLogLines(lines) };
+  } catch (e) {
+    return { source: "server.log", lines: [], error: `cannot read ${LOG_FILE}: ${e.message}` };
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+// ------------------------------------------------------------------ model loads
+// Ollama logs "llama runner started in N seconds" once per model load. The dashboard only sees
+// loads that last until a poll, so these times tell it about models that load and unload between
+// polls, such as when a client sends keep_alive 0. Keep RUNNER_STARTED_RE the same in both agents.
+const RUNNER_STARTED_RE = /llama runner started in/;
+
+/** server.log only covers the current run of Ollama, so starts before it are missing. */
+function runnerStarts(since) {
+  const TAIL = 16 * 1024 * 1024;
+  let fd;
+  try {
+    fd = fs.openSync(LOG_FILE, "r");
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, TAIL);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    const starts = [];
+    for (const l of buf.toString("utf8").split(/\r?\n/)) {
+      if (!RUNNER_STARTED_RE.test(l)) continue;
+      const t = Date.parse(/time=(\S+)/.exec(l)?.[1] ?? "") / 1000;
+      if (t >= since) starts.push(t);
+    }
+    return { starts };
+  } catch (e) {
+    return { starts: [], error: `cannot read ${LOG_FILE}: ${e.message}` };
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+// ------------------------------------------------------------------ request log
+// Ollama logs each HTTP request through gin, one line per request:
+//   [GIN] 2026/11/02 - 09:14:07 | 200 |  4.551040958s |   192.168.30.20 | POST     "/api/chat"
+// Only these fields are read; Ollama's log has no prompts or responses. A line that starts like one
+// but doesn't parse, such as from a newer Ollama, is counted as skipped rather than misread.
+// Keep this section the same in both agents.
+const GIN_PREFIX = "[GIN] ";
+const DURATION_MS = { h: 3600e3, m: 60e3, s: 1e3, ms: 1, "µs": 1e-3, us: 1e-3, ns: 1e-6 };
+/** Requests one call returns at most; the dashboard asks again from where it stopped. */
+const REQUESTS_MAX = 5000;
+/** A log file is read from its end, at most this much of it. */
+const REQUEST_LOG_TAIL_BYTES = 8 * 1024 * 1024;
+
+/** Go's time.Duration text ("4.55s", "1m2.5s", "735.1µs") in milliseconds, or null. */
+function goDurationMs(text) {
+  let ms = 0, rest = text;
+  if (!rest) return null;
+  while (rest) {
+    const m = /^(\d+(?:\.\d+)?)(h|ms|m|s|µs|us|ns)/.exec(rest);
+    if (!m) return null;
+    ms += Number(m[1]) * DURATION_MS[m[2]];
+    rest = rest.slice(m[0].length);
+  }
+  return ms;
+}
+
+/** A gin request line: null if the line isn't one, `{skipped: true}` if it looks like one but doesn't parse. */
+function parseRequestLine(line) {
+  const at = line.indexOf(GIN_PREFIX);
+  if (at < 0) return null;
+  const parts = line.slice(at + GIN_PREFIX.length).split("|").map((p) => p.trim());
+  if (parts.length !== 5) return { skipped: true };
+  const [when, status, latency, client, call] = parts;
+  const d = /^(\d{4})\/(\d{2})\/(\d{2}) - (\d{2}):(\d{2}):(\d{2})$/.exec(when);
+  const c = /^([A-Z]+) +"([^"]*)"$/.exec(call);
+  const ms = goDurationMs(latency);
+  if (!d || !/^\d{3}$/.test(status) || ms === null || !c || !client || /\s/.test(client)) return { skipped: true };
+  return {
+    // gin writes the host's local time without a zone
+    local: new Date(+d[1], +d[2] - 1, +d[3], +d[4], +d[5], +d[6]).getTime() / 1000,
+    status: Number(status), duration_ms: Math.round(ms * 1000) / 1000, client, method: c[1],
+    // the query string is dropped: it isn't needed to tell endpoints apart
+    path: c[2].split("?")[0],
+  };
+}
+
+/** The last `maxBytes` of a file as lines (the first, likely cut, is dropped when the file is longer). */
+function tailLines(file, maxBytes) {
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, maxBytes);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    const lines = buf.toString("utf8").split(/\r?\n/);
+    return size > len ? lines.slice(1) : lines;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/**
+ * The requests after `since` and up to `until` from log entries `{t, line}` in time order (`t`: an
+ * exact time from the journal, or null to use the line's own). At most REQUESTS_MAX are returned;
+ * `until` then says how far they reach, and `more` that the caller should ask again from there.
+ */
+function collectRequests(entries, since, until) {
+  const requests = [];
+  let skipped = 0;
+  for (const e of entries) {
+    const r = parseRequestLine(e.line);
+    if (!r) continue;
+    if (r.skipped) {
+      skipped++;
+      continue;
+    }
+    const t = e.t ?? r.local;
+    // a log file's lines have whole seconds, so one stamped with the second `since` falls in may
+    // have been written after it: those come again, and the dashboard drops the ones it already has
+    const whole = e.t === null;
+    if ((whole ? t + 1 : t) <= since || t > until) continue;
+    if (requests.length === REQUESTS_MAX) {
+      // end before the last request's time, so the others at that time come with the next call
+      const last = requests[requests.length - 1].t;
+      return { requests: requests.filter((x) => x.t < last), until: whole ? last : last - 0.001, more: true, skipped };
+    }
+    const { local: _local, ...rest } = r;
+    requests.push({ t, ...rest });
+  }
+  return { requests, until, more: false, skipped };
+}
+
+function readRequests(since) {
+  const now = Date.now() / 1000;
+  let lines;
+  try {
+    lines = tailLines(LOG_FILE, REQUEST_LOG_TAIL_BYTES);
+  } catch (e) {
+    // Ollama hasn't written a log yet
+    if (e.code === "ENOENT") return collectRequests([], since, now);
+    throw httpError(500, `can't read ${LOG_FILE}: ${e.message}`);
+  }
+  return collectRequests(lines.map((line) => ({ t: null, line })), since, now);
+}
+
 // ------------------------------------------------------------------ TLS
 // The agent makes its own ECDSA key and a self-signed certificate for it. Node can't write X.509
 // certificates, and Windows has no openssl, so a minimal DER encoder builds one. The dashboard pins
@@ -541,6 +718,20 @@ const routes = {
   "GET /logs": async (_req, url) => {
     const lines = Math.max(10, Math.min(Number(url.searchParams.get("lines")) || 200, 2000));
     return { lines: tailFile(LOG_FILE, lines) };
+  },
+  "GET /gpu-check": async () => ({ ts: Date.now() / 1000, platform: "windows", log: gpuLog() }),
+  "POST /gpu/reload-uvm": async () => {
+    throw httpError(400, "nvidia_uvm is a Linux kernel module; on Windows, restart Ollama instead");
+  },
+  "GET /runner-starts": async (_req, url) => {
+    const now = Date.now() / 1000;
+    const since = Math.max(now - 86400, Math.min(Number(url.searchParams.get("since")) || now - 3600, now));
+    return { ts: now, ...runnerStarts(since) };
+  },
+  // ?since=<unix seconds>: the requests after it, from Ollama's log
+  "GET /requests": async (_req, url) => {
+    const since = Number(url.searchParams.get("since"));
+    return readRequests(Number.isFinite(since) && since > 0 ? since : Date.now() / 1000 - 3600);
   },
 };
 

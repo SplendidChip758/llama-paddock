@@ -84,6 +84,51 @@ export interface PsModel {
   context_length?: number;
 }
 
+/** See modelSplit() in lib/split.ts. */
+export interface ModelSplit {
+  /** gpu: all in VRAM · partial: some in system RAM, run by the CPU · cpu: none in VRAM ·
+   *  cloud: runs remotely · unknown: Ollama didn't report usable sizes */
+  state: "gpu" | "partial" | "cpu" | "cloud" | "unknown";
+  /** share of the model in VRAM, 0–100; null for cloud and unknown */
+  gpu_pct: number | null;
+  /** bytes in system RAM; null for cloud and unknown */
+  cpu_bytes: number | null;
+}
+
+/** An /api/ps entry as the dashboard serves it. */
+export interface LoadedModel extends PsModel {
+  split: ModelSplit;
+  /** missing until the dashboard has read the model's /api/show */
+  context?: ContextCheck;
+}
+
+/** The context a loaded model runs with against what the host sets; see contextCheck() in lib/modelcheck.ts. */
+export interface ContextCheck {
+  /** tokens, from /api/ps */
+  running: number | null;
+  /** the most the model supports, from /api/show */
+  max: number | null;
+  /** what the host sets when a client doesn't: num_ctx in the Modelfile, else OLLAMA_CONTEXT_LENGTH */
+  configured: number | null;
+  configured_by: "modelfile" | "env" | null;
+  /** short: below what the host sets, without proof of the cause · default: nothing sets more,
+   *  and the model supports far more · ok · unknown: Ollama doesn't report the running context */
+  state: "ok" | "short" | "default" | "unknown";
+  /** what it means and what to change; null when ok */
+  hint: string | null;
+}
+
+/** A model loaded again and again; see reloadChurn() in lib/modelcheck.ts. */
+export interface ReloadChurn {
+  /** null: loads Ollama's log shows that the polls never saw, so their model isn't known */
+  model: string | null;
+  /** in the last hour */
+  loads: number;
+  summary: string;
+  causes: string[];
+  fixes: string[];
+}
+
 export interface TagModel {
   name: string;
   model: string;
@@ -91,6 +136,11 @@ export interface TagModel {
   digest: string;
   modified_at: string;
   details?: ModelDetails;
+  /** cloud models: the model and host Ollama forwards requests to */
+  remote_model?: string;
+  remote_host?: string;
+  /** added by the dashboard: see isCloudModel() */
+  cloud?: boolean;
 }
 
 export interface InstanceSnapshot {
@@ -119,9 +169,52 @@ export interface InstanceSnapshot {
   agent_error: string | null;
   version: string | null;
   agent_version: string | null;
-  ps: PsModel[];
+  ps: LoadedModel[];
   stats: AgentStats | null;
+  /** whether Ollama uses the GPU nvidia-smi sees; null without an agent, an NVIDIA GPU or Ollama answering */
+  gpu_check: GpuCheck | null;
+  /** models loaded at least RELOAD_WARN_LOADS times in the last hour */
+  reload_churn: ReloadChurn[];
   updated: number | null;
+}
+
+/** The agent's GET /gpu-check (agents from 0.8.0): evidence for the GPU check, read when the dashboard asks. */
+export interface AgentGpuCheck {
+  ts: number;
+  platform?: Platform;
+  /** GPU-related lines from Ollama's log since it last started */
+  log: { source: "journal" | "server.log"; lines: string[]; error?: string };
+  /** Linux: the NVIDIA kernel modules. In a container they belong to the host, so can_reload is false there. */
+  nvidia_uvm?: { driver: boolean; module: boolean; device: boolean; container: boolean; can_reload: boolean };
+}
+
+export type GpuFixAction = "restart" | "reload_uvm";
+
+export interface GpuFix {
+  /** a fix the dashboard runs through the agent; null for a command to run by hand */
+  action: GpuFixAction | null;
+  label: string;
+  detail: string;
+  command?: string;
+}
+
+/** See diagnoseGpu() in lib/gpucheck.ts. */
+export interface GpuCheck {
+  /** ok: Ollama uses the GPU · lost: a GPU is present, but Ollama runs on the CPU or failed to use it ·
+   *  cpu_intended: on the CPU because a setting says so · unknown: nothing loaded, and the log doesn't tell */
+  state: "ok" | "lost" | "cpu_intended" | "unknown";
+  summary: string;
+  /** likely causes, the likeliest first; lost only */
+  causes: string[];
+  fixes: GpuFix[];
+  /** what the result rests on, as sentences */
+  evidence: string[];
+  /** the lines of Ollama's log since its last start that the result rests on */
+  log_lines: string[];
+  /** when Ollama's log and settings were read; null: not yet in this run of Ollama, so only /api/ps counts */
+  checked_at: number | null;
+  /** what limited the check, such as an older agent or an unreadable log */
+  notes: string[];
 }
 
 export interface HistoryPoint {
@@ -155,6 +248,210 @@ export interface HostEvent {
   digest?: string;
   context_length?: number;
   size_vram?: number;
+}
+
+/** What an alert rule watches; see lib/rules.ts for each kind's unit and defaults. */
+export type AlertKind = "gpu_temp" | "vram" | "disk" | "host_unreachable" | "agent_unreachable" | "ollama_crash" | "gpu_lost" | "context_short" | "reload_churn";
+
+export interface AlertRule {
+  id: string;
+  name: string;
+  kind: AlertKind;
+  enabled: boolean;
+  /** °C for gpu_temp, percent for vram and disk; null for the kinds without one */
+  threshold: number | null;
+  /** seconds the condition must be observed without a break before the alert fires */
+  for_s: number;
+  /** seconds the condition must be observed clear without a break before a firing alert resolves */
+  clear_s: number;
+  /** host ids, or null for every host, including ones added later */
+  hosts: string[] | null;
+  /** notification channel ids, or null for every channel, including ones added later. Missing before 0.8.0: every channel */
+  channels?: string[] | null;
+}
+
+/**
+ * One rule's alert on one host. `subject` tells apart several on a host: "gpu0" for a GPU, the path
+ * for a disk, "" for the host itself.
+ */
+export interface ActiveAlert {
+  rule: string;
+  name: string;
+  kind: AlertKind;
+  instance: string;
+  subject: string;
+  /** pending: the condition holds, but not yet for the rule's for_s */
+  state: "pending" | "firing";
+  since: number;
+  fired_at: number | null;
+  value: number | null;
+  detail: string;
+  /** the last poll had no data for it (agent down, GPU gone, …), so it can neither fire nor resolve */
+  unknown: boolean;
+  /** fired repeatedly in a short time; it now has to stay clear longer before it resolves */
+  flapping: boolean;
+  /** a silence or acknowledgement that matches it: it still shows and is recorded, but isn't counted or sent */
+  silence: AlertSilence | null;
+}
+
+/** One stretch of a timeline. unobserved: the dashboard wasn't polling; unknown: polled, but not yet seen either way. */
+export interface AvailabilitySegment {
+  start: number;
+  end: number;
+  state: "up" | "down" | "unknown" | "unobserved";
+  /** down: why, as the poll that saw it go down reported */
+  error?: string;
+}
+
+/** Ollama's or the agent's availability over a range. Only observed time counts: up_pct is up / (up + down). */
+export interface Availability {
+  up_pct: number | null;
+  up_s: number;
+  down_s: number;
+  unknown_s: number;
+  unobserved_s: number;
+  segments: AvailabilitySegment[];
+  /** the down segments, newest first; ongoing: still down at the last poll */
+  outages: { start: number; end: number; error: string | null; ongoing: boolean }[];
+}
+
+export interface HostAvailability {
+  range: string;
+  from: number;
+  to: number;
+  /** share of the range the dashboard was polling the host */
+  coverage: number;
+  ollama: Availability;
+  /** null for a host without an agent */
+  agent: Availability | null;
+}
+
+/**
+ * Alerts muted for a while. rule, instance and subject say what it matches; null matches anything,
+ * so a silence with only `instance` covers a whole host (maintenance).
+ */
+export interface AlertSilence {
+  id: number;
+  created: number;
+  rule: string | null;
+  instance: string | null;
+  subject: string | null;
+  /** unix seconds; null for an acknowledgement */
+  until: number | null;
+  /** an acknowledgement: lasts until its alert resolves */
+  until_resolved: boolean;
+  note: string;
+}
+
+/** An alert starting or ending. Rule name and kind are copied, since rules can change later. */
+export interface AlertTransition {
+  id: number;
+  t: number;
+  rule: string;
+  name: string;
+  kind: AlertKind;
+  instance: string;
+  subject: string;
+  state: "firing" | "resolved";
+  value: number | null;
+  detail: string;
+  flapping: boolean;
+}
+
+/** One request from Ollama's log, as the agents' GET /requests returns it. */
+export interface AgentRequest {
+  /** when it finished, unix seconds */
+  t: number;
+  status: number;
+  duration_ms: number;
+  /** the client's IP address, as Ollama saw it */
+  client: string;
+  method: string;
+  /** without the query string */
+  path: string;
+}
+
+export interface RequestCount {
+  count: number;
+  /** answered with status 400 or above */
+  errors: number;
+  avg_ms: number;
+  max_ms: number;
+}
+
+/** A host's request log over a range, from GET /api/instances/{id}/requests. */
+export interface RequestSummary {
+  range: string;
+  from: number;
+  to: number;
+  /** seconds per bucket in `buckets` */
+  bucket_s: number;
+  total: RequestCount;
+  buckets: { t: number; count: number; errors: number }[];
+  /** `name`: what the client's address has been named, or null */
+  clients: (RequestCount & { client: string; name: string | null; last: number })[];
+  endpoints: (RequestCount & { method: string; path: string })[];
+  /** requests matched to the one model that was loaded then; the rest are left out */
+  models: (RequestCount & { model: string })[];
+  slowest: (AgentRequest & { model: string | null })[];
+  recent: (AgentRequest & { model: string | null })[];
+  /** how collecting goes for this host: the last successful read, and the last error */
+  sync: {
+    last_ok: number | null;
+    error: string | null;
+    /** the agent is older than 0.8.0 and has no request log */
+    unsupported: boolean;
+    /** lines that looked like requests but couldn't be read, since the dashboard started */
+    skipped: number;
+  };
+}
+
+/** One page of a host's requests, from GET /api/instances/{id}/requests/log. */
+export interface RequestLogPage {
+  range: string;
+  sort: "latest" | "slowest";
+  from: number;
+  to: number;
+  offset: number;
+  limit: number;
+  /** requests in the range, on every page */
+  total: number;
+  requests: (AgentRequest & { model: string | null })[];
+}
+
+export type ChannelType = "webhook" | "discord" | "slack" | "email";
+
+/** A notification channel as the API returns it. Secrets (URLs, tokens, passwords) never leave the server. */
+export interface NotifyChannel {
+  id: string;
+  name: string;
+  type: ChannelType;
+  enabled: boolean;
+  /** also send a message when an alert resolves */
+  send_resolved: boolean;
+  /** webhook, discord, slack: the URL with everything after the host hidden */
+  url_hint: string | null;
+  /** webhook: a bearer token is set */
+  has_token: boolean;
+  email: {
+    host: string;
+    port: number;
+    security: "tls" | "starttls" | "none";
+    username: string | null;
+    has_password: boolean;
+    from: string;
+    to: string[];
+  } | null;
+  status: ChannelStatus;
+}
+
+/** How deliveries to a channel have gone since the dashboard started. */
+export interface ChannelStatus {
+  last_ok: number | null;
+  last_error: string | null;
+  last_error_at: number | null;
+  /** messages waiting to be sent, retries included */
+  queued: number;
 }
 
 export type JobState ="running" | "done" | "error" | "cancelled";

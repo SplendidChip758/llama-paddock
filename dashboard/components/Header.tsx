@@ -7,15 +7,18 @@ import { JobsDrawer } from "./JobsDrawer";
 import { statusOf } from "./ui";
 import { Logo } from "./Logo";
 import { api } from "@/lib/format";
+import { loudAlerts } from "./AlertBits";
 
 export function Header({ version }: { version: string }) {
   const pre = version.includes("-");
-  const { instances, jobs, setJobsOpen, me } = usePaddock();
+  const { instances, jobs, setJobsOpen, me, alerts } = usePaddock();
   const path = usePathname();
   const m = path.match(/^\/i\/([^/]+)(?:\/([^/]+))?/);
   const currentId = m ? decodeURIComponent(m[1]) : null;
   const tab = m?.[2] ?? "monitor";
   const running = jobs.filter((j) => j.state === "running").length;
+  // silenced and acknowledged alerts still show on the Alerts page, but don't call for attention
+  const firing = loudAlerts(alerts).length;
 
   return (
     <>
@@ -36,6 +39,11 @@ export function Header({ version }: { version: string }) {
             );
           })}
         </nav>
+        <Link href="/alerts" className={`jobsbtn ${path === "/alerts" ? "active" : ""}`}
+          title={firing ? `${firing} alert${firing === 1 ? "" : "s"} firing` : "Alert rules"}>
+          <span>Alerts</span>
+          {firing > 0 && <span className="pill alert">{firing}</span>}
+        </Link>
         <button className="jobsbtn" onClick={() => setJobsOpen(true)} title="Pull / create jobs">
           <span>Jobs</span>
           <span className={`pill ${running ? "live" : ""}`}>{running || jobs.length}</span>

@@ -34,6 +34,8 @@ before(async () => {
       ...process.env, PADDOCK_AGENT_TOKEN: TOKEN, PADDOCK_AGENT_BIND: "127.0.0.1", PADDOCK_AGENT_PORT: String(port),
       PADDOCK_DRY_RUN: "1", PADDOCK_OVERRIDE_PATH: path.join(data.dir, "override.conf"),
       PADDOCK_AGENT_TLS_KEY: path.join(data.dir, "agent.key"), PADDOCK_AGENT_TLS_CERT: path.join(data.dir, "agent.crt"),
+      // dry run reads no journal: Ollama's request log comes from this file instead
+      PADDOCK_OLLAMA_LOG: writeOllamaLog(path.join(data.dir, "ollama.log")),
     },
   });
   agentUrl = `http://127.0.0.1:${port}`;
@@ -45,6 +47,26 @@ before(async () => {
   c = await new Client(stack.dashboard.url).login();
 });
 after(() => holder.stack?.stop());
+
+/** gin's line start at unix time `t`: local time without a zone, in whole seconds. */
+function ginAt(t) {
+  const p = (n) => String(n).padStart(2, "0");
+  const d = new Date(t * 1000);
+  return `[GIN] ${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())} - ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/** Ollama's log as gin writes it: two requests, a monitoring call, a line it can't read, and noise. */
+function writeOllamaLog(file) {
+  const gin = (ago) => ginAt(Date.now() / 1000 - ago);
+  fs.writeFileSync(file, [
+    'time=2026-11-02T09:00:00 level=INFO source=routes.go msg="Listening on [::]:11434"',
+    `${gin(120)} | 200 |  2.512345s |   192.168.30.30 | POST     "/api/chat"`,
+    `${gin(90)} | 200 |     812.4µs |       127.0.0.1 | GET      "/api/ps"`,
+    `${gin(60)} | 500 |  1m0.25s |   192.168.30.31 | POST     "/v1/chat/completions?stream=true"`,
+    `${gin(30)} 200 a request line from a newer Ollama`,
+  ].join("\n") + "\n");
+  return file;
+}
 
 const call = async (base, token, method, p, body) => {
   const r = await fetch(base + p, {
@@ -117,6 +139,54 @@ test("the simulated agent answers with the real agent's shapes", async () => {
 
   const [rl, sl] = await Promise.all([real("GET", "/logs?lines=10"), simulated("GET", "/logs?lines=10")]);
   assert.deepEqual(keys(sl.data), keys(rl.data), "/logs");
+
+  const [rg, sg] = await Promise.all([real("GET", "/gpu-check"), simulated("GET", "/gpu-check")]);
+  assert.deepEqual(keys(sg.data), keys(rg.data), "/gpu-check");
+  // dry run can't read the journal, so it reports why
+  assert.deepEqual(keys(sg.data.log), keys(rg.data.log).filter((k) => k !== "error"), "/gpu-check log");
+  assert.deepEqual(keys(sg.data.nvidia_uvm), keys(rg.data.nvidia_uvm), "/gpu-check nvidia_uvm");
+  const [rrs, srs] = await Promise.all([real("GET", "/runner-starts?since=0"), simulated("GET", "/runner-starts?since=0")]);
+  assert.deepEqual(keys(srs.data), keys(rrs.data).filter((k) => k !== "error"), "/runner-starts");
+  // no NVIDIA driver on either, so neither reloads
+  const [rr, sr] = await Promise.all([real("POST", "/gpu/reload-uvm"), simulated("POST", "/gpu/reload-uvm")]);
+  assert.equal(sr.status, rr.status, JSON.stringify(rr.data));
+  const since = Date.now() / 1000 - 3600;
+  const [rq, sq] = await Promise.all([real("GET", `/requests?since=${since}`), simulated("GET", `/requests?since=${since}`)]);
+  assert.deepEqual(keys(sq.data), keys(rq.data), "/requests");
+  assert.deepEqual(keys(sq.data.requests[0] ?? rq.data.requests[0]), keys(rq.data.requests[0]), "/requests requests[]");
+});
+
+test("the real agent reads Ollama's request log; the dashboard stores it and counts unreadable lines", async () => {
+  const r = await real("GET", `/requests?since=${Date.now() / 1000 - 3600}`);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.skipped, 1, "the line in an unknown format is skipped");
+  assert.deepEqual(r.data.requests.map((x) => `${x.status} ${x.client} ${x.method} ${x.path}`), [
+    "200 192.168.30.30 POST /api/chat",
+    "200 127.0.0.1 GET /api/ps",
+    "500 192.168.30.31 POST /v1/chat/completions",
+  ]);
+  assert.equal(r.data.requests[0].duration_ms, 2512.345);
+  assert.equal(r.data.requests[2].duration_ms, 60250);
+  assert.ok(Math.abs(Date.now() / 1000 - 120 - r.data.requests[0].t) < 5, "gin's local time is read as local time");
+
+  // the dashboard reads it every 10 polls; the monitoring call isn't stored
+  const s = await waitFor(async () => {
+    const x = (await c.get("/api/instances/sim-1/requests?range=1h")).data;
+    return x.total?.count >= 2 && x;
+  }, { timeout: 40_000, what: "the dashboard to store the real agent's requests" });
+  assert.equal(s.total.count, 2);
+  assert.equal(s.total.errors, 1);
+  assert.ok(s.sync.skipped >= 1);
+});
+
+test("a request logged later in the second a read ended comes with the next read", async () => {
+  const first = await real("GET", `/requests?since=${Date.now() / 1000 - 3600}`);
+  const until = first.data.until;
+  // gin stamps it with that second, which is before `until`
+  fs.appendFileSync(path.join(data.dir, "ollama.log"), `${ginAt(Math.floor(until))} | 200 |  1.5s |   192.168.30.32 | POST     "/api/generate"\n`);
+  const next = await real("GET", `/requests?since=${until}`);
+  assert.equal(next.status, 200, JSON.stringify(next.data));
+  assert.deepEqual(next.data.requests.map((x) => `${x.client} ${x.path}`), ["192.168.30.32 /api/generate"], "and the older lines don't come again");
 });
 
 test("simulated GPUs have the fields the agents read from nvidia-smi", async () => {

@@ -6,12 +6,15 @@ import { api, instPath } from "@/lib/format";
 import { usePaddock } from "./PaddockProvider";
 import { statusOf } from "./ui";
 import { MonitorTab } from "./MonitorTab";
+import { DiagnosticsTab } from "./DiagnosticsTab";
 import { ModelsTab } from "./ModelsTab";
 import { EnvTab } from "./EnvTab";
 import { LogsTab } from "./LogsTab";
+import { RequestsTab } from "./RequestsTab";
 import { TABS, type Tab } from "@/lib/tabs";
 import { HostEditor } from "./HostEditor";
 import { AgentKeyNotice, AgentPlainChip, HttpsOffer, agentEncrypted } from "./AgentTls";
+import { HostAlertPill, HostSilence } from "./AlertBits";
 
 export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
   const { instances, loaded, toast } = usePaddock();
@@ -46,6 +49,7 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
           <div className="row">
             <span className={`dot ${c}`} />
             <h1>{st.name}</h1>
+            <HostAlertPill id={st.id} name={st.name} />
           </div>
           <div className="meta">
             <span>{label}</span>
@@ -62,6 +66,7 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
           </div>
         </div>
         <div className="row">
+          <HostSilence id={st.id} name={st.name} />
           {st.source === "ui" ? (
             <button className="btn" onClick={() => setEditing(true)}>Edit host</button>
           ) : (
@@ -87,9 +92,11 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
         ))}
       </nav>
       {tab === "monitor" && <MonitorTab st={st} />}
+      {tab === "diagnostics" && <DiagnosticsTab st={st} />}
       {tab === "models" && <ModelsTab st={st} />}
       {tab === "env" && <EnvTab st={st} key={id} />}
       {tab === "logs" && <LogsTab st={st} key={id} />}
+      {tab === "requests" && <RequestsTab st={st} key={id} />}
     </>
   );
 }

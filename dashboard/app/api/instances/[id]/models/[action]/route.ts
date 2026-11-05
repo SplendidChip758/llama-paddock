@@ -1,5 +1,5 @@
 import { HttpError, getInstance, handle, json, listJobs, ollama, readBody, startJob } from "@/lib/server";
-import { MODEL_NAME_RE, coerceParam, parseParameters } from "@/lib/params";
+import { MODEL_NAME_RE, coerceParam, nativeContext, parseParameters } from "@/lib/params";
 import type { ParamValue, ShowResult } from "@/lib/types";
 import type { Instance } from "@/lib/config";
 
@@ -18,7 +18,6 @@ const actions: Record<string, (inst: Instance, body: Body) => Promise<unknown>> 
     const model = str(body, "model");
     const d = await ollama(inst, "POST", "/api/show", { model });
     const info: Record<string, unknown> = d.model_info ?? {};
-    const ctxKey = Object.keys(info).find((k) => k.endsWith(".context_length"));
     const result: ShowResult = {
       model,
       details: d.details ?? null,
@@ -27,7 +26,7 @@ const actions: Record<string, (inst: Instance, body: Body) => Promise<unknown>> 
       parameters_raw: d.parameters ?? null,
       system: d.system ?? null,
       template: d.template ?? null,
-      native_context_length: ctxKey ? Number(info[ctxKey]) : null,
+      native_context_length: nativeContext(info),
       architecture: (info["general.architecture"] as string) ?? null,
       parameter_count: (info["general.parameter_count"] as number) ?? null,
       modified_at: d.modified_at ?? null,

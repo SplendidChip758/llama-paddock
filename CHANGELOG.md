@@ -1,3 +1,70 @@
+## [0.8.0-dev.11](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.10...v0.8.0-dev.11) (2026-11-05)
+
+### Bug Fixes
+
+* **dashboard:** remove the scrollbar beside the host tabs ([#121](https://github.com/SplendidChip758/llama-paddock/issues/121)) ([eed2e3c](https://github.com/SplendidChip758/llama-paddock/commit/eed2e3c89f2c0f771cf0e273779e7b9d441bb263))
+* **install:** install the newest prerelease on the dev channel ([#120](https://github.com/SplendidChip758/llama-paddock/issues/120)) ([e001b88](https://github.com/SplendidChip758/llama-paddock/commit/e001b88d2a1a35f060a9b671c730eaafbe308558))
+
+## [0.8.0-dev.10](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.9...v0.8.0-dev.10) (2026-11-04)
+
+### Features
+
+* **dashboard:** add a Diagnostics tab for GPU, context and reload checks ([#116](https://github.com/SplendidChip758/llama-paddock/issues/116)) ([125e99b](https://github.com/SplendidChip758/llama-paddock/commit/125e99bd66ebcb6fbbefe9db917c60e718a790a3))
+
+## [0.8.0-dev.9](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.8...v0.8.0-dev.9) (2026-11-04)
+
+### Features
+
+* **dashboard:** move host alerts into a header pill and page the request log ([#115](https://github.com/SplendidChip758/llama-paddock/issues/115)) ([e83686e](https://github.com/SplendidChip758/llama-paddock/commit/e83686e1bdaa8b60cdb427e6e14c4309d519f18f)), closes [#9](https://github.com/SplendidChip758/llama-paddock/issues/9) [#73](https://github.com/SplendidChip758/llama-paddock/issues/73)
+
+## [0.8.0-dev.8](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.7...v0.8.0-dev.8) (2026-11-04)
+
+### Bug Fixes
+
+* **agent:** keep requests logged in the second a read ended ([#114](https://github.com/SplendidChip758/llama-paddock/issues/114)) ([3fd3066](https://github.com/SplendidChip758/llama-paddock/commit/3fd306669596389b125ef7f749fdbeac92fd397f))
+
+## [0.8.0-dev.7](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.6...v0.8.0-dev.7) (2026-11-03)
+
+### Features
+
+* add a request log for each host ([#111](https://github.com/SplendidChip758/llama-paddock/issues/111)) ([4794d5e](https://github.com/SplendidChip758/llama-paddock/commit/4794d5e0994528b057f57db4420e09c2c56373dc)), closes [#73](https://github.com/SplendidChip758/llama-paddock/issues/73)
+
+## [0.8.0-dev.6](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.5...v0.8.0-dev.6) (2026-11-03)
+
+### Features
+
+* warn about cut-off context and constant model reloads ([#110](https://github.com/SplendidChip758/llama-paddock/issues/110)) ([604ffc1](https://github.com/SplendidChip758/llama-paddock/commit/604ffc101eb225eb7aa0fbab8d4e07d355df17fe)), closes [#71](https://github.com/SplendidChip758/llama-paddock/issues/71) [#72](https://github.com/SplendidChip758/llama-paddock/issues/72)
+
+## [0.8.0-dev.5](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.4...v0.8.0-dev.5) (2026-11-03)
+
+### Features
+
+* detect when Ollama loses the GPU ([#109](https://github.com/SplendidChip758/llama-paddock/issues/109)) ([4dc2795](https://github.com/SplendidChip758/llama-paddock/commit/4dc279534f5947d4fd58d099fb798dffe4532bc4)), closes [#71](https://github.com/SplendidChip758/llama-paddock/issues/71)
+
+## [0.8.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.3...v0.8.0-dev.4) (2026-11-02)
+
+### Features
+
+* **dashboard:** send alerts to webhook, Discord, Slack and email ([#107](https://github.com/SplendidChip758/llama-paddock/issues/107)) ([d8ac501](https://github.com/SplendidChip758/llama-paddock/commit/d8ac5014645aaa74394596c133ccbfab8c7172f5)), closes [#8](https://github.com/SplendidChip758/llama-paddock/issues/8)
+
+## [0.8.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.2...v0.8.0-dev.3) (2026-11-02)
+
+### Features
+
+* **dashboard:** add alert history, silences and host uptime ([#108](https://github.com/SplendidChip758/llama-paddock/issues/108)) ([52a3aa3](https://github.com/SplendidChip758/llama-paddock/commit/52a3aa35a2678fb1ad1542fd3619ca96fe54a983)), closes [#8](https://github.com/SplendidChip758/llama-paddock/issues/8) [#9](https://github.com/SplendidChip758/llama-paddock/issues/9)
+
+## [0.8.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0-dev.1...v0.8.0-dev.2) (2026-11-02)
+
+### Features
+
+* **dashboard:** add alert rules engine ([#106](https://github.com/SplendidChip758/llama-paddock/issues/106)) ([3197a41](https://github.com/SplendidChip758/llama-paddock/commit/3197a41d2200486e823879bf072a65a73514f602)), closes [#28](https://github.com/SplendidChip758/llama-paddock/issues/28) [#8](https://github.com/SplendidChip758/llama-paddock/issues/8) [#9](https://github.com/SplendidChip758/llama-paddock/issues/9) [#7](https://github.com/SplendidChip758/llama-paddock/issues/7)
+
+## [0.8.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0...v0.8.0-dev.1) (2026-11-02)
+
+### Features
+
+* **dashboard:** show GPU/CPU split on fleet overview and models tab ([#105](https://github.com/SplendidChip758/llama-paddock/issues/105)) ([ca71d99](https://github.com/SplendidChip758/llama-paddock/commit/ca71d994cae8696c8f50140e2efe8a044ca7b4a4)), closes [#28](https://github.com/SplendidChip758/llama-paddock/issues/28)
+
 ## [0.7.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.6.0...v0.7.0) (2026-11-01)
 
 ### Features

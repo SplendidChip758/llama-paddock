@@ -10,6 +10,8 @@
  *   - nvidia-smi GPU metrics and per-process GPU memory
  *   - the Ollama systemd environment (read + edit the drop-in override)
  *   - service restart / status and recent journal logs
+ *   - the GPU check: GPU lines from Ollama's log since it started, the nvidia_uvm module, and reloading it
+ *   - when Ollama started model runners, for the dashboard's reload warnings
  *
  * Every endpoint except /health needs `Authorization: Bearer <PADDOCK_AGENT_TOKEN>`.
  * The port serves HTTPS with the agent's own key, and plain HTTP unless PADDOCK_AGENT_HTTP=off.
@@ -26,6 +28,7 @@
  *   PADDOCK_DISK_PATHS     extra mount points to report, comma separated
  *   PADDOCK_AGENT_ENV_ALLOW extra variable names the dashboard may set, comma separated
  *                          (a trailing * allows a prefix: "HSA_*,MY_VAR"); see ENV_ALLOW
+ *   PADDOCK_OLLAMA_LOG     read Ollama's log from this file instead of the journal (Ollama outside systemd)
  *   PADDOCK_DRY_RUN        "1" = never call systemctl/journalctl (testing)
  */
 import http from "node:http";
@@ -37,12 +40,13 @@ import path from "node:path";
 import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 
-const VERSION = "0.7.0";
+const VERSION = "0.8.0-dev.11";
 const TOKEN = process.env.PADDOCK_AGENT_TOKEN || "";
 const UNIT = process.env.PADDOCK_OLLAMA_UNIT || "ollama.service";
 const OVERRIDE_PATH =
   process.env.PADDOCK_OVERRIDE_PATH || "/etc/systemd/system/ollama.service.d/override.conf";
 const DRY_RUN = process.env.PADDOCK_DRY_RUN === "1";
+const OLLAMA_LOG = process.env.PADDOCK_OLLAMA_LOG || "";
 const EXTRA_DISKS = (process.env.PADDOCK_DISK_PATHS || "").split(",").map((s) => s.trim()).filter(Boolean);
 const TLS_KEY = process.env.PADDOCK_AGENT_TLS_KEY || "/etc/llama-paddock-agent.key";
 const TLS_CERT = process.env.PADDOCK_AGENT_TLS_CERT || "/etc/llama-paddock-agent.crt";
@@ -67,7 +71,11 @@ const envAllowed = (name) => ENV_ALLOW.some((p) => p.endsWith("*")
 function run(cmd, args, timeoutMs = 10_000) {
   return new Promise((resolve) => {
     execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 }, (err, stdout, stderr) => {
-      resolve({ code: err ? (typeof err.code === "number" ? err.code : 1) : 0, stdout: String(stdout), stderr: String(stderr || (err && !stdout ? err.message : "")) });
+      resolve({
+        code: err ? (typeof err.code === "number" ? err.code : 1) : 0, stdout: String(stdout), stderr: String(stderr || (err && !stdout ? err.message : "")),
+        // execFile keeps the start of the output and stops the command
+        truncated: err?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+      });
     });
   });
 }
@@ -360,6 +368,225 @@ async function putEnv(body) {
   return result;
 }
 
+// ------------------------------------------------------------------ GPU check
+// Ollama falls back to the CPU without an error when it can't use the GPU. The dashboard compares
+// where models are loaded with nvidia-smi, and these give it the evidence: the GPU lines from
+// Ollama's log since its last start (discovery at startup, CUDA/ROCm errors later), and on Linux the
+// nvidia_uvm module, which CUDA needs and which a suspend and resume can break. The dashboard
+// decides what the lines mean, so newer Ollama wording only needs a dashboard update.
+// Keep GPU_LOG_RE and gpuLogLines() the same in both agents.
+const GPU_LOG_RE = /cuda|cudart|nvcuda|nvml|nvidia|rocm|\bhip\b|amdgpu|gpu|vram|inference compute|offload|library=/i;
+const GPU_LOG_KEEP = 150;
+
+function gpuLogLines(lines) {
+  const hits = lines.filter((l) => GPU_LOG_RE.test(l) && !l.includes("[GIN]")).map((l) => (l.length > 500 ? `${l.slice(0, 500)}…` : l));
+  // the start of the run holds discovery, the end the latest errors
+  return hits.length > 2 * GPU_LOG_KEEP ? [...hits.slice(0, GPU_LOG_KEEP), ...hits.slice(-GPU_LOG_KEEP)] : hits;
+}
+
+async function gpuLog() {
+  if (DRY_RUN) return { source: "journal", lines: [], error: "dry run: journalctl disabled" };
+  const id = (await run("systemctl", ["show", UNIT, "-p", "InvocationID", "--value"])).stdout.trim();
+  // the current run of the service; systemd before 232 has no invocation id, so then since boot
+  const match = /^[0-9a-f]{32}$/.test(id) ? [`_SYSTEMD_INVOCATION_ID=${id}`] : ["-u", UNIT, "-b"];
+  const all = await run("journalctl", [...match, "-o", "short-iso", "--no-pager"], 30_000);
+  if (all.code !== 0 && !all.truncated) return { source: "journal", lines: [], error: all.stderr.trim() || `journalctl exited with ${all.code}` };
+  let lines = all.stdout.split("\n");
+  if (all.truncated) {
+    // a long run outgrows the buffer: its start is kept, so read the end separately
+    const tail = await run("journalctl", [...match, "-n", "20000", "-o", "short-iso", "--no-pager"], 30_000);
+    lines = [...new Set([...lines.slice(0, -1), ...tail.stdout.split("\n")])];
+  }
+  return { source: "journal", lines: gpuLogLines(lines) };
+}
+
+async function inContainer() {
+  const r = await run("systemd-detect-virt", ["--container", "--quiet"]);
+  if (!/ENOENT/.test(r.stderr)) return r.code === 0;
+  return ["/run/.containerenv", "/.dockerenv"].some((p) => fs.existsSync(p)) || !!readText("/run/systemd/container");
+}
+
+/** The NVIDIA kernel modules CUDA needs. In a container they belong to the host's kernel, so they can only be reloaded there. */
+async function nvidiaUvm() {
+  const driver = fs.existsSync("/sys/module/nvidia");
+  const container = await inContainer();
+  return {
+    driver,
+    module: fs.existsSync("/sys/module/nvidia_uvm"),
+    device: fs.existsSync("/dev/nvidia-uvm"),
+    container,
+    can_reload: driver && !container && process.getuid?.() === 0,
+  };
+}
+
+/** Stop Ollama, reload nvidia_uvm and start Ollama again: the usual fix when CUDA fails after a suspend and resume. */
+async function reloadUvm() {
+  const u = await nvidiaUvm();
+  if (!u.can_reload) {
+    throw httpError(409, u.container ? "nvidia_uvm belongs to the host's kernel: reload it on the host that runs this container"
+      : !u.driver ? "the NVIDIA kernel driver isn't loaded on this host" : "the agent needs to run as root to reload nvidia_uvm");
+  }
+  if (DRY_RUN) return { ok: true, dry_run: true };
+  const steps = [];
+  const step = async (cmd, args, timeoutMs = 30_000) => {
+    const r = await run(cmd, args, timeoutMs);
+    steps.push({ cmd: [cmd, ...args].join(" "), ok: r.code === 0, stderr: r.stderr.trim() });
+    return r.code === 0;
+  };
+  // Ollama's runners hold the module open
+  await step("systemctl", ["stop", UNIT], 90_000);
+  const removed = !u.module || (await step("modprobe", ["-r", "nvidia_uvm"]));
+  let loaded = await step("modprobe", ["nvidia_uvm"]);
+  // without udev rules for it, the device node only appears through nvidia-modprobe
+  if (loaded && !fs.existsSync("/dev/nvidia-uvm")) loaded = await step("nvidia-modprobe", ["-u", "-c=0"]);
+  // start Ollama again whatever happened above
+  const started = await step("systemctl", ["start", UNIT], 90_000);
+  return { ok: removed && loaded && started, steps, stderr: steps.filter((s) => !s.ok).map((s) => `${s.cmd}: ${s.stderr}`).join("\n") };
+}
+
+// ------------------------------------------------------------------ model loads
+// Ollama logs "llama runner started in N seconds" once per model load. The dashboard only sees
+// loads that last until a poll, so these times tell it about models that load and unload between
+// polls, such as when a client sends keep_alive 0. Keep RUNNER_STARTED_RE the same in both agents.
+const RUNNER_STARTED_RE = /llama runner started in/;
+
+async function runnerStarts(since) {
+  if (DRY_RUN) return { starts: [], error: "dry run: journalctl disabled" };
+  const r = await run("journalctl", ["-u", UNIT, "--since", `@${Math.floor(since)}`, "-o", "short-unix", "--no-pager"], 30_000);
+  if (r.code !== 0 && !r.truncated) return { starts: [], error: r.stderr.trim() || `journalctl exited with ${r.code}` };
+  // short-unix lines start with the time in seconds
+  const starts = r.stdout.split("\n").filter((l) => RUNNER_STARTED_RE.test(l)).map((l) => parseFloat(l)).filter((t) => t >= since);
+  return r.truncated ? { starts, partial: true } : { starts };
+}
+
+// ------------------------------------------------------------------ request log
+// Ollama logs each HTTP request through gin, one line per request:
+//   [GIN] 2026/11/02 - 09:14:07 | 200 |  4.551040958s |   192.168.30.20 | POST     "/api/chat"
+// Only these fields are read; Ollama's log has no prompts or responses. A line that starts like one
+// but doesn't parse, such as from a newer Ollama, is counted as skipped rather than misread.
+// Keep this section the same in both agents.
+const GIN_PREFIX = "[GIN] ";
+const DURATION_MS = { h: 3600e3, m: 60e3, s: 1e3, ms: 1, "µs": 1e-3, us: 1e-3, ns: 1e-6 };
+/** Requests one call returns at most; the dashboard asks again from where it stopped. */
+const REQUESTS_MAX = 5000;
+/** A log file is read from its end, at most this much of it. */
+const REQUEST_LOG_TAIL_BYTES = 8 * 1024 * 1024;
+
+/** Go's time.Duration text ("4.55s", "1m2.5s", "735.1µs") in milliseconds, or null. */
+function goDurationMs(text) {
+  let ms = 0, rest = text;
+  if (!rest) return null;
+  while (rest) {
+    const m = /^(\d+(?:\.\d+)?)(h|ms|m|s|µs|us|ns)/.exec(rest);
+    if (!m) return null;
+    ms += Number(m[1]) * DURATION_MS[m[2]];
+    rest = rest.slice(m[0].length);
+  }
+  return ms;
+}
+
+/** A gin request line: null if the line isn't one, `{skipped: true}` if it looks like one but doesn't parse. */
+function parseRequestLine(line) {
+  const at = line.indexOf(GIN_PREFIX);
+  if (at < 0) return null;
+  const parts = line.slice(at + GIN_PREFIX.length).split("|").map((p) => p.trim());
+  if (parts.length !== 5) return { skipped: true };
+  const [when, status, latency, client, call] = parts;
+  const d = /^(\d{4})\/(\d{2})\/(\d{2}) - (\d{2}):(\d{2}):(\d{2})$/.exec(when);
+  const c = /^([A-Z]+) +"([^"]*)"$/.exec(call);
+  const ms = goDurationMs(latency);
+  if (!d || !/^\d{3}$/.test(status) || ms === null || !c || !client || /\s/.test(client)) return { skipped: true };
+  return {
+    // gin writes the host's local time without a zone
+    local: new Date(+d[1], +d[2] - 1, +d[3], +d[4], +d[5], +d[6]).getTime() / 1000,
+    status: Number(status), duration_ms: Math.round(ms * 1000) / 1000, client, method: c[1],
+    // the query string is dropped: it isn't needed to tell endpoints apart
+    path: c[2].split("?")[0],
+  };
+}
+
+/** The last `maxBytes` of a file as lines (the first, likely cut, is dropped when the file is longer). */
+function tailLines(file, maxBytes) {
+  let fd;
+  try {
+    fd = fs.openSync(file, "r");
+    const size = fs.fstatSync(fd).size;
+    const len = Math.min(size, maxBytes);
+    const buf = Buffer.alloc(len);
+    fs.readSync(fd, buf, 0, len, size - len);
+    const lines = buf.toString("utf8").split(/\r?\n/);
+    return size > len ? lines.slice(1) : lines;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
+
+/**
+ * The requests after `since` and up to `until` from log entries `{t, line}` in time order (`t`: an
+ * exact time from the journal, or null to use the line's own). At most REQUESTS_MAX are returned;
+ * `until` then says how far they reach, and `more` that the caller should ask again from there.
+ */
+function collectRequests(entries, since, until) {
+  const requests = [];
+  let skipped = 0;
+  for (const e of entries) {
+    const r = parseRequestLine(e.line);
+    if (!r) continue;
+    if (r.skipped) {
+      skipped++;
+      continue;
+    }
+    const t = e.t ?? r.local;
+    // a log file's lines have whole seconds, so one stamped with the second `since` falls in may
+    // have been written after it: those come again, and the dashboard drops the ones it already has
+    const whole = e.t === null;
+    if ((whole ? t + 1 : t) <= since || t > until) continue;
+    if (requests.length === REQUESTS_MAX) {
+      // end before the last request's time, so the others at that time come with the next call
+      const last = requests[requests.length - 1].t;
+      return { requests: requests.filter((x) => x.t < last), until: whole ? last : last - 0.001, more: true, skipped };
+    }
+    const { local: _local, ...rest } = r;
+    requests.push({ t, ...rest });
+  }
+  return { requests, until, more: false, skipped };
+}
+
+/** Local "YYYY-MM-DD HH:MM:SS", the form every systemd version's journalctl --since takes. */
+function journalTime(t) {
+  const d = new Date(t * 1000);
+  const p = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+/** The journal is read a window at a time, so catching up after a long gap doesn't read all of it at once. */
+const REQUESTS_WINDOW_S = 6 * 3600;
+
+async function readRequests(since) {
+  const now = Date.now() / 1000;
+  if (OLLAMA_LOG) return collectRequests(tailLines(OLLAMA_LOG, REQUEST_LOG_TAIL_BYTES).map((line) => ({ t: null, line })), since, now);
+  if (DRY_RUN) return collectRequests([], since, now);
+  const until = Math.min(now, since + REQUESTS_WINDOW_S);
+  const r = await run("journalctl", [
+    "-u", UNIT, "-o", "json", "--output-fields=MESSAGE", "--no-pager",
+    "--since", journalTime(Math.floor(since)), "--until", journalTime(Math.ceil(until)),
+  ], 30_000);
+  if (r.code !== 0) throw httpError(500, `journalctl: ${(r.stderr || r.stdout).trim().split("\n")[0]}`);
+  const entries = [];
+  for (const line of r.stdout.split("\n")) {
+    if (!line) continue;
+    try {
+      const j = JSON.parse(line);
+      // the journal's own timestamp is exact and has a zone, unlike gin's
+      if (typeof j.MESSAGE === "string") entries.push({ t: Number(j.__REALTIME_TIMESTAMP) / 1e6, line: j.MESSAGE });
+    } catch {
+      // not a journal entry
+    }
+  }
+  const out = collectRequests(entries, since, until);
+  return { ...out, more: out.more || until < now };
+}
+
 // ------------------------------------------------------------------ TLS
 // The agent makes its own ECDSA key and a self-signed certificate for it. Node can't write X.509
 // certificates, and Windows has no openssl, so a minimal DER encoder builds one. The dashboard pins
@@ -500,9 +727,25 @@ const routes = {
   "POST /service/restart": async () => restartService(),
   "GET /logs": async (_req, url) => {
     const lines = Math.max(10, Math.min(Number(url.searchParams.get("lines")) || 200, 2000));
+    if (OLLAMA_LOG) return { lines: tailLines(OLLAMA_LOG, 4 * 1024 * 1024).filter((l) => l.length).slice(-lines) };
     if (DRY_RUN) return { lines: ["(dry run: journalctl disabled)"] };
     const r = await run("journalctl", ["-u", UNIT, "-n", String(lines), "--no-pager", "-o", "short-iso"], 15_000);
     return { lines: r.code === 0 ? r.stdout.split("\n").filter((l) => l.length) : [r.stderr.trim()] };
+  },
+  "GET /gpu-check": async () => {
+    const [log, nvidia_uvm] = await Promise.all([gpuLog(), nvidiaUvm()]);
+    return { ts: Date.now() / 1000, platform: "linux", log, nvidia_uvm };
+  },
+  "POST /gpu/reload-uvm": async () => reloadUvm(),
+  "GET /runner-starts": async (_req, url) => {
+    const now = Date.now() / 1000;
+    const since = Math.max(now - 86400, Math.min(Number(url.searchParams.get("since")) || now - 3600, now));
+    return { ts: now, ...(await runnerStarts(since)) };
+  },
+  // ?since=<unix seconds>: the requests after it, from Ollama's log
+  "GET /requests": async (_req, url) => {
+    const since = Number(url.searchParams.get("since"));
+    return readRequests(Number.isFinite(since) && since > 0 ? since : Date.now() / 1000 - 3600);
   },
 };
 
