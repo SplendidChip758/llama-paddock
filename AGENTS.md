@@ -11,6 +11,7 @@ llama-paddock is a self-hosted dashboard for monitoring and managing a fleet of 
 | `agent/windows/paddock-agent.mjs` | Agent on Windows PCs (Scheduled Task) | Same HTTP API as the Linux agent. Change both together |
 | `install/*.sh` | One-liner installers (Proxmox LXC or local) | Served raw from the `main` and `dev` branches, not from releases: a merged change is live immediately |
 | `docs/` | User documentation, also built into the website's Docs section | Plain GitHub Markdown: each page starts with one `# Title` and links to other pages with relative `.md` paths. `docs/README.md` is the index and sets the website's sidebar: its `##` groups (Install, Configure, Use, Reference) and the entries under them, with indented entries nested |
+| `brand/` | Logo files, the palette as CSS variables (`tokens.css`) and the component rules | The reference for UI work: use its variables and components rather than new colours |
 | `test/` | `sim/paddock-sim.mjs` (simulated Ollama hosts and agents) and `scenarios/` (`node:test` behaviour tests run in CI) | Plain Node, no dependencies |
 | `.github/workflows/` | `ci` (PR checks), `pr-title`, `release` (semantic-release) | |
 
