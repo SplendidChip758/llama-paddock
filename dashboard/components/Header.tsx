@@ -11,7 +11,7 @@ import { loudAlerts } from "./AlertBits";
 
 export function Header({ version }: { version: string }) {
   const pre = version.includes("-");
-  const { instances, jobs, setJobsOpen, me, alerts, readOnly } = usePaddock();
+  const { instances, jobs, setJobsOpen, me, alerts, readOnly, security } = usePaddock();
   const path = usePathname();
   const m = path.match(/^\/i\/([^/]+)(?:\/([^/]+))?/);
   const currentId = m ? decodeURIComponent(m[1]) : null;
@@ -45,6 +45,11 @@ export function Header({ version }: { version: string }) {
           title={firing ? `${firing} alert${firing === 1 ? "" : "s"} firing` : "Alert rules"}>
           <span>Alerts</span>
           {firing > 0 && <span className="pill alert">{firing}</span>}
+        </Link>
+        <Link href="/security" className={`jobsbtn ${path === "/security" ? "active" : ""}`}
+          title={security?.failing ? `${security.failing} security check${security.failing === 1 ? "" : "s"} failing` : "Security checks"}>
+          <span>Security</span>
+          {!!security?.failing && <span className="pill warn">{security.failing}</span>}
         </Link>
         <button className="jobsbtn" onClick={() => setJobsOpen(true)} title="Pull / create jobs">
           <span>Jobs</span>

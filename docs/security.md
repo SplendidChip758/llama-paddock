@@ -99,6 +99,10 @@ This covers the dashboard's calls to agents. Its calls to Ollama on port 11434 c
 
 Ollama's API has no authentication. Anyone who can reach port 11434 can pull, delete and run models without the dashboard. That's how Ollama is designed, and the dashboard can't change it: bind Ollama to the LAN and firewall it like the agent, or put it behind a proxy that checks a key ([setup examples](proxy.md#ollama-behind-a-proxy)). Give the host an `ollama_proxy_key` ([configuration](configuration.md#declarative-hosts), or **Proxy key** in Add host) and the dashboard sends it as `Authorization: Bearer <key>` on every Ollama call. The key is stored like agent tokens, in `hosts.json` (mode 600) or `config.yaml`, and never sent to the browser. Without TLS on the proxy it crosses the network in clear text, the same as agent tokens.
 
+## Security checks
+
+The **Security** page checks each host and the dashboard for the settings above that are easy to miss: Ollama answering without a key, agents over plain HTTP or with weak tokens, initial passwords, the dashboard over plain HTTP, data files readable by others and API tokens that never expire. Failing checks fire an alert. See [Security checks](security-checks.md).
+
 ## Reporting a problem
 
 Please report vulnerabilities privately, as described in the [security policy](../SECURITY.md).

@@ -1,3 +1,9 @@
+## [0.9.0-dev.6](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.5...v0.9.0-dev.6) (2026-11-06)
+
+### Features
+
+* **dashboard:** add security checks for each host and the dashboard ([#131](https://github.com/SplendidChip758/llama-paddock/issues/131)) ([8ba8703](https://github.com/SplendidChip758/llama-paddock/commit/8ba87037e210327281317f285464c716b30b9797)), closes [#83](https://github.com/SplendidChip758/llama-paddock/issues/83)
+
 ## [0.9.0-dev.5](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.4...v0.9.0-dev.5) (2026-11-05)
 
 ### Features

@@ -219,20 +219,32 @@ A rule is `{id, name, kind, enabled, threshold, for_s, clear_s, hosts, channels}
 | Field | Meaning |
 |---|---|
 | `id` | Letters, digits, `_`, `.` or `-`. Omit it for a new rule to get one made from the name. Keep it when editing: alerts belong to the rule's ID |
-| `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable`, `ollama_crash`, `gpu_lost`, `context_short` or `reload_churn` (loads per hour, at most 10000); see [Alerts](alerts.md#rules) |
+| `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable`, `ollama_crash`, `gpu_lost`, `context_short`, `reload_churn` (loads per hour, at most 10000) or `insecure`; see [Alerts](alerts.md#rules) |
 | `threshold` | Above 0, at most 150 for `gpu_temp` and 100 for the percentages; `null` for the kinds without one |
 | `for_s`, `clear_s` | Whole seconds, 0 to 86400: how long the condition has to hold before firing, and be gone before resolving |
 | `hosts` | Host IDs, or `null` for every host including ones added later |
 | `channels` | Channel IDs to notify, `null` (or left out) for every channel including ones added later, or `[]` for none |
 | `enabled` | `false` keeps the rule without checking it |
 
-An active alert is `{rule, name, kind, instance, subject, state, since, fired_at, value, detail, unknown, flapping, silence}`. `subject` tells apart several alerts of one rule on a host: `gpu0`, `gpu1`, … for GPUs, the path for disks, empty otherwise. `state` is `pending` (the condition holds, but not yet for `for_s`) or `firing`. `since` is when the condition was first seen and `fired_at` when it fired. `unknown: true` means the last poll had no data for it, so it can neither fire nor resolve until data comes back; see [Missing data](alerts.md#missing-data). `value` is the reading in the threshold's unit, or `null`. `silence` is the silence or acknowledgement covering it, or `null`.
+An active alert is `{rule, name, kind, instance, subject, state, since, fired_at, value, detail, unknown, flapping, silence}`. `subject` tells apart several alerts of one rule on a host: `gpu0`, `gpu1`, … for GPUs, the path for disks, the check's ID for `insecure`, empty otherwise. `insecure` alerts of the dashboard's own checks have the `instance` `@dashboard`. `state` is `pending` (the condition holds, but not yet for `for_s`) or `firing`. `since` is when the condition was first seen and `fired_at` when it fired. `unknown: true` means the last poll had no data for it, so it can neither fire nor resolve until data comes back; see [Missing data](alerts.md#missing-data). `value` is the reading in the threshold's unit, or `null`. `silence` is the silence or acknowledgement covering it, or `null`.
 
 A silence is `{id, created, rule, instance, subject, until, until_resolved, note}`. `rule`, `instance` and `subject` say what it covers; `null` (or left out) covers any, but a silence needs a `rule`, an `instance`, or both. Give `duration_s` (60 to 2592000) to silence for a while, or `until_resolved: true` with all three of `rule`, `instance` and `subject` to acknowledge one active alert until it resolves (409 if it isn't active). Silences end by themselves; see [Silences](alerts.md#silences).
 
 A channel is `{id, name, type, enabled, send_resolved, url, token, email}`, with `type` `webhook`, `discord`, `slack` or `email`. `url` is for the first three, `token` (sent as `Authorization: Bearer`) for `webhook` only, and `email` is `{host, port, security, username, password, from, to}` with `security` `starttls` (default), `tls` or `none`. `clear_token: true` and `email.clear_password: true` remove a stored secret. Responses leave the secrets out: they show `url_hint` (the URL up to its host), `has_token` and `email.has_password`, plus `status`: `{last_ok, last_error, last_error_at, queued}` since the dashboard started. The JSON the generic webhook receives is described under [Notifications](alerts.md#the-webhooks-json).
 
 A transition is `{id, t, rule, name, kind, instance, subject, state, value, detail, flapping}` with `state` `firing` or `resolved`. The rule's name and kind are copied, so they stay readable after the rule changes. Poll with `after` set to the last `id` you saw to follow new transitions. Transitions follow `history_retention_days`, except the latest one of an alert that is still firing.
+
+## Security checks
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/security` | `{targets, failing, dismissed}`: the [security checks](security-checks.md) of the dashboard and each host, and how many fail or are dismissed |
+| GET | `/api/security/dismissals` | `{dismissals}` |
+| POST | `/api/security/dismissals` | `{instance, check, note}` → `{dismissal}` (201): the check fails on purpose. `note` is required (at most 200 characters); dismissing again replaces it |
+| DELETE | `/api/security/dismissals/{instance}/{check}` | Counts a dismissed check again (404 if it isn't dismissed) |
+| POST | `/api/security/fix` | `{check: "data_files"}` → `{changed, failed}`: sets the data directory to 700 and its files to 600 |
+
+A target is `{instance, name, checks}`, with `instance` a host ID or `@dashboard` for the dashboard itself. A check is `{id, label, state, detail, fix, dismissal}`. `id` is `ollama_open`, `agent_http` or `agent_token` for hosts (the agent ones only for hosts with an agent), and `default_password`, `dashboard_http`, `data_files` or `api_tokens` for the dashboard (the password and token ones only with the login on). `state` is `pass`, `fail`, `unknown` or `dismissed`. `fix` is `null` or `{label}` with one of `href` (a dashboard page), `doc` (a page under `docs/` with its anchor) or `action` (`switch_https` or `chmod_data`, which the dashboard can apply). `dismissal` is `{instance, check, note, user, t}` or `null`. `GET /api/instances` also returns `security: {failing, dismissed}`.
 
 ## Models and jobs
 

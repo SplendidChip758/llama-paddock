@@ -4,6 +4,7 @@ import {
   trustedProxies, verifyToken, type Session,
 } from "./lib/auth";
 import type { Scope } from "./lib/credentials";
+import { noteServed } from "./lib/served";
 
 const AUTH_PAGES = ["/login", "/change-password"];
 
@@ -109,6 +110,7 @@ function sameOrigin(req: NextRequest): boolean {
 export function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
   const isApi = pathname.startsWith("/api/");
+  noteServed(req);
   // Prometheus can't sign in: the route checks its own scrape token (app/metrics/route.ts)
   if (pathname === "/metrics") return NextResponse.next();
 

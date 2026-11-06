@@ -19,11 +19,13 @@ import {
 import { fitEnv, settingsKey } from "./fit";
 import { nativeContext, parseParameters } from "./params";
 import { startNotifications } from "./notify";
+import { dashboardChecks, forgetDismissals, hostChecks, probeOllama, summarize, type OllamaProbe } from "./security";
 import { forgetRequests, syncRequests } from "./requests";
 import { isCloudModel, withSplit } from "./split";
-import type {
-  AgentGpuCheck, AgentStats, EnvState, FitHost, FitMeasurement, GpuCheck, GpuFixAction, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, LoadedModel, PsModel,
-  ReloadChurn,
+import {
+  DASHBOARD_TARGET,
+  type AgentGpuCheck, type AgentStats, type EnvState, type FitHost, type FitMeasurement, type GpuCheck, type GpuFixAction, type HistoryPoint, type HostEvent,
+  type InstanceSnapshot, type JobInfo, type LoadedModel, type PsModel, type ReloadChurn, type SecurityCheck, type SecurityTarget,
 } from "./types";
 
 // ============================================================================ errors
@@ -99,6 +101,9 @@ class InstanceState {
   runner_log_next = 0;
   /** the size last recorded for each model, context and settings; see recordSizes() */
   sizes_recorded = new Map<string, number>();
+  /** the security checks' probe of Ollama without its key; see refreshSecurityProbe() */
+  security_probe: OllamaProbe | null = null;
+  security_probing = false;
 
   constructor(public inst: Instance) {}
 
@@ -120,6 +125,13 @@ class InstanceState {
 
   unseenLoads(): number | null {
     return this.runner_log && unseenLoads(this.runner_log.starts, this.model_events ?? [], this.runner_log.t);
+  }
+
+  securityChecks(): SecurityCheck[] {
+    return hostChecks({
+      inst: this.inst, ollama_ok: this.ollama_ok, agent_ok: this.agent_ok, agent_https_fingerprint: this.agent_https_fingerprint,
+      env: this.env(), probe: this.security_probe,
+    });
   }
 
   reloadChurn(): ReloadChurn[] {
@@ -182,7 +194,7 @@ export function paddock(): Paddock {
     } catch (e) {
       console.error("[llama-paddock] marking interrupted benchmarks failed:", e);
     }
-    startNotifications((id) => g.__paddock?.instances.get(id)?.inst.name ?? id);
+    startNotifications((id) => (id === DASHBOARD_TARGET ? "the dashboard" : g.__paddock?.instances.get(id)?.inst.name ?? id));
   }
   const p = g.__paddock;
   if (!p.pollerStarted) {
@@ -302,6 +314,7 @@ export function removeInstance(id: string) {
   deleteHistory(id);
   forgetAlerts(id, "the host was removed");
   forgetRequests(id);
+  forgetDismissals(id);
 }
 
 /** Accept the key an https:// agent presents now, e.g. after its key was replaced. */
@@ -734,6 +747,14 @@ const polledHost = (st: InstanceState): PolledHost => ({
   ollama_ok: st.ollama_ok, ollama_error: st.ollama_error, agent_ok: st.agent_ok, agent_error: st.agent_error,
   stats: st.stats, ps: st.ps, restart_expected: st.restarting > 0 || Date.now() < st.restart_settled, gpu_check: st.gpuCheck(),
   models: { loaded: st.loadedModels(), stats: st.loadStats(), unseen: st.unseenLoads(), env: st.env() },
+  security: st.securityChecks(),
+});
+
+/** The dashboard's own security checks, as a host for the alert rules (only "insecure" rules apply to it). */
+const polledDashboard = (): PolledHost => ({
+  id: DASHBOARD_TARGET, t: Date.now() / 1000, has_agent: false, ollama_ok: true, ollama_error: null, agent_ok: false, agent_error: null,
+  stats: null, ps: [], restart_expected: false, gpu_check: null, models: { loaded: [], stats: [], unseen: null, env: null },
+  security: dashboardChecks(),
 });
 
 const MAINTAIN_EVERY_MS = 60_000;
@@ -780,8 +801,9 @@ async function pollLoop(p: Paddock) {
       refreshModelState(st, p.settings.poll_interval);
     }
     if (round % REQUESTS_EVERY_POLLS === REQUESTS_EVERY_POLLS - 1) syncAllRequests(p);
+    for (const st of observed) refreshSecurityProbe(st, round);
     try {
-      evaluateAlerts(observed.map(polledHost), [...p.instances.keys()], gapAfter);
+      evaluateAlerts([...observed.map(polledHost), polledDashboard()], [...p.instances.keys(), DASHBOARD_TARGET], gapAfter);
     } catch (e) {
       console.error("[llama-paddock] evaluating alert rules failed:", e);
     }
@@ -809,6 +831,37 @@ async function pollLoop(p: Paddock) {
     const wait = Math.max(500, p.settings.poll_interval * 1000 - (Date.now() - started));
     await new Promise((r) => setTimeout(r, wait));
   }
+}
+
+// ============================================================================ security checks
+/** Ask Ollama without its key every this many polls (every 30 s at the default interval), and at once for a new or changed host. */
+const SECURITY_PROBE_EVERY_POLLS = 10;
+
+function refreshSecurityProbe(st: InstanceState, round: number) {
+  if (st.security_probing || !st.inst.ollama_proxy_key) return;
+  const scheduled = round % SECURITY_PROBE_EVERY_POLLS === 0;
+  if (st.security_probe && !scheduled) return;
+  // Ollama's environment says whether its own port is open: wait for the agent to report it, until the next scheduled probe
+  if (!st.security_probe && !scheduled && st.agent_ok && !st.env()) return;
+  st.security_probing = true;
+  void probeOllama(st.inst, st.env())
+    .then((r) => {
+      st.security_probe = r;
+    })
+    .catch((e) => console.error(`[llama-paddock] security probe of ${st.inst.id} failed:`, e))
+    .finally(() => {
+      st.security_probing = false;
+    });
+}
+
+/** Every host's checks and the dashboard's, for the Security page. */
+export function securityReport(): { targets: SecurityTarget[] } & ReturnType<typeof summarize> {
+  const p = paddock();
+  const targets: SecurityTarget[] = [
+    { instance: DASHBOARD_TARGET, name: "Dashboard", checks: dashboardChecks() },
+    ...[...p.instances.values()].map((st) => ({ instance: st.inst.id, name: st.inst.name, checks: st.securityChecks() })),
+  ];
+  return { targets, ...summarize(targets) };
 }
 
 // ============================================================================ GPU check

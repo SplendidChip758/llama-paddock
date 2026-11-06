@@ -83,7 +83,7 @@ export function AlertLine({ a, host, actions }: { a: ActiveAlert; host: string; 
       <div className="grow">
         <div>
           <b>{a.name}</b> <span className="faint">on</span>{" "}
-          <Link href={`/i/${encodeURIComponent(a.instance)}/monitor`}>{host}</Link>
+          <Link href={a.kind === "insecure" ? "/security" : `/i/${encodeURIComponent(a.instance)}/monitor`}>{host}</Link>
           {a.subject && <span className="faint"> · {subjectText(a.subject)}</span>}
         </div>
         <div className="hint" style={{ marginTop: 2 }}>{a.detail}</div>

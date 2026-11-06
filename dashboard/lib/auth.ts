@@ -77,6 +77,8 @@ const g = globalThis as unknown as {
   /** Timestamps of recent failures from every address, for the global ceiling. */
   __paddockLoginFailsGlobal?: number[];
   __paddockTokenFails?: Map<string, { n: number; until: number; last: number }>;
+  /** user id + password version → the password is a well-known one; see weakPasswords() */
+  __paddockWeak?: Map<string, boolean | Promise<boolean>>;
 };
 
 function hashPassword(password: string): string {
@@ -285,6 +287,41 @@ export function requireSession(req: { cookies: { get(name: string): { value: str
   if (!session) throw new HttpError(401, "not signed in");
   const user = findUser(loadAuth(), session.username)!;
   return { ...session, id: user.id };
+}
+
+/** Passwords anyone could guess for a dashboard: the example in .env.example, and the usual first tries. */
+const KNOWN_PASSWORDS = ["change-me", "changeme", "admin", "password", "llama-paddock", "paddock"];
+
+/**
+ * For the security checks (#83): accounts still on a password that was handed over (must_change), and
+ * accounts whose password is PADDOCK_PASSWORD or a well-known one. scrypt is slow on purpose, so each
+ * password version is checked once in the background; weak is null until every account has been.
+ */
+export function passwordConcerns(): { handed_over: string[]; weak: string[] | null } {
+  const users = loadAuth().users;
+  const cache = (g.__paddockWeak ??= new Map());
+  const candidates = [...new Set([...KNOWN_PASSWORDS, process.env.PADDOCK_PASSWORD].filter((x): x is string => !!x))];
+  const weak: string[] = [];
+  let pending = false;
+  const keys = new Set<string>();
+  for (const u of users) {
+    const key = `${u.id}:${u.version}`;
+    keys.add(key);
+    const known = cache.get(key);
+    if (known === undefined) {
+      const check = (async () => {
+        for (const c of candidates) if (await matchesHash(c, u.hash)) return true;
+        return false;
+      })();
+      cache.set(key, check);
+      check.then((v) => cache.set(key, v), () => cache.delete(key));
+      pending = true;
+    } else if (known instanceof Promise) pending = true;
+    else if (known) weak.push(u.username);
+  }
+  // old password versions can't sign in any more
+  for (const k of cache.keys()) if (!keys.has(k)) cache.delete(k);
+  return { handed_over: users.filter((u) => u.must_change).map((u) => u.username), weak: pending ? null : weak };
 }
 
 /** Usernames by user id, to show who owns a credential. */

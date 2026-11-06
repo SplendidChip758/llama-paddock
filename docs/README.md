@@ -18,6 +18,7 @@ group named after it. Keep that format. -->
 - [Configuration and login](configuration.md): `config.yaml`, environment variables, login, users and roles, and the data directory
 - [Security](security.md): what admins and viewers can do, API tokens, the audit log, exposing the dashboard, lockout, cross-site requests and agent tokens
   - [Reverse proxies](proxy.md): the dashboard behind a proxy, and Ollama behind a proxy that checks a key
+  - [Security checks](security-checks.md): what each check on the Security page looks for, and how to fix or dismiss it
 - [Prometheus and Grafana](prometheus.md): the `/metrics` endpoint, its scrape token, the metric list and a Grafana dashboard
 
 ## Use
