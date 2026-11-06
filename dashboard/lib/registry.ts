@@ -89,10 +89,19 @@ export function parseRef(name: string, registry = paddock().settings.model_regis
   return { registry, repo: parts.length === 1 ? `library/${parts[0]}` : parts.join("/"), tag };
 }
 
+/**
+ * Where the registries keep blobs: a blob request is answered with a redirect there.
+ * registry.ollama.ai uses Cloudflare R2 (<id>.r2.cloudflarestorage.com); Hugging Face its own
+ * CDN under hf.co (us.aws.cdn.hf.co, cas-bridge.xethub.hf.co). Without these, no GGUF header
+ * could be read, and every model that isn't pulled would be "insufficient information".
+ */
+const STORAGE_HOSTS = [/^[a-z0-9-]+\.r2\.cloudflarestorage\.com$/, /^[a-z0-9.-]+\.hf\.co$/, /^[a-z0-9.-]+\.huggingface\.co$/];
+
 async function get(url: string, init: RequestInit & { timeout?: number } = {}): Promise<Response> {
   try {
     const configured = new URL(paddock().settings.model_registry_url);
     const allowedHosts = new Set([configured.host.toLowerCase(), "hf.co", "huggingface.co"]);
+    const allowed = (host: string) => allowedHosts.has(host) || STORAGE_HOSTS.some((re) => re.test(host));
     const headers = { "User-Agent": UA, ...(init.headers as Record<string, string>) };
     const signal = AbortSignal.timeout(init.timeout ?? 15_000);
     let current = new URL(url);
@@ -104,7 +113,7 @@ async function get(url: string, init: RequestInit & { timeout?: number } = {}): 
       const next = new URL(location, current);
       if (
         redirects >= 5 ||
-        !allowedHosts.has(next.host.toLowerCase()) ||
+        !allowed(next.host.toLowerCase()) ||
         (next.protocol !== "https:" && next.origin !== configured.origin) ||
         next.username || next.password
       ) {

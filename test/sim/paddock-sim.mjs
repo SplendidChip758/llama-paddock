@@ -1235,8 +1235,11 @@ function handleRegistry(req, res, url) {
   }
   const blob = /^\/_sim\/registry\/v2\/(.+)\/blobs\/(sha256:[0-9a-f]+)$/.exec(url.pathname);
   if (blob) {
-    // the registry sends blobs to its CDN, which the dashboard has to follow
-    res.writeHead(307, { Location: url.pathname.replace("/_sim/registry/", "/_sim/registry-cdn/") });
+    // the registry sends blobs to its CDN, which the dashboard has to follow. Models named
+    // "elsewhere…" go to another host (localhost instead of 127.0.0.1), which it must refuse
+    const cdnPath = url.pathname.replace("/_sim/registry/", "/_sim/registry-cdn/");
+    const elsewhere = /\/elsewhere/.test(blob[1]) && blob[2] !== registryBlobs.get(blob[2])?.configDigest;
+    res.writeHead(307, { Location: elsewhere ? `http://localhost:${req.socket.localPort}${cdnPath}` : cdnPath });
     return res.end();
   }
   const cdn = /^\/_sim\/registry-cdn\/v2\/(.+)\/blobs\/(sha256:[0-9a-f]+)$/.exec(url.pathname);

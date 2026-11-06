@@ -47,7 +47,7 @@ A model the host doesn't have, such as `qwen3:8b` or `hf.co/bartowski/Llama-3.2-
 
 The quantizations of one model size (`8b`, `8b-q8_0`, `8b-fp16`, …) share the metadata, so it's read once per size.
 
-Names without a host resolve to the Ollama registry (`model_registry_url`, `https://registry.ollama.ai` by default). Host-prefixed names are only supported for explicit allowlisted hosts (`hf.co` and `huggingface.co` for Hugging Face); other hosts are rejected. Manifests are cached for an hour, metadata for as long as the dashboard runs. `model_library: false` in [`config.yaml`](configuration.md) stops these requests: the estimate then needs the model pulled on the host.
+Names without a host resolve to the Ollama registry (`model_registry_url`, `https://registry.ollama.ai` by default). Host-prefixed names are only supported for explicit allowlisted hosts (`hf.co` and `huggingface.co` for Hugging Face); other hosts are rejected. The registries serve model files from their storage (Cloudflare R2 for the Ollama registry, Hugging Face's CDN under `hf.co`), and the dashboard follows a redirect only there or to the configured registry itself. When the metadata can't be read, the estimate says so and why. Manifests are cached for an hour, metadata for as long as the dashboard runs. `model_library: false` in [`config.yaml`](configuration.md) stops these requests: the estimate then needs the model pulled on the host.
 
 A GGUF file uploaded for a [new model](usage.md#models) is estimated from its header the same way, before the model is created.
 

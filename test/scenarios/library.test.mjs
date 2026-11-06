@@ -162,3 +162,14 @@ test("a registry estimate is calibrated by another host that has the model loade
   assert.equal(e.calibration.kind, "measured");
   assert.equal(e.total, ps.size);
 });
+
+test("a registry that redirects the weights to a host that isn't allowed gives a reason, not a guess", async () => {
+  const r = await fit("sim-1", { model: "elsewhere-model:1b", num_ctx: 4096 });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.source, "registry");
+  // the manifest still came through: only the weights' header was refused
+  assert.ok(r.data.model.weights > 0);
+  const e = r.data.estimates[0];
+  assert.equal(e.verdict, "unknown");
+  assert.match(e.summary, /couldn't be read from its registry \(registry redirect target isn't allowed\)/);
+});
