@@ -50,6 +50,8 @@ const actions: Record<string, (inst: Instance, body: Body) => Promise<unknown>> 
     if (ctx !== undefined && ctx !== null && !(Number.isInteger(ctx) && (ctx as number) > 0)) throw new HttpError(400, '"num_ctx" must be a positive integer');
     let m: FitModel;
     let source: FitResult["source"] = "host";
+    /** why the registry's GGUF header couldn't be read, when it couldn't */
+    let metaError: string | null = null;
     const blob = typeof body.blob === "string" ? body.blob : null;
     const model = blob && !body.model ? "uploaded model" : str(body, "model");
     const tags = blob ? null : await ollama<{ models?: TagModel[] }>(inst, "GET", "/api/tags");
@@ -68,6 +70,7 @@ const actions: Record<string, (inst: Instance, body: Body) => Promise<unknown>> 
       const r = await registryModel(model);
       m = fitModel(model, { model_info: r.model_info, parameters: r.parameters }, { size: r.weights + r.projector, digest: r.digest }, false);
       source = "registry";
+      metaError = r.model_info_error;
     }
     const hosts = [inst.id, ...[...paddock().instances.keys()].filter((id) => id !== inst.id)].map((id) => fitHost(getState(id), m.digest));
     // one GPU of this host instead of all of them, as the library's fit filter can ask
@@ -77,7 +80,14 @@ const actions: Record<string, (inst: Instance, body: Body) => Promise<unknown>> 
       hosts[0] = { ...hosts[0], gpus: [gpu] };
     }
     const measurements = m.digest ? modelSizes(m.digest) : [];
-    const result: FitResult = { model: m, source, hosts, measurements, estimates: hosts.map((h) => estimateFit(m, h, measurements, ctx as number | null | undefined)) };
+    const estimates = hosts.map((h) => estimateFit(m, h, measurements, ctx as number | null | undefined));
+    // the formula can only say the shape is unknown; the reason is that the registry read failed
+    if (metaError) {
+      for (const e of estimates) {
+        if (e.verdict === "unknown" && e.total === null) e.summary = `Insufficient information: the model's metadata couldn't be read from its registry (${metaError}).`;
+      }
+    }
+    const result: FitResult = { model: m, source, hosts, measurements, estimates };
     return result;
   },
 

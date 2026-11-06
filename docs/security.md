@@ -97,7 +97,7 @@ This covers the dashboard's calls to agents. Its calls to Ollama on port 11434 c
 
 ## Outbound connections
 
-The dashboard connects to your Ollama hosts and agents, and to the [notification channels](alerts.md) you set up. For the model library browser and [fit estimates](fit-estimates.md) of models that aren't pulled, it also reads `ollama.com`, `registry.ollama.ai` and, for `hf.co/` model names, Hugging Face. These requests send no credentials and nothing about your hosts, only the model names and searches you ask for. Set `model_library: false` in [`config.yaml`](configuration.md) to stop them.
+The dashboard connects to your Ollama hosts and agents, and to the [notification channels](alerts.md) you set up. For the model library browser and [fit estimates](fit-estimates.md) of models that aren't pulled, it also reads `ollama.com`, `registry.ollama.ai` and, for `hf.co/` model names, Hugging Face. Model files are read where those registries redirect to: Cloudflare R2 storage (`*.r2.cloudflarestorage.com`) for the Ollama registry and Hugging Face's own hosts (`*.hf.co`, `*.huggingface.co`); redirects anywhere else are refused. These requests send no credentials and nothing about your hosts, only the model names and searches you ask for. Set `model_library: false` in [`config.yaml`](configuration.md) to stop them.
 
 ## Ollama's own port
 
