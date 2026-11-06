@@ -1,3 +1,9 @@
+## [0.9.0-dev.11](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.10...v0.9.0-dev.11) (2026-11-06)
+
+### Bug Fixes
+
+* **dashboard:** read model headers from the registries' storage again ([#137](https://github.com/SplendidChip758/llama-paddock/issues/137)) ([ac6d71c](https://github.com/SplendidChip758/llama-paddock/commit/ac6d71c8dbb083f3319ae7f990e74b0cddc8f14c))
+
 ## [0.9.0-dev.10](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.9...v0.9.0-dev.10) (2026-11-06)
 
 ### Features
