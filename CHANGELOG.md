@@ -1,3 +1,9 @@
+## [0.9.0-dev.10](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.9...v0.9.0-dev.10) (2026-11-06)
+
+### Features
+
+* **dashboard:** filter the model library by what fits on a host ([#135](https://github.com/SplendidChip758/llama-paddock/issues/135)) ([d53b719](https://github.com/SplendidChip758/llama-paddock/commit/d53b71914a96066b5d8165e3f6016b36c4e0091f)), closes [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#30](https://github.com/SplendidChip758/llama-paddock/issues/30) [#29](https://github.com/SplendidChip758/llama-paddock/issues/29) [#33](https://github.com/SplendidChip758/llama-paddock/issues/33)
+
 ## [0.9.0-dev.9](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.8...v0.9.0-dev.9) (2026-11-06)
 
 ### Features
