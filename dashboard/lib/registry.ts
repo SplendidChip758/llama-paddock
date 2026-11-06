@@ -50,9 +50,11 @@ const g = globalThis as unknown as {
   __paddockRegistry?: {
     manifests: Map<string, { at: number; value: Promise<RegistryModel> }>;
     meta: Map<string, Promise<Record<string, unknown>>>;
+    /** metadata by model and size (registry/repo:8b), shared by that size's quantizations */
+    sizes: Map<string, Promise<Record<string, unknown>>>;
   };
 };
-const cache = (g.__paddockRegistry ??= { manifests: new Map(), meta: new Map() });
+const cache = (g.__paddockRegistry ??= { manifests: new Map(), meta: new Map(), sizes: new Map() });
 
 /** Whether the dashboard may contact registries and ollama.com. */
 export function libraryEnabled(): boolean {
@@ -160,7 +162,7 @@ async function loadModel(name: string, ref: ModelRef): Promise<RegistryModel> {
   let model_info: Record<string, unknown> | null = null;
   let model_info_error: string | null = null;
   try {
-    model_info = await ggufInfo(ref, weights.digest);
+    model_info = await ggufInfo(ref, weights.digest, sizeKey(ref));
   } catch (e) {
     model_info_error = (e as Error).message;
   }
@@ -173,14 +175,30 @@ async function loadModel(name: string, ref: ModelRef): Promise<RegistryModel> {
   };
 }
 
-function ggufInfo(ref: ModelRef, digest: string): Promise<Record<string, unknown>> {
-  let p = cache.meta.get(digest);
+/**
+ * The model and parameter size a tag names (registry/library/qwen3:8b for 8b-q8_0 and 8b-instruct-fp16):
+ * quantizing changes the weights, not the layers, heads or context, so one header serves them all.
+ * null for tags without a size, such as latest.
+ */
+function sizeKey(ref: ModelRef): string | null {
+  const size = /^(e?\d+(?:\.\d+)?[mbt]|\d+x\d+(?:\.\d+)?b)(?=$|[-_])/i.exec(ref.tag)?.[1];
+  return size ? `${ref.registry}/${ref.repo}:${size.toLowerCase()}` : null;
+}
+
+function ggufInfo(ref: ModelRef, digest: string, size: string | null): Promise<Record<string, unknown>> {
+  let p = cache.meta.get(digest) ?? (size ? cache.sizes.get(size) : undefined);
   if (!p) {
+    // the vocabulary makes this a few MB per read: a library model's tags would add up to hundreds
     p = readGguf((offset, length) => readBlob(ref, digest, offset, length)).then(ggufModelInfo);
-    p.catch(() => cache.meta.delete(digest));
-    cache.meta.set(digest, p);
-    if (cache.meta.size > META_CACHE_MAX) cache.meta.delete(cache.meta.keys().next().value!);
+    p.catch(() => {
+      cache.meta.delete(digest);
+      if (size) cache.sizes.delete(size);
+    });
+    if (size) cache.sizes.set(size, p);
+    if (cache.sizes.size > META_CACHE_MAX) cache.sizes.delete(cache.sizes.keys().next().value!);
   }
+  cache.meta.set(digest, p);
+  if (cache.meta.size > META_CACHE_MAX) cache.meta.delete(cache.meta.keys().next().value!);
   return p;
 }
 

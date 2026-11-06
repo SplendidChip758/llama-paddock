@@ -34,7 +34,7 @@
  * like registry.ollama.ai (point the dashboard's model_registry_url at http://<bind>:<B>/_sim/registry),
  * and ollama.com's library pages: GET /_sim/ollama.com/search and /_sim/ollama.com/<path>/tags
  * (model_library_url: http://<bind>:<B>/_sim/ollama.com). GET /_sim/library-requests lists the
- * pages asked for.
+ * pages asked for, and the reads of model weights from the registry ("weights <model> <range>").
  *
  * Control API (no auth; it binds to --bind like everything else):
  *   GET  /_sim/hosts                    every host: URLs, credentials, scenario
@@ -1244,6 +1244,7 @@ function handleRegistry(req, res, url) {
   const r = registryBlobs.get(cdn[2]);
   if (!r) throw new HttpErr(404, `blob unknown in ${cdn[1]}`);
   if (cdn[2] === r.configDigest) return sendJson(res, 200, JSON.parse(r.config.toString()));
+  libraryRequests.push(`weights ${r.m.name} ${req.headers.range ?? ""}`);
   const size = r.m.size;
   const range = /^bytes=(\d+)-(\d+)?$/.exec(req.headers.range ?? "");
   const start = range ? Number(range[1]) : 0;
