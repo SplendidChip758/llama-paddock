@@ -136,6 +136,14 @@ test("a model that isn't pulled is estimated from its registry", async () => {
   assert.match(missing.data.detail, /isn't in the registry/);
 });
 
+test("registry estimates reject host-prefixed references outside the allowlist", async () => {
+  for (const model of ["10.0.0.5:8443/a/b:x", "attacker.example/a/b:x"]) {
+    const r = await fit("sim-1", { model });
+    assert.equal(r.status, 400, `${model}: ${JSON.stringify(r.data)}`);
+    assert.match(r.data.detail, /registry host .* isn't allowed/);
+  }
+});
+
 test("a registry estimate is calibrated by another host that has the model loaded", async () => {
   // pulled on sim-1 by the test above; load it there so the poller measures it
   const name = "llama3.2:1b-q8_0";

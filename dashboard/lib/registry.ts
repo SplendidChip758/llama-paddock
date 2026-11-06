@@ -78,8 +78,12 @@ export function parseRef(name: string, registry = paddock().settings.model_regis
   if (!parts.length) throw new HttpError(400, "model name is empty");
   if (parts.length > 1 && /[.:]/.test(parts[0])) {
     const host = parts.shift()!.toLowerCase();
+    const configured = new URL(registry);
     // Ollama pulls hf.co names through Hugging Face's registry
-    const base = host === "huggingface.co" ? "https://hf.co" : `https://${host}`;
+    const base = host === "hf.co" || host === "huggingface.co"
+      ? "https://hf.co"
+      : host === configured.host.toLowerCase() ? registry : null;
+    if (!base) throw new HttpError(400, `registry host ${host} isn't allowed`);
     return { registry: base, repo: parts.join("/"), tag };
   }
   return { registry, repo: parts.length === 1 ? `library/${parts[0]}` : parts.join("/"), tag };
@@ -87,12 +91,31 @@ export function parseRef(name: string, registry = paddock().settings.model_regis
 
 async function get(url: string, init: RequestInit & { timeout?: number } = {}): Promise<Response> {
   try {
-    return await fetch(url, {
-      ...init, redirect: "follow",
-      headers: { "User-Agent": UA, ...(init.headers as Record<string, string>) },
-      signal: AbortSignal.timeout(init.timeout ?? 15_000),
-    });
+    const configured = new URL(paddock().settings.model_registry_url);
+    const allowedHosts = new Set([configured.host.toLowerCase(), "hf.co", "huggingface.co"]);
+    const headers = { "User-Agent": UA, ...(init.headers as Record<string, string>) };
+    const signal = AbortSignal.timeout(init.timeout ?? 15_000);
+    let current = new URL(url);
+    for (let redirects = 0; ; redirects++) {
+      const response = await fetch(current, { ...init, redirect: "manual", headers, signal });
+      if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+      const location = response.headers.get("location");
+      if (!location) return response;
+      const next = new URL(location, current);
+      if (
+        redirects >= 5 ||
+        !allowedHosts.has(next.host.toLowerCase()) ||
+        (next.protocol !== "https:" && next.origin !== configured.origin) ||
+        next.username || next.password
+      ) {
+        await response.body?.cancel().catch(() => {});
+        throw new HttpError(502, "registry redirect target isn't allowed");
+      }
+      await response.body?.cancel().catch(() => {});
+      current = next;
+    }
   } catch (e) {
+    if (e instanceof HttpError) throw e;
     const err = e as Error;
     throw new HttpError(502, `can't reach ${new URL(url).host}: ${err.name === "TimeoutError" ? "timed out" : err.message}`);
   }
