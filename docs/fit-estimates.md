@@ -47,7 +47,9 @@ A model the host doesn't have, such as `qwen3:8b` or `hf.co/bartowski/Llama-3.2-
 
 Names without a host resolve to the Ollama registry (`model_registry_url`, `https://registry.ollama.ai` by default); `hf.co/` names go to Hugging Face. Manifests are cached for an hour, metadata for as long as the dashboard runs. `model_library: false` in [`config.yaml`](configuration.md) stops these requests: the estimate then needs the model pulled on the host.
 
-The API's `source` says which it was: `host` or `registry`.
+A GGUF file uploaded for a [new model](usage.md#models) is estimated from its header the same way, before the model is created.
+
+The API's `source` says which it was: `host`, `registry` or `upload`.
 
 ## Confidence
 

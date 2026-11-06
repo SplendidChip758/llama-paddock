@@ -411,7 +411,7 @@ export async function testConnection(body: InstanceInput & { id?: unknown }) {
 const agentHeaders = (inst: Instance): Record<string, string> =>
   inst.agent_token ? { Authorization: `Bearer ${inst.agent_token}` } : {};
 
-const ollamaHeaders = (inst: Instance, json: boolean): Record<string, string> => ({
+export const ollamaHeaders = (inst: Instance, json: boolean): Record<string, string> => ({
   ...(inst.ollama_proxy_key ? { Authorization: `Bearer ${inst.ollama_proxy_key}` } : {}),
   ...(json ? { "Content-Type": "application/json" } : {}),
 });

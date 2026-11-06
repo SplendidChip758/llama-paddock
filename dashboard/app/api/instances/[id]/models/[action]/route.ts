@@ -1,9 +1,13 @@
-import { HttpError, fitHost, getInstance, getState, handle, json, listJobs, ollama, paddock, readBody, startJob } from "@/lib/server";
+import crypto from "node:crypto";
+import {
+  HttpError, fitHost, getInstance, getState, handle, json, listJobs, ndjsonLines, ollama, ollamaPost, paddock, readBody, startJob, startTask,
+} from "@/lib/server";
 import { estimateFit, fitModel } from "@/lib/fit";
 import { modelSizes } from "@/lib/db";
 import { isCloudModel } from "@/lib/split";
 import { MODEL_NAME_RE, coerceParam, nativeContext, parseParameters } from "@/lib/params";
 import { registryModel } from "@/lib/registry";
+import { uploadedBlob } from "@/lib/uploads";
 import type { FitModel, FitResult, ParamValue, ShowResult, TagModel } from "@/lib/types";
 import type { Instance } from "@/lib/config";
 import { audit } from "@/lib/audit";
@@ -42,14 +46,21 @@ const actions: Record<string, (inst: Instance, body: Body) => Promise<unknown>> 
 
   /** Estimate where the model fits at a context, on this host and every other one. Read-only. */
   async fit(inst, body) {
-    const model = str(body, "model");
     const ctx = body.num_ctx;
     if (ctx !== undefined && ctx !== null && !(Number.isInteger(ctx) && (ctx as number) > 0)) throw new HttpError(400, '"num_ctx" must be a positive integer');
-    const tags = await ollama<{ models?: TagModel[] }>(inst, "GET", "/api/tags");
-    const tag = (tags.models ?? []).find((m) => m.name === model || m.model === model || m.name === `${model}:latest`) ?? null;
     let m: FitModel;
     let source: FitResult["source"] = "host";
-    if (tag || isCloudModel({ name: model })) {
+    const blob = typeof body.blob === "string" ? body.blob : null;
+    const model = blob && !body.model ? "uploaded model" : str(body, "model");
+    const tags = blob ? null : await ollama<{ models?: TagModel[] }>(inst, "GET", "/api/tags");
+    const tag = (tags?.models ?? []).find((m) => m.name === model || m.model === model || m.name === `${model}:latest`) ?? null;
+    if (blob) {
+      // a GGUF uploaded for a new model: its header was read when it arrived
+      const up = uploadedBlob(inst.id, blob);
+      if (!up) throw new HttpError(404, "no GGUF with that digest was uploaded to this host since the dashboard started");
+      m = fitModel(model, { model_info: up.model_info, parameters: {} }, { size: up.size }, false);
+      source = "upload";
+    } else if (tag || isCloudModel({ name: model })) {
       const show = tag && !isCloudModel(tag) ? await ollama(inst, "POST", "/api/show", { model }) : {};
       m = fitModel(model, { model_info: show.model_info, parameters: parseParameters(show.parameters) }, tag, isCloudModel(tag ?? { name: model }));
     } else {
@@ -72,20 +83,51 @@ const actions: Record<string, (inst: Instance, body: Body) => Promise<unknown>> 
     return startJob("pull", inst, model, "/api/pull", { model, stream: true });
   },
 
+  /**
+   * A model layered on `from` (installed, or with pull: true a library or hf.co model, pulled first),
+   * or from `blob`, a GGUF uploaded through …/models/upload. Parameters, system prompt and template
+   * override what the base has.
+   */
   async create(inst, body) {
     const model = str(body, "model");
-    const from = str(body, "from");
     if (!MODEL_NAME_RE.test(model)) throw new HttpError(400, `invalid model name ${JSON.stringify(model)}`);
+    const blob = body.blob === undefined ? null : String(body.blob);
+    if (blob !== null && !/^sha256:[0-9a-f]{64}$/.test(blob)) throw new HttpError(400, '"blob" must be a digest, sha256:<64 hex digits>');
+    if (blob !== null && body.from !== undefined) throw new HttpError(400, 'give "from" or "blob", not both');
+    const from = blob === null ? str(body, "from") : null;
+    if (from !== null && !MODEL_NAME_RE.test(from)) throw new HttpError(400, `invalid model name ${JSON.stringify(from)}`);
     const raw = (body.parameters ?? {}) as Record<string, unknown>;
     const parameters: Record<string, ParamValue> = {};
     for (const [k, v] of Object.entries(raw)) {
       if (v === null || v === "" || (Array.isArray(v) && !v.length)) continue;
       parameters[k] = coerceParam(k, v);
     }
-    const req: Body = { model, from, parameters, stream: true };
+    const req: Body = { model, parameters, stream: true };
+    if (from !== null) req.from = from;
+    // Ollama only uses the file name to tell the files of a model apart
+    else req.files = { [uploadedBlob(inst.id, blob!)?.filename ?? "model.gguf"]: blob };
     if (typeof body.system === "string") req.system = body.system;
-    const detail = `from ${from}: ` + Object.entries(parameters).map(([k, v]) => `${k}=${Array.isArray(v) ? JSON.stringify(v) : v}`).join(", ");
-    return startJob("create", inst, model, "/api/create", req, detail);
+    if (typeof body.template === "string") req.template = body.template;
+    const base = from ?? `uploaded ${uploadedBlob(inst.id, blob!)?.filename ?? blob}`;
+    const detail = `from ${base}: ` + Object.entries(parameters).map(([k, v]) => `${k}=${Array.isArray(v) ? JSON.stringify(v) : v}`).join(", ");
+
+    const installed = from === null || body.pull !== true || ((await ollama<{ models?: TagModel[] }>(inst, "GET", "/api/tags")).models ?? [])
+      .some((m) => m.name === from || m.name === `${from}:latest`);
+    if (installed) return startJob("create", inst, model, "/api/create", req, detail);
+
+    // the base isn't on the host yet: pull it, then create, as one job
+    return startTask("create", inst, model, `pull ${from}, then ${detail}`, crypto.randomBytes(6).toString("hex"), async (progress, signal) => {
+      const run = async (path: string, payload: unknown, label: (status: string) => string) => {
+        const r = await ollamaPost(inst, path, payload, signal);
+        for await (const msg of ndjsonLines(r)) {
+          if (msg.error) throw new Error(msg.error);
+          progress({ ...(msg.status ? { status: label(msg.status) } : {}), ...(msg.total ? { completed: msg.completed ?? 0, total: msg.total } : {}) });
+        }
+      };
+      await run("/api/pull", { model: from, stream: true }, (st) => `pulling ${from}: ${st}`);
+      progress({ completed: 0, total: 0 });
+      await run("/api/create", req, (st) => st);
+    });
   },
 
   async delete(inst, body) {
@@ -119,7 +161,8 @@ const audited: Record<string, (b: Body) => { target: unknown; detail?: string }>
   create: (b) => ({
     target: b.model,
     detail: [
-      `from ${String(b.from)}`,
+      b.blob ? `from uploaded ${String(b.blob)}` : `from ${String(b.from)}${b.pull === true ? " (pulled if missing)" : ""}`,
+      typeof b.template === "string" ? "template set" : "",
       Object.keys((b.parameters ?? {}) as object).length ? `parameters ${Object.keys(b.parameters as object).join(", ")}` : "",
       typeof b.system === "string" ? "system prompt set" : "",
     ].filter(Boolean).join("; "),

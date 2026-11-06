@@ -657,6 +657,7 @@ export const AUDIT_ACTIONS = {
   "model.delete": "Deleted model",
   "model.load": "Loaded model",
   "model.unload": "Unloaded model",
+  "model.upload": "Uploaded a GGUF file",
   "job.cancel": "Cancelled or cleared job",
   "alert.rules": "Changed alert rules",
   "alert.channels": "Changed alert channels",
@@ -797,8 +798,9 @@ export interface FitEstimate {
 /** POST /api/instances/{id}/models/fit: the inputs, so the editor can estimate other contexts without asking again. */
 export interface FitResult {
   model: FitModel;
-  /** host: installed there, read with /api/show · registry: not pulled, read from its registry's manifest and GGUF header */
-  source: "host" | "registry";
+  /** host: installed there, read with /api/show · registry: not pulled, read from its registry's manifest and GGUF header ·
+   *  upload: a GGUF uploaded for a new model */
+  source: "host" | "registry" | "upload";
   /** the requested host first */
   hosts: FitHost[];
   measurements: FitMeasurement[];
