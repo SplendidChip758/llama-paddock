@@ -32,6 +32,12 @@ export interface Settings {
   metrics_token: string | null;
   /** Serve /metrics without a token (only when no token is set). */
   metrics_open: boolean;
+  /** Read ollama.com and model registries: the library browser, and fit estimates for models that aren't pulled. Off for offline installs. */
+  model_library: boolean;
+  /** The Ollama registry that model names without a host resolve to. */
+  model_registry_url: string;
+  /** Where the library browser reads search results and tag lists: ollama.com, which has no API for it. */
+  model_library_url: string;
   instances: Instance[];
 }
 
@@ -118,6 +124,9 @@ export function loadSettings(): Settings {
     // `||`, not `??`: an unset ${VAR} in the YAML expands to "" and should fall through to the env
     metrics_token: String(raw.metrics_token || process.env.PADDOCK_METRICS_TOKEN || "").trim() || null,
     metrics_open: raw.metrics_open === true || raw.metrics_open === "true",
+    model_library: !/^(false|off|no|0)$/i.test(String(raw.model_library ?? process.env.PADDOCK_MODEL_LIBRARY ?? "true").trim()),
+    model_registry_url: trimSlash(String(raw.model_registry_url || process.env.PADDOCK_MODEL_REGISTRY_URL || "https://registry.ollama.ai")),
+    model_library_url: trimSlash(String(raw.model_library_url || process.env.PADDOCK_MODEL_LIBRARY_URL || "https://ollama.com")),
     instances: [...fromConfig, ...fromUi],
   };
 }

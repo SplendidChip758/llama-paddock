@@ -14,6 +14,9 @@ Copy [`config.example.yaml`](../config.example.yaml) to `config.yaml`. With Dock
 | `audit_retention_days` | `365` | Days of [audit log](security.md#audit-log) to retain; must be positive |
 | `metrics_token` | unset | Bearer token for the Prometheus [`/metrics`](prometheus.md) endpoint; falls back to `PADDOCK_METRICS_TOKEN`. Without a token or `metrics_open`, `/metrics` is off |
 | `metrics_open` | `false` | `true` serves `/metrics` without a token; ignored when a token is set |
+| `model_library` | `true` | `false` stops the dashboard contacting ollama.com and the model registries (Hugging Face too, for `hf.co/` models): the [library browser](usage.md#models) is off and [fit estimates](fit-estimates.md) need the model pulled on the host. Falls back to `PADDOCK_MODEL_LIBRARY` |
+| `model_library_url` | `https://ollama.com` | Where the library browser reads search results and tag lists. Falls back to `PADDOCK_MODEL_LIBRARY_URL` |
+| `model_registry_url` | `https://registry.ollama.ai` | The registry that model names without a host resolve to, such as `qwen3:8b`. Falls back to `PADDOCK_MODEL_REGISTRY_URL` |
 | `instances` | `[]` | Declarative hosts; read-only in the UI |
 
 Raw polls are kept for up to 24 hours, one-minute averages for up to 7 days, and 15-minute averages up to the retention limit. Reducing retention also shortens the finer tiers. See the [history API](api.md#history) for the resolution returned by each range.

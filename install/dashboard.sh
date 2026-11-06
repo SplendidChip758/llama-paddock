@@ -622,6 +622,10 @@ audit_retention_days: 365   # audit log of who changed what
 # Prometheus /metrics is off until a scrape token is set: put
 # PADDOCK_METRICS_TOKEN=<random> in llama-paddock.env, or see docs/prometheus.md.
 
+# The library browser reads ollama.com and fit estimates read the Ollama
+# registry; false keeps the dashboard from contacting them.
+# model_library: true
+
 # Add hosts in the dashboard (Add host). Hosts listed here also work, but are
 # read-only in the UI. Tokens can live in llama-paddock.env as \${VAR}.
 # instances:

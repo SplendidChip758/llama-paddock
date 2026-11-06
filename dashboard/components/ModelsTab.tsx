@@ -6,6 +6,7 @@ import { ago, api, fmtBytes, instPath } from "@/lib/format";
 import type { InstanceSnapshot, TagModel } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
 import { JobLine } from "./JobsDrawer";
+import { LibraryBrowser } from "./LibraryBrowser";
 import { ModelEditor } from "./ModelEditor";
 import { CloudBadge, SplitChip, SplitHint } from "./ui";
 
@@ -16,6 +17,7 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
   const [pullName, setPullName] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [browsing, setBrowsing] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -83,7 +85,7 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
         <div className="card" style={{ marginBottom: 18 }}>
           <div className="card-head">
             <h3>Pull a model</h3>
-            <a className="sub" href="https://ollama.com/library" target="_blank" rel="noopener">browse library ↗</a>
+            <button className="btn sm" onClick={() => setBrowsing(true)}>Browse library</button>
           </div>
           <form className="row" onSubmit={pull}>
             <input className="grow" type="text" value={pullName} onChange={(e) => setPullName(e.target.value)}
@@ -152,6 +154,7 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
           </div>
         )}
       </div>
+      {browsing && <LibraryBrowser instanceId={st.id} onClose={() => setBrowsing(false)} />}
       {editing && <ModelEditor instanceId={st.id} model={editing} onClose={() => setEditing(null)} key={editing} />}
     </>
   );

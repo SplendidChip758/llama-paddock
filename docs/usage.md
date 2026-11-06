@@ -32,6 +32,14 @@ CPU placement and a smaller context can be intentional. These readings help inve
 
 Pull by name (`qwen3:8b`, `gemma3:12b`, …). Progress shows in the Jobs drawer, and the list refreshes when a pull finishes.
 
+*Browse library* searches the [Ollama library](https://ollama.com/library) without leaving the dashboard:
+
+- Search by name or description, and filter by capability (tools, vision, thinking, embedding, audio, cloud), parameter count and quantization. Sort by popularity or by newest.
+- Open a model to see every tag with its size, context window, input types and quantization. Aliases such as `latest` show the quantization of the tag they point to. Cloud tags are marked and have no size.
+- *Pull* fetches a tag to this host, or to every host ticked under *Pull to*.
+
+Ollama has no search API, so the dashboard reads ollama.com's pages and caches them (searches for 10 minutes, tag lists for an hour). If ollama.com changes its pages and they can't be read, the browser says so; pulling by name keeps working. `model_library: false` in [`config.yaml`](configuration.md) turns the browser off.
+
 A loaded model shows a `loaded` chip with its [GPU/CPU split](#gpucpu-split), such as `loaded · 100% GPU`. Ollama cloud models (`gpt-oss:120b-cloud`, `gemma4:cloud`, …) get a dashed **cloud** badge, and no size, since they take no space on the host.
 
 ![Pulling a model](images/models-pull.png)

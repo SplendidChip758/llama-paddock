@@ -14,6 +14,13 @@ audit_retention_days: 365   # audit log of who changed what (admins: menu → Au
 # metrics_token: ${PADDOCK_METRICS_TOKEN}  # scrapers send Authorization: Bearer <token>
 # metrics_open: true                       # no token; only on a network you trust
 
+# The library browser reads ollama.com, and fit estimates for models that aren't
+# pulled yet read the Ollama registry. false keeps the dashboard from contacting
+# either (offline installs).
+# model_library: true
+# model_library_url: https://ollama.com
+# model_registry_url: https://registry.ollama.ai
+
 instances:
   - id: ollama-01
     name: ollama-01 · Node-01 P100

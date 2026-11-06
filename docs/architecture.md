@@ -48,6 +48,8 @@ dashboard/        Next.js app (App Router, TypeScript)
   lib/alerts.ts   alert rules, evaluated after every poll
   lib/db.ts       SQLite metric history, host events, alert transitions and job storage
   lib/split.ts    GPU/CPU split of loaded models and cloud model detection (server and UI)
+  lib/registry.ts model manifests and GGUF metadata from the Ollama and Hugging Face registries
+  lib/library.ts  the Ollama library browser: ollama.com's search and tags pages, parsed and cached
   components/     React UI
   lib/auth.ts     login, sessions (checked for every request by proxy.ts)
 .github/workflows release.yml (semantic-release: tag, tarball, agents, GHCR image; main + dev)
