@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, fmtDur } from "@/lib/format";
 import { ALERT_KINDS, DEFAULT_CLEAR_S, durText, parseDur, subjectText, thresholdText } from "@/lib/rules";
-import type { AlertKind, AlertRule, AlertSilence, AlertTransition, NotifyChannel } from "@/lib/types";
+import { DASHBOARD_TARGET, type AlertKind, type AlertRule, type AlertSilence, type AlertTransition, type NotifyChannel } from "@/lib/types";
 import { AlertLine, silenceChip, useSilences, whenText } from "./AlertBits";
 import { ChannelsSection } from "./ChannelsSection";
 import { usePaddock } from "./PaddockProvider";
@@ -51,7 +51,7 @@ export function AlertsView({ host: hostFilter }: { host?: string }) {
     }
   };
 
-  const hostName = (id: string) => instances.find((i) => i.id === id)?.name ?? id;
+  const hostName = (id: string) => (id === DASHBOARD_TARGET ? "the dashboard" : instances.find((i) => i.id === id)?.name ?? id);
   const notifyText = (r: AlertRule) => {
     if (r.channels == null) return channels?.length ? <span className="faint">all channels</span> : <span className="faint">no channels yet</span>;
     if (!r.channels.length) return <span className="faint">dashboard only</span>;
@@ -248,8 +248,9 @@ function History({ hostName, initialHost }: { hostName: (id: string) => string; 
         <h2>History</h2>
         <select value={host} onChange={(e) => setHost(e.target.value)} aria-label="Host" style={{ width: "auto", maxWidth: 240 }}>
           <option value="">All hosts</option>
+          <option value={DASHBOARD_TARGET}>The dashboard</option>
           {instances.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-          {host && !instances.some((i) => i.id === host) && <option value={host}>{host}</option>}
+          {host && host !== DASHBOARD_TARGET && !instances.some((i) => i.id === host) && <option value={host}>{host}</option>}
         </select>
       </div>
       <div className="card">

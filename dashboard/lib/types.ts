@@ -251,7 +251,7 @@ export interface HostEvent {
 }
 
 /** What an alert rule watches; see lib/rules.ts for each kind's unit and defaults. */
-export type AlertKind = "gpu_temp" | "vram" | "disk" | "host_unreachable" | "agent_unreachable" | "ollama_crash" | "gpu_lost" | "context_short" | "reload_churn";
+export type AlertKind = "gpu_temp" | "vram" | "disk" | "host_unreachable" | "agent_unreachable" | "ollama_crash" | "gpu_lost" | "context_short" | "reload_churn" | "insecure";
 
 export interface AlertRule {
   id: string;
@@ -666,12 +666,15 @@ export const AUDIT_ACTIONS = {
   "benchmark.cancel": "Cancelled benchmark",
   "benchmark.delete": "Deleted benchmark",
   "settings.client_names": "Renamed request clients",
+  "security.dismiss": "Dismissed a security check",
+  "security.undismiss": "Restored a security check",
+  "security.fix": "Fixed data file permissions",
 } as const;
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
 
 export const AUDIT_GROUPS: Record<string, string> = {
   auth: "Sign-in", user: "Users", token: "API tokens", host: "Hosts", ollama: "Ollama service", env: "Environment",
-  model: "Models", job: "Jobs", alert: "Alerts", benchmark: "Benchmarks", settings: "Settings",
+  model: "Models", job: "Jobs", alert: "Alerts", benchmark: "Benchmarks", settings: "Settings", security: "Security",
 };
 
 /**
@@ -696,4 +699,51 @@ export interface AuditEntry {
   /** what was acted on: a model, user, token, rule… */
   target: string | null;
   detail: string;
+}
+
+// ============================================================================ security checks
+/** The instance id that security alerts and dismissals use for the dashboard itself. Host ids can't contain "@". */
+export const DASHBOARD_TARGET = "@dashboard";
+
+export type SecurityCheckId =
+  | "ollama_open" | "agent_http" | "agent_token"
+  | "default_password" | "dashboard_http" | "data_files" | "api_tokens";
+
+/** pass, fail, or unknown: this poll can't tell (host down, nothing seen yet). dismissed: failing, but someone said it's intended. */
+export type SecurityState = "pass" | "fail" | "unknown" | "dismissed";
+
+export interface SecurityDismissal {
+  /** a host id, or DASHBOARD_TARGET */
+  instance: string;
+  check: SecurityCheckId;
+  note: string;
+  user: string | null;
+  /** unix seconds */
+  t: number;
+}
+
+export interface SecurityCheck {
+  id: SecurityCheckId;
+  label: string;
+  state: SecurityState;
+  detail: string;
+  /**
+   * How to fix it: href, a dashboard page; doc, a page under docs/ with its anchor ("proxy.md#…"), which
+   * the browser links on GitHub for this release; action, a fix the dashboard applies itself (admins).
+   */
+  fix: { label: string; href?: string; doc?: string; action?: "switch_https" | "chmod_data" } | null;
+  dismissal: SecurityDismissal | null;
+}
+
+export interface SecurityTarget {
+  /** a host id, or DASHBOARD_TARGET */
+  instance: string;
+  name: string;
+  checks: SecurityCheck[];
+}
+
+export interface SecuritySummary {
+  /** failing checks that aren't dismissed, across the dashboard and every host */
+  failing: number;
+  dismissed: number;
 }

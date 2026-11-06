@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, fmtDur, fmtMiB, pct } from "@/lib/format";
@@ -66,6 +67,7 @@ export function Overview() {
       </div>
       {editor}
       <FleetHttpsOffer instances={instances} />
+      <SecurityBadge />
       <div className="stats" style={{ marginBottom: 18 }}>
         <Stat k="Online" v={instances.filter((s) => s.ollama_ok).length} unit={`/ ${instances.length}`} />
         <Stat k="GPUs" v={gpus.length} />
@@ -77,6 +79,19 @@ export function Overview() {
         {instances.map((st) => <InstCard key={st.id} st={st} uptime={uptime[st.id]} />)}
       </div>
     </>
+  );
+}
+
+/** The security checks in one line, linking to the Security page; quiet while everything passes. */
+function SecurityBadge() {
+  const { security } = usePaddock();
+  if (!security?.failing) return null;
+  const n = security.failing;
+  return (
+    <Link href="/security" className="notice warn row" style={{ display: "flex", gap: 10 }}>
+      <span className="chip bad">{n} security check{n === 1 ? "" : "s"} failing</span>
+      <span className="grow">Something leaves a host or the dashboard exposed. Open Security to see what and how to fix it.</span>
+    </Link>
   );
 }
 

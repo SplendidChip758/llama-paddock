@@ -9,8 +9,13 @@ import { deleteSilences, firingAlerts, insertSilence, loadSilences, recentFiring
 import { HttpError } from "./http-error";
 import { reloadChurn, type LoadStats } from "./modelcheck";
 import { ALERT_KINDS, DEFAULT_CLEAR_S, DEFAULT_RULES, isAlertKind, subjectText } from "./rules";
+import { SECURITY_CHECKS } from "./security";
 import { readJson, writeJson } from "./store";
-import type { ActiveAlert, AgentStats, AlertRule, AlertSilence, AlertTransition, GpuCheck, LoadedModel, PsModel } from "./types";
+import {
+  DASHBOARD_TARGET,
+  type ActiveAlert, type AgentStats, type AlertRule, type AlertSilence, type AlertTransition, type GpuCheck, type LoadedModel, type PsModel,
+  type SecurityCheck,
+} from "./types";
 
 const RULES_FILE = "alert-rules.json";
 
@@ -137,7 +142,9 @@ export function saveRules(raw: unknown, hostIds: string[], channelIds: string[])
   return listRules();
 }
 
-const applies = (rule: AlertRule, instance: string) => rule.enabled && (!rule.hosts || rule.hosts.includes(instance));
+/** The dashboard's own security checks count as a host for "insecure" rules that cover every host. */
+const applies = (rule: AlertRule, instance: string) =>
+  rule.enabled && (instance === DASHBOARD_TARGET ? rule.kind === "insecure" && !rule.hosts : !rule.hosts || rule.hosts.includes(instance));
 
 // ============================================================================ state
 interface Tracker extends Omit<ActiveAlert, "silence"> {
@@ -357,6 +364,8 @@ export interface PolledHost {
   gpu_check: GpuCheck | null;
   /** see lib/modelcheck.ts. stats lists every model seen loaded since the dashboard started. */
   models: { loaded: LoadedModel[]; stats: LoadStats[]; unseen: number | null; env: Record<string, string> | null };
+  /** see lib/security.ts */
+  security: SecurityCheck[];
 }
 
 /**
@@ -428,6 +437,18 @@ function observe(rule: AlertRule, h: PolledHost, crash: Observation | null): Obs
       // a model that has unloaded no longer runs short
       for (const s of h.models.stats) {
         if (!h.models.loaded.some((m) => m.name === s.model)) out.push({ subject: s.model, cond: false, value: null, detail: `${s.model} isn't loaded` });
+      }
+      return out;
+    }
+    case "insecure": {
+      // a dismissed check is intended, so it counts as clear
+      const out: Observation[] = h.security.map((c) => ({
+        subject: c.id, cond: c.state === "unknown" ? null : c.state === "fail", value: null, detail: `${c.label}: ${c.detail}`,
+      }));
+      // a check that no longer applies (the agent removed, the login turned off) is clear rather than missing, so its alert resolves
+      const target = h.id === DASHBOARD_TARGET ? "dashboard" : "host";
+      for (const [id, info] of Object.entries(SECURITY_CHECKS)) {
+        if (info.target === target && !h.security.some((c) => c.id === id)) out.push({ subject: id, cond: false, value: null, detail: `${info.label}: doesn't apply` });
       }
       return out;
     }

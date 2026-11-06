@@ -59,6 +59,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pill { font-family: var(--mono); font-size: 12px; background: var(--panel2); padding: 0 7px; border-radius: 999px; color: var(--muted); }
 .pill.live { background: var(--accent); color: var(--bg); }
 .pill.alert { background: var(--bad); color: var(--bg); }
+.pill.warn { background: var(--warn); color: var(--bg); }
 .jobsbtn.active { border-color: var(--accent); }
 
 .dot { display: inline-block; vertical-align: middle; width: 8px; height: 8px; border-radius: 50%; background: var(--faint); flex: none; }
