@@ -1,3 +1,9 @@
+## [0.9.0-dev.9](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.8...v0.9.0-dev.9) (2026-11-06)
+
+### Features
+
+* **dashboard:** create a new model from scratch ([#134](https://github.com/SplendidChip758/llama-paddock/issues/134)) ([a5ac495](https://github.com/SplendidChip758/llama-paddock/commit/a5ac495c77e9b8749481b4a17e513622f661b7dd)), closes [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#30](https://github.com/SplendidChip758/llama-paddock/issues/30) [#29](https://github.com/SplendidChip758/llama-paddock/issues/29)
+
 ## [0.9.0-dev.8](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.7...v0.9.0-dev.8) (2026-11-06)
 
 ### Features
