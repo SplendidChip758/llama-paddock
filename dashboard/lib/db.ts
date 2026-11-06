@@ -5,7 +5,7 @@ import fs from "node:fs";
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { dataDir, dataFile } from "./store";
 import type {
-  AgentRequest, AlertKind, AlertSilence, AuditEntry, AlertTransition, BenchConditions, BenchRun, BenchSpec, HistoryPoint, HostEvent, JobInfo, JobState,
+  AgentRequest, AlertKind, FitMeasurement, AlertSilence, AuditEntry, AlertTransition, BenchConditions, BenchRun, BenchSpec, HistoryPoint, HostEvent, JobInfo, JobState,
   RequestCount,
 } from "./types";
 
@@ -102,6 +102,16 @@ const MIGRATIONS: string[] = [
     instance TEXT, instance_name TEXT, target TEXT, detail TEXT NOT NULL
   );
   CREATE INDEX audit_t ON audit (t);
+  `,
+  `
+  -- model_sizes: what /api/ps reported for a model loaded at a context, under the Ollama settings that change its size
+  -- (settings: see settingsKey() in lib/fit.ts). Fit estimates calibrate against these. One row per combination, the latest.
+  CREATE TABLE model_sizes (
+    instance TEXT NOT NULL, digest TEXT NOT NULL, context INTEGER NOT NULL, settings TEXT NOT NULL,
+    size INTEGER NOT NULL, size_vram INTEGER NOT NULL, t REAL NOT NULL,
+    PRIMARY KEY (instance, digest, context, settings)
+  ) WITHOUT ROWID;
+  CREATE INDEX model_sizes_digest ON model_sizes (digest);
   `,
 ];
 
@@ -265,6 +275,7 @@ export function deleteHistory(instance: string) {
     d.prepare("DELETE FROM alert_transitions WHERE instance = ?").run(instance);
     d.prepare("DELETE FROM alert_silences WHERE instance = ?").run(instance);
     d.prepare("DELETE FROM requests WHERE instance = ?").run(instance);
+    d.prepare("DELETE FROM model_sizes WHERE instance = ?").run(instance);
   });
 }
 
@@ -688,6 +699,20 @@ export function deleteBenchmark(id: string) {
 /** Benchmarks still marked running when the dashboard starts were cut off by the restart. */
 export function interruptBenchmarks(now = Date.now() / 1000) {
   db().prepare("UPDATE benchmarks SET state = 'error', error = 'interrupted: the dashboard restarted', finished = ? WHERE state = 'running'").run(now);
+}
+
+// ============================================================================ model sizes
+export function recordModelSizes(rows: (FitMeasurement & { digest: string })[]) {
+  if (!rows.length) return;
+  tx((d) => {
+    const st = d.prepare("INSERT OR REPLACE INTO model_sizes (instance, digest, context, settings, size, size_vram, t) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    for (const r of rows) st.run(r.instance, r.digest, r.context, r.settings, r.size, r.size_vram, r.t);
+  });
+}
+
+export function modelSizes(digest: string): FitMeasurement[] {
+  return db().prepare("SELECT instance, context, settings, size, size_vram, t FROM model_sizes WHERE digest = ? ORDER BY t")
+    .all(digest) as unknown as FitMeasurement[];
 }
 
 // ============================================================================ audit log

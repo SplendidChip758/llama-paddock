@@ -5,6 +5,7 @@ import { api, fmtNum, instPath } from "@/lib/format";
 import type { ParamValue, ShowResult } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
 import { Drawer } from "./ui";
+import { FitPanel } from "./FitPanel";
 
 const PARAM_KNOWN: Record<string, string> = {
   num_ctx: "Context window in tokens",
@@ -133,10 +134,6 @@ export function ModelEditor({ instanceId, model, onClose }: { instanceId: string
             ))}
             {nctx && <button className="btn sm" onClick={() => setParam("num_ctx", nctx)}>max</button>}
           </div>
-          <div className="hint">
-            Bigger contexts grow the KV cache: check VRAM on the Monitor tab after loading. With OLLAMA_KV_CACHE_TYPE=q8_0 the cache is roughly halved.
-          </div>
-
           <h2 style={{ margin: "18px 0 10px" }}>Parameters</h2>
           {Object.keys(params).length === 0 && <div className="hint">No parameters set — the model uses Ollama defaults.</div>}
           {Object.entries(params).map(([k, v]) => (
@@ -168,6 +165,9 @@ export function ModelEditor({ instanceId, model, onClose }: { instanceId: string
             <summary className="sub" style={{ cursor: "pointer" }}>Current parameters (raw)</summary>
             <pre className="logs" style={{ marginTop: 8 }}>{info.parameters_raw || "(none)"}</pre>
           </details>
+
+          <h2 style={{ margin: "22px 0 10px" }}>Fit estimate</h2>
+          <FitPanel instanceId={instanceId} model={model} params={params} onContext={(n) => setParam("num_ctx", n)} />
 
           <div className="row" style={{ marginTop: 20, justifyContent: "flex-end" }}>
             <button className="ghost" onClick={onClose}>Cancel</button>

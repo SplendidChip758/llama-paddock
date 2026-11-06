@@ -1,6 +1,9 @@
-import { HttpError, getInstance, handle, json, listJobs, ollama, readBody, startJob } from "@/lib/server";
+import { HttpError, fitHost, getInstance, getState, handle, json, listJobs, ollama, paddock, readBody, startJob } from "@/lib/server";
+import { estimateFit, fitModel } from "@/lib/fit";
+import { modelSizes } from "@/lib/db";
+import { isCloudModel } from "@/lib/split";
 import { MODEL_NAME_RE, coerceParam, nativeContext, parseParameters } from "@/lib/params";
-import type { ParamValue, ShowResult } from "@/lib/types";
+import type { FitResult, ParamValue, ShowResult, TagModel } from "@/lib/types";
 import type { Instance } from "@/lib/config";
 import { audit } from "@/lib/audit";
 import type { AuditAction } from "@/lib/types";
@@ -33,6 +36,23 @@ const actions: Record<string, (inst: Instance, body: Body) => Promise<unknown>> 
       parameter_count: (info["general.parameter_count"] as number) ?? null,
       modified_at: d.modified_at ?? null,
     };
+    return result;
+  },
+
+  /** Estimate where the model fits at a context, on this host and every other one. Read-only. */
+  async fit(inst, body) {
+    const model = str(body, "model");
+    const ctx = body.num_ctx;
+    if (ctx !== undefined && ctx !== null && !(Number.isInteger(ctx) && (ctx as number) > 0)) throw new HttpError(400, '"num_ctx" must be a positive integer');
+    const [show, tags] = await Promise.all([
+      ollama(inst, "POST", "/api/show", { model }),
+      ollama<{ models?: TagModel[] }>(inst, "GET", "/api/tags"),
+    ]);
+    const tag = (tags.models ?? []).find((m) => m.name === model || m.model === model || m.name === `${model}:latest`) ?? null;
+    const m = fitModel(model, { model_info: show.model_info, parameters: parseParameters(show.parameters) }, tag, isCloudModel(tag ?? { name: model }));
+    const hosts = [inst.id, ...[...paddock().instances.keys()].filter((id) => id !== inst.id)].map((id) => fitHost(getState(id), m.digest));
+    const measurements = m.digest ? modelSizes(m.digest) : [];
+    const result: FitResult = { model: m, hosts, measurements, estimates: hosts.map((h) => estimateFit(m, h, measurements, ctx as number | null | undefined)) };
     return result;
   },
 

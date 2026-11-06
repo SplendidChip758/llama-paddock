@@ -701,6 +701,108 @@ export interface AuditEntry {
   detail: string;
 }
 
+// ============================================================================ fit estimates
+/** What a fit estimate needs to know about a model, from /api/show and /api/tags; see fitModel() in lib/fit.ts. */
+export interface FitModel {
+  name: string;
+  digest: string | null;
+  /** the model's files on disk (/api/tags size): weights, plus a projector for vision models. null when it isn't pulled */
+  weights: number | null;
+  architecture: string | null;
+  /** the context it was trained for */
+  max_context: number | null;
+  layers: number | null;
+  /** KV heads per layer; models can vary them, and layers without attention have 0 */
+  kv_heads: number[] | null;
+  heads: number | null;
+  key_length: number | null;
+  value_length: number | null;
+  embedding: number | null;
+  vocab: number | null;
+  /** sliding-window attention: the window, and how many layers use it (null: not known for this architecture) */
+  sliding: { window: number; layers: number | null } | null;
+  /** has state-space (recurrent) layers, whose memory doesn't follow the KV cache formula */
+  recurrent: boolean;
+  /** Modelfile parameters that change the estimate */
+  num_ctx: number | null;
+  num_gpu: number | null;
+  num_batch: number | null;
+  /** an Ollama cloud model: nothing runs on the host */
+  cloud: boolean;
+}
+
+/** What a fit estimate needs to know about a host; see fitHost() in lib/server.ts. */
+export interface FitHost {
+  id: string;
+  name: string;
+  /** bytes; other: VRAM held by processes other than Ollama. null: no agent stats, so the GPUs aren't known */
+  gpus: { index: number; name: string; total: number; other: number }[] | null;
+  /** bytes; available counts what Ollama's runners hold, since Ollama unloads models to make room */
+  ram: { total: number; available: number } | null;
+  /** Ollama's settings that change the estimate; null when the environment isn't known (no agent) */
+  env: {
+    kv_cache_type: string | null;
+    flash_attention: boolean | null;
+    num_parallel: number | null;
+    context_length: number | null;
+    gpu_overhead: number | null;
+  } | null;
+  /** other models loaded now */
+  loaded: { name: string; size: number; size_vram: number }[];
+}
+
+/** What /api/ps reported for the model once loaded at a context, under the settings settingsKey() names. */
+export interface FitMeasurement {
+  instance: string;
+  context: number;
+  settings: string;
+  size: number;
+  size_vram: number;
+  t: number;
+}
+
+export interface FitEstimate {
+  instance: string;
+  instance_name: string;
+  /** tokens per request; the KV cache holds this times the parallel requests */
+  context: number;
+  context_source: "requested" | "modelfile" | "env" | "default";
+  /** fits: likely fully in VRAM · offload: likely partly or fully on the CPU · insufficient: not enough VRAM and RAM ·
+   *  unknown: insufficient information · cloud: runs remotely, nothing to estimate */
+  verdict: "fits" | "offload" | "insufficient" | "unknown" | "cloud";
+  confidence: "high" | "medium" | "low" | null;
+  /** predicted bytes, as /api/ps would report the loaded model. total includes any calibration; the parts are the formula's */
+  total: number | null;
+  weights: number | null;
+  kv: number | null;
+  overhead: number | null;
+  /** the formula alone, before calibration */
+  formula_total: number | null;
+  /** expected share in VRAM, 0–100 */
+  gpu_pct: number | null;
+  placement: string | null;
+  /** VRAM the model could use on its GPU(s), bytes */
+  capacity: number | null;
+  /** the largest context likely to fit entirely in VRAM under the same assumptions; null when unknown */
+  max_gpu_context: number | null;
+  /** loaded models Ollama would unload to make room */
+  evicts: string[];
+  /** measured: /api/ps reported this context · fitted: a line through measurements at two or more contexts ·
+   *  offset: the formula shifted by one measurement */
+  calibration: { kind: "measured" | "fitted" | "offset"; points: { context: number; size: number }[] } | null;
+  summary: string;
+  assumptions: string[];
+}
+
+/** POST /api/instances/{id}/models/fit: the inputs, so the editor can estimate other contexts without asking again. */
+export interface FitResult {
+  model: FitModel;
+  /** the requested host first */
+  hosts: FitHost[];
+  measurements: FitMeasurement[];
+  estimates: FitEstimate[];
+}
+
 // ============================================================================ security checks
 /** The instance id that security alerts and dismissals use for the dashboard itself. Host ids can't contain "@". */
 export const DASHBOARD_TARGET = "@dashboard";

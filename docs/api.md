@@ -10,7 +10,7 @@ The browser uses a session cookie. Scripts, Home Assistant and cron jobs use an 
 2. If the response has `must_change: true`, call `POST /api/auth/password` with `{"password":"…"}` and save the replacement cookie. Other application endpoints return 403 until this is done. The new password must differ from the old one and contain at least eight characters.
 3. Sessions last seven days. Changing the password invalidates other sessions, and so do an admin resetting it or removing the account.
 4. Failed logins return 401. After five failures from one address, or 20 from all addresses together, the login returns 429 for five minutes. See [Security](security.md).
-5. Accounts have a [role](configuration.md#users-and-roles). A **viewer** may call every `GET` endpoint below except `/api/users` and `/api/audit`, plus `POST /api/instances/{id}/models/show`, `POST /api/instances/{id}/gpu-check` and its own `/api/auth` routes. Anything else answers 403 with `code: "forbidden"`. An **admin** may call everything.
+5. Accounts have a [role](configuration.md#users-and-roles). A **viewer** may call every `GET` endpoint below except `/api/users` and `/api/audit`, plus `POST /api/instances/{id}/models/show`, `POST /api/instances/{id}/models/fit`, `POST /api/instances/{id}/gpu-check` and its own `/api/auth` routes. Anything else answers 403 with `code: "forbidden"`. An **admin** may call everything.
 6. From a browser, requests other than `GET` must come from the dashboard's own origin, or they get 403. `curl` and scripts send no `Origin` or `Sec-Fetch-Site` header and are unaffected. See [Cross-site requests](security.md#cross-site-requests).
 
 | Method | Path | Body / result |
@@ -252,6 +252,7 @@ A target is `{instance, name, checks}`, with `instance` a host ID or `@dashboard
 |---|---|---|
 | GET | `/api/instances/{id}/models` | Installed models from Ollama's `/api/tags`, each with `cloud`: `true` for an Ollama cloud model (Ollama reports `remote_host`, or the tag ends in `cloud`) |
 | POST | `/api/instances/{id}/models/show` | `{model}` → details, parsed parameters, system prompt and native context length |
+| POST | `/api/instances/{id}/models/fit` | `{model, num_ctx?}` → `{model, hosts, measurements, estimates}`: where the model would fit at that context on every host, this one first. Read-only. See [Fit estimates](fit-estimates.md) |
 | POST | `/api/instances/{id}/models/pull` | `{model}` → background job |
 | POST | `/api/instances/{id}/models/create` | `{model, from, parameters?, system?}` → background job |
 | POST | `/api/instances/{id}/models/load` | `{model, keep_alive?}` |

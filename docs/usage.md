@@ -39,6 +39,7 @@ A loaded model shows a `loaded` chip with its [GPU/CPU split](#gpucpu-split), su
 *Edit* opens the model editor:
 
 - Context presets from 4K up to the model's native maximum (read from GGUF metadata), or type any `num_ctx`
+- A [fit estimate](fit-estimates.md) that follows the context: whether the model fits in VRAM on this host, and the largest context that does
 - Add or remove any parameter (`temperature`, `top_p`, `num_gpu`, `stop`, …) and change the system prompt
 - **Save as** defaults to a new name such as `hermes3:8b-ctx32k`. Ollama layers it on the original model, so no weights are duplicated. Using the original name overwrites it in place; a later `ollama pull` of a registry model resets that.
 
