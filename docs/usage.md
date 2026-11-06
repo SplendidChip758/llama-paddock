@@ -44,14 +44,22 @@ A loaded model shows a `loaded` chip with its [GPU/CPU split](#gpucpu-split), su
 
 ![Pulling a model](images/models-pull.png)
 
+*New model* opens the same editor empty. Start from:
+
+- **a model on this host**: the new model is layered on it, so no weights are copied,
+- **the library or Hugging Face**: a library tag such as `qwen3:8b`, or a GGUF on Hugging Face as `hf.co/<user>/<repo>:<quantization>`. It's pulled to the host first if it isn't there, in the same job,
+- **a GGUF file** from your computer. It uploads through the dashboard in 8 MB chunks; the dashboard keeps it in its data directory until Ollama has it, then deletes its copy, so it needs that much free space for a moment.
+
+Then name it and set its parameters, system prompt and template. *Presets* (Coding, Factual, Chat, Creative, Long context) fill in common sampling settings; each only changes the parameters it lists. The [fit estimate](fit-estimates.md) shows whether it fits before anything is pulled or created: for a library model it reads the registry, for an uploaded file its GGUF header.
+
 *Edit* opens the model editor:
 
 - Context presets from 4K up to the model's native maximum (read from GGUF metadata), or type any `num_ctx`
 - A [fit estimate](fit-estimates.md) that follows the context: whether the model fits in VRAM on this host, and the largest context that does
-- Add or remove any parameter (`temperature`, `top_p`, `num_gpu`, `stop`, …) and change the system prompt
+- Add or remove any parameter (`temperature`, `top_p`, `num_gpu`, `stop`, …), apply a preset, and change the system prompt and the template
 - **Save as** defaults to a new name such as `hermes3:8b-ctx32k`. Ollama layers it on the original model, so no weights are duplicated. Using the original name overwrites it in place; a later `ollama pull` of a registry model resets that.
 
-Under the hood this calls Ollama's `POST /api/create` with `from` and `parameters`, the API equivalent of a `FROM` + `PARAMETER` Modelfile.
+Under the hood this calls Ollama's `POST /api/create` with `from` (or `files`, for an uploaded GGUF), `parameters`, `system` and `template`, the API equivalent of a `FROM` + `PARAMETER` + `SYSTEM` + `TEMPLATE` Modelfile.
 
 ![Model editor](images/model-editor.png)
 

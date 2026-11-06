@@ -50,6 +50,7 @@ dashboard/        Next.js app (App Router, TypeScript)
   lib/split.ts    GPU/CPU split of loaded models and cloud model detection (server and UI)
   lib/registry.ts model manifests and GGUF metadata from the Ollama and Hugging Face registries
   lib/library.ts  the Ollama library browser: ollama.com's search and tags pages, parsed and cached
+  lib/uploads.ts  GGUF uploads for new models: chunks into the data directory, then to Ollama's /api/blobs
   components/     React UI
   lib/auth.ts     login, sessions (checked for every request by proxy.ts)
 .github/workflows release.yml (semantic-release: tag, tarball, agents, GHCR image; main + dev)

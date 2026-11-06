@@ -18,6 +18,7 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [browsing, setBrowsing] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -103,7 +104,10 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
           <h3>
             {models?.length ?? "…"} models <span className="faint" style={{ fontWeight: 400 }}>· {fmtBytes(total)} on disk</span>
           </h3>
-          <button className="ghost sm" onClick={load}>Refresh</button>
+          <div className="row" style={{ gap: 6 }}>
+            {!readOnly && <button className="btn sm" onClick={() => setCreating(true)}>New model</button>}
+            <button className="ghost sm" onClick={load}>Refresh</button>
+          </div>
         </div>
         {models === null ? (
           <div className="empty">Loading models…</div>
@@ -154,6 +158,7 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
           </div>
         )}
       </div>
+      {creating && <ModelEditor instanceId={st.id} model={null} onClose={() => setCreating(false)} />}
       {browsing && <LibraryBrowser instanceId={st.id} onClose={() => setBrowsing(false)} />}
       {editing && <ModelEditor instanceId={st.id} model={editing} onClose={() => setEditing(null)} key={editing} />}
     </>

@@ -31,17 +31,19 @@ export function VerdictChip({ e }: { e: FitEstimate }) {
  * The model editor's fit estimate: fetched once, then re-estimated in the browser as the context and
  * parameters change, since the formula and the measurements come with the response.
  */
-export function FitPanel({ instanceId, model, params, onContext }: {
+export function FitPanel({ instanceId, model, blob, params, onContext }: {
   instanceId: string; model: string; params: Record<string, ParamValue>; onContext: (n: number) => void;
+  /** a GGUF uploaded for a new model, estimated from its header instead of `model` */
+  blob?: string | null;
 }) {
   const [data, setData] = useState<FitResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api<FitResult>(instPath(instanceId, "/models/fit"), { method: "POST", body: { model } })
+    api<FitResult>(instPath(instanceId, "/models/fit"), { method: "POST", body: blob ? { model, blob } : { model } })
       .then(setData)
       .catch((e) => setError(e.message));
-  }, [instanceId, model]);
+  }, [instanceId, model, blob]);
 
   const ctx = intParam(params.num_ctx);
   const e = useMemo(() => {

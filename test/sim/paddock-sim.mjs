@@ -280,6 +280,8 @@ function makeHost(n, o) {
       index: i, uuid: `GPU-${hash(`${id}/${i}`).slice(0, 8)}-${hash(`${id}/${i}`).slice(8, 12)}-sim0-${hash(`${id}/${i}`).slice(12, 24)}`,
     })),
     models: new Map(SEED_MODELS.map((name) => [name, makeModel(name)])),
+    /** blobs pushed to /api/blobs: digest → { size } */
+    blobs: new Map(),
     /** name → { until: ms timestamp or Infinity, ctx, cpuOnly: options.num_gpu was 0 } */
     loaded: new Map(),
     /** model → bytes already downloaded, so a pull that was cut off resumes (Ollama keeps partial blobs) */
@@ -474,10 +476,41 @@ async function pull(h, body, res) {
   }
 }
 
+/** Ollama's blob upload: HEAD says whether it has the blob, POST stores it if the body's sha256 matches. */
+async function blobRoute(h, req, res, digest) {
+  if (req.method === "HEAD") {
+    res.writeHead(h.blobs.has(digest) ? 200 : 404);
+    return res.end();
+  }
+  const sha = crypto.createHash("sha256");
+  let size = 0;
+  for await (const chunk of req) {
+    sha.update(chunk);
+    size += chunk.length;
+  }
+  if (`sha256:${sha.digest("hex")}` !== digest) return sendJson(res, 400, { error: "digest mismatch" });
+  h.blobs.set(digest, { size });
+  logLine(h, `received blob ${digest} (${size} bytes)`);
+  res.writeHead(201);
+  res.end();
+}
+
 async function create(h, body, res) {
   const name = fullName(String(body.model ?? ""));
   const out = ndjson(res);
-  const from = h.models.get(fullName(String(body.from ?? "")));
+  let from;
+  if (body.files && typeof body.files === "object") {
+    // a model from an uploaded GGUF: its size is the blob's
+    const [, digest] = Object.entries(body.files)[0] ?? [];
+    const blob = h.blobs.get(String(digest));
+    if (!blob) {
+      out.send({ error: `blob ${digest} not found` });
+      return out.end();
+    }
+    from = { ...makeModel(name), size: blob.size, parameters: "", template: "{{ .Prompt }}" };
+  } else {
+    from = h.models.get(fullName(String(body.from ?? "")));
+  }
   if (!from) {
     out.send({ error: `model '${body.from}' not found` });
     return out.end();
@@ -496,9 +529,10 @@ async function create(h, body, res) {
     ...from, name, model: name, digest: hash(name + Date.now()), modified_at: new Date().toISOString(),
     parameters: params.length ? params.join("\n") : from.parameters,
     system: typeof body.system === "string" ? body.system : from.system,
-    details: { ...from.details, parent_model: from.name },
+    template: typeof body.template === "string" ? body.template : from.template,
+    details: { ...from.details, parent_model: body.files ? "" : from.name },
   });
-  logLine(h, `created ${name} from ${from.name}`);
+  logLine(h, `created ${name} from ${body.files ? "an uploaded file" : from.name}`);
   out.send({ status: "success" });
   out.end();
 }
@@ -641,6 +675,8 @@ async function handleOllama(h, req, res) {
     res.writeHead(401, { "Content-Type": "text/plain", "WWW-Authenticate": "Bearer" });
     return res.end("401 Unauthorized");
   }
+  const blob = /^\/api\/blobs\/(sha256:[0-9a-f]{64})$/.exec(url.pathname);
+  if (blob && (req.method === "HEAD" || req.method === "POST")) return blobRoute(h, req, res, blob[1]);
   const route = ollamaRoutes[key];
   if (!route) {
     res.writeHead(404, { "Content-Type": "text/plain" });
