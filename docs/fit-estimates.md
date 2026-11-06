@@ -1,6 +1,6 @@
 # Fit estimates
 
-Before you load a model at a bigger context, the dashboard estimates how much memory it will need and where it will sit on each host: fully in VRAM, partly on the CPU, or not at all. The estimate is in the [model editor](usage.md#models), under **Fit estimate**, and updates as you change `num_ctx`, `num_gpu` or `num_batch`.
+Before you load a model at a bigger context, the dashboard estimates how much memory it will need and where it will sit on each host: fully in VRAM, partly on the CPU, or not at all. The estimate is in the [model editor](usage.md#models), under **Fit estimate**, and updates as you change `num_ctx`, `num_gpu` or `num_batch`. The [library browser](usage.md#models) uses the same estimate to mark each tag of a model before you pull it.
 
 An estimate is a prediction, not a measurement. It says how confident it is; the [API](#api) also lists what it assumed.
 
@@ -44,6 +44,8 @@ Measurements from the host itself come first. Without any, measurements from oth
 ## Models that aren't pulled
 
 A model the host doesn't have, such as `qwen3:8b` or `hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M`, is read from an allowed registry source instead: the manifest gives the exact size of its files, and the first few MB of its weights give the GGUF metadata the KV cache formula needs. Nothing is downloaded to the host. The manifest's digest is the one Ollama reports once the model is pulled, so measurements from hosts that have it loaded still [calibrate](#calibration) the estimate.
+
+The quantizations of one model size (`8b`, `8b-q8_0`, `8b-fp16`, …) share the metadata, so it's read once per size.
 
 Names without a host resolve to the Ollama registry (`model_registry_url`, `https://registry.ollama.ai` by default). Host-prefixed names are only supported for explicit allowlisted hosts (`hf.co` and `huggingface.co` for Hugging Face); other hosts are rejected. Manifests are cached for an hour, metadata for as long as the dashboard runs. `model_library: false` in [`config.yaml`](configuration.md) stops these requests: the estimate then needs the model pulled on the host.
 

@@ -402,5 +402,5 @@ tr.selected td { background: var(--bg2); }
 .chip.dim { opacity: .4; }
 .librarylist .tablewrap { padding: 0 12px 10px; }
 .librarytags td, .librarytags th { white-space: nowrap; }
-.librarydrawer select { width: auto; }
+.librarydrawer select { width: auto; max-width: 100%; }
 .libraryhead .name { font-weight: 600; font-family: var(--mono); }

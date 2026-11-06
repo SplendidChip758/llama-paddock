@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { api, fmtNum, instPath } from "@/lib/format";
-import type { LibraryModel, LibrarySearch, LibraryTag } from "@/lib/types";
+import type { BenchmarkInfo, FitEstimate, FitResult, LibraryModel, LibrarySearch, LibraryTag } from "@/lib/types";
+import { VerdictChip } from "./FitPanel";
 import { usePaddock } from "./PaddockProvider";
 import { Drawer } from "./ui";
 
@@ -33,6 +34,23 @@ export function paramsB(s: string): number | null {
   return m[1] ? n * Number(m[1]) : n;
 }
 
+const FIT_CONTEXTS = [4096, 8192, 16384, 32768, 65536, 131072];
+/** Tags estimated at once: each may read a registry manifest and a GGUF header. */
+const FIT_CONCURRENCY = 3;
+
+/** Where the fit filter estimates: a host, one of its GPUs (null: all of them) and a context. */
+interface FitTarget {
+  host: string;
+  gpu: number | null;
+  ctx: number;
+}
+
+/** A benchmark's generation speed for a model, with the conditions it was measured under. */
+interface Speed {
+  tps: number;
+  title: string;
+}
+
 const fmtSize = (b: number | null) => (b === null ? "–" : b >= 1e9 ? `${(b / 1e9).toFixed(b >= 1e10 ? 0 : 1)} GB` : `${Math.round(b / 1e6)} MB`);
 const fmtCtx = (n: number | null) => (n === null ? "–" : n >= 1024 ? `${Math.round(n / 1024)}K` : String(n));
 
@@ -52,6 +70,37 @@ export function LibraryBrowser({ instanceId, onClose, onPulled }: { instanceId: 
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
   const [targets, setTargets] = useState<string[]>([instanceId]);
+  const [fitHost, setFitHost] = useState("");
+  const [fitGpu, setFitGpu] = useState<number | null>(null);
+  const [fitCtx, setFitCtx] = useState(8192);
+  const [hideMisfits, setHideMisfits] = useState(false);
+  const [speeds, setSpeeds] = useState<Map<string, Speed>>(new Map());
+  const fit: FitTarget | null = fitHost ? { host: fitHost, gpu: fitGpu, ctx: fitCtx } : null;
+  const fitGpus = instances.find((i) => i.id === fitHost)?.stats?.nvidia.gpus ?? [];
+
+  // measured speeds on the fit host, by model digest (the 12 digits the library shows)
+  useEffect(() => {
+    setSpeeds(new Map());
+    if (!fitHost) return;
+    api<{ benchmarks: BenchmarkInfo[] }>(`/api/benchmarks?instance=${encodeURIComponent(fitHost)}&limit=500`)
+      .then((d) => {
+        const m = new Map<string, Speed>();
+        // newest first: keep the latest finished benchmark of each model
+        for (const b of d.benchmarks) {
+          const digest = b.conditions?.digest?.replace(/^sha256:/, "").slice(0, 12);
+          const c = b.summary.find((x) => x.case === "short" && x.tps) ?? b.summary.find((x) => x.tps);
+          if (!digest || !c?.tps || b.state !== "done" || m.has(digest)) continue;
+          m.set(digest, {
+            tps: c.tps.median,
+            title: `Benchmark of ${b.model} on ${b.instance_name}, ${new Date(b.started * 1000).toLocaleDateString()}: median generation speed of the ` +
+              `${c.case.replace("_", " ")} case over ${c.runs} ${b.spec.mode} run${c.runs === 1 ? "" : "s"} at ${fmtCtx(b.spec.num_ctx)} context` +
+              (c.tps.cv !== null ? `, ±${c.tps.cv.toFixed(0)}%` : "") + (c.split && c.split.state !== "gpu" ? `, ${c.split.gpu_pct ?? 0}% on the GPU` : ""),
+          });
+        }
+        setSpeeds(m);
+      })
+      .catch(() => {});
+  }, [fitHost]);
 
   const search = useCallback(async (p: number) => {
     setLoading(true);
@@ -133,6 +182,29 @@ export function LibraryBrowser({ instanceId, onClose, onPulled }: { instanceId: 
           {QUANTS.map((x, i) => <option key={x.label} value={i}>{x.label}</option>)}
         </select>
       </div>
+      <div className="row" style={{ gap: 8, flexWrap: "wrap", marginBottom: 12, alignItems: "center" }}>
+        <span className="sub">Fit on</span>
+        <select value={fitHost} onChange={(e) => { setFitHost(e.target.value); setFitGpu(null); }} aria-label="Host to estimate the fit on">
+          <option value="">— no estimate</option>
+          {instances.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+        </select>
+        {fitHost && fitGpus.length > 1 && (
+          <select value={fitGpu ?? ""} onChange={(e) => setFitGpu(e.target.value === "" ? null : Number(e.target.value))} aria-label="GPU">
+            <option value="">all GPUs</option>
+            {fitGpus.map((g) => <option key={g.index} value={g.index}>GPU {g.index} · {g.name}</option>)}
+          </select>
+        )}
+        {fitHost && (
+          <>
+            <select value={fitCtx} onChange={(e) => setFitCtx(Number(e.target.value))} aria-label="Context">
+              {FIT_CONTEXTS.map((c) => <option key={c} value={c}>{fmtCtx(c)} context</option>)}
+            </select>
+            <label className="sub" style={{ whiteSpace: "nowrap" }}>
+              <input type="checkbox" checked={hideMisfits} onChange={(e) => setHideMisfits(e.target.checked)} /> hide what doesn&apos;t fit
+            </label>
+          </>
+        )}
+      </div>
       {!readOnly && instances.length > 1 && (
         <div className="hint" style={{ marginBottom: 10 }}>
           Pull to:{" "}
@@ -163,7 +235,7 @@ export function LibraryBrowser({ instanceId, onClose, onPulled }: { instanceId: 
             </button>
             {open === m.path && (
               <Tags path={m.path} inRange={range ? inRange : null} quantTest={quant ? QUANTS[quant].test : null}
-                onPull={readOnly ? null : pull} />
+                onPull={readOnly ? null : pull} fit={fit} hideMisfits={hideMisfits} speeds={speeds} />
             )}
           </li>
         ))}
@@ -173,11 +245,52 @@ export function LibraryBrowser({ instanceId, onClose, onPulled }: { instanceId: 
   );
 }
 
-function Tags({ path, inRange, quantTest, onPull }: {
+type TagFit = Pick<FitEstimate, "verdict" | "gpu_pct" | "confidence" | "summary"> | { error: string };
+
+/** Estimate every tag at the target, a few at a time; results arrive as they're ready. */
+function useTagFits(tags: LibraryTag[] | null, fit: FitTarget | null): Map<string, TagFit> {
+  const [fits, setFits] = useState<Map<string, TagFit>>(new Map());
+  const key = fit ? `${fit.host}|${fit.gpu}|${fit.ctx}` : "";
+  useEffect(() => {
+    setFits(new Map());
+    if (!tags || !fit) return;
+    let gone = false;
+    const queue = tags.filter((t) => !t.cloud);
+    const one = async (t: LibraryTag) => {
+      let r: TagFit;
+      try {
+        const d = await api<FitResult>(instPath(fit.host, "/models/fit"), {
+          method: "POST", body: { model: t.name, num_ctx: fit.ctx, ...(fit.gpu !== null ? { gpu: fit.gpu } : {}) },
+        });
+        r = d.estimates[0];
+      } catch (e) {
+        r = { error: (e as Error).message };
+      }
+      if (!gone) setFits((m) => new Map(m).set(t.tag, r));
+    };
+    const worker = async () => {
+      for (let t = queue.shift(); t && !gone; t = queue.shift()) await one(t);
+    };
+    for (let i = 0; i < FIT_CONCURRENCY; i++) void worker();
+    return () => {
+      gone = true;
+    };
+    // `key` stands for the target, compared by value
+  }, [tags, key]);
+  return fits;
+}
+
+/** Likely partly or fully on the CPU, or too big: what "hide what doesn't fit" hides. Unknowns stay. */
+const misfit = (f: TagFit | undefined) => !!f && !("error" in f) && (f.verdict === "offload" || f.verdict === "insufficient");
+
+function Tags({ path, inRange, quantTest, onPull, fit, hideMisfits, speeds }: {
   path: string;
   inRange: ((s: string) => boolean) | null;
   quantTest: ((q: string) => boolean) | null;
   onPull: ((name: string) => void) | null;
+  fit: FitTarget | null;
+  hideMisfits: boolean;
+  speeds: Map<string, Speed>;
 }) {
   const [tags, setTags] = useState<LibraryTag[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -186,28 +299,54 @@ function Tags({ path, inRange, quantTest, onPull }: {
       .then((d) => setTags(d.tags))
       .catch((e) => setError(e.message));
   }, [path]);
+  const fits = useTagFits(tags, fit);
   if (error) return <div className="notice bad">{error}</div>;
   if (!tags) return <div className="hint">Loading tags…</div>;
-  const shown = tags.filter((t) => (!inRange || inRange(t.tag)) && (!quantTest || (t.quantization !== null && quantTest(t.quantization))));
+  const filtered = tags.filter((t) => (!inRange || inRange(t.tag)) && (!quantTest || (t.quantization !== null && quantTest(t.quantization))));
+  const shown = fit && hideMisfits ? filtered.filter((t) => !misfit(fits.get(t.tag))) : filtered;
   const hidden = tags.length - shown.length;
+  const pending = fit ? tags.filter((t) => !t.cloud && !fits.has(t.tag)).length : 0;
   return (
     <div className="tablewrap">
       <table className="librarytags">
-        <thead><tr><th>Tag</th><th className="r">Size</th><th className="r">Context</th><th>Input</th><th>Quant</th><th /></tr></thead>
+        <thead>
+          <tr>
+            <th>Tag</th><th className="r">Size</th><th className="r">Context</th><th>Input</th><th>Quant</th>
+            {fit && <><th>Fit at {fmtCtx(fit.ctx)}</th><th className="r">Speed</th></>}
+            <th />
+          </tr>
+        </thead>
         <tbody>
-          {shown.map((t) => (
-            <tr key={t.tag}>
-              <td><span className="name">{t.tag}</span>{t.cloud && <> <span className="chip cloud">cloud</span></>}</td>
-              <td className="r num">{t.cloud ? "–" : fmtSize(t.size)}</td>
-              <td className="r num">{fmtCtx(t.context)}</td>
-              <td className="faint">{t.input.join(", ") || "–"}</td>
-              <td className="faint">{t.quantization ?? "–"}</td>
-              <td>{onPull && <button className="btn sm" onClick={() => onPull(t.name)}>Pull</button>}</td>
-            </tr>
-          ))}
+          {shown.map((t) => {
+            const f = fits.get(t.tag);
+            const speed = speeds.get(t.digest);
+            return (
+              <tr key={t.tag}>
+                <td><span className="name">{t.tag}</span>{t.cloud && <> <span className="chip cloud">cloud</span></>}</td>
+                <td className="r num">{t.cloud ? "–" : fmtSize(t.size)}</td>
+                <td className="r num">{fmtCtx(t.context)}</td>
+                <td className="faint">{t.input.join(", ") || "–"}</td>
+                <td className="faint">{t.quantization ?? "–"}</td>
+                {fit && (
+                  <>
+                    <td title={f && !("error" in f) ? f.summary : f?.error}>
+                      {t.cloud ? <span className="faint">runs remotely</span>
+                        : !f ? <span className="faint">…</span>
+                          : "error" in f ? <span className="chip">fit unknown</span>
+                            : <><VerdictChip e={f as FitEstimate} />{f.confidence && f.confidence !== "high" && f.verdict !== "unknown" && <span className="faint"> {f.confidence}</span>}</>}
+                    </td>
+                    <td className="r num" title={speed?.title}>{speed ? `${speed.tps.toFixed(speed.tps < 10 ? 1 : 0)} tok/s` : <span className="faint">–</span>}</td>
+                  </>
+                )}
+                <td>{onPull && <button className="btn sm" onClick={() => onPull(t.name)}>Pull</button>}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+      {pending > 0 && <div className="hint">Estimating {pending} tag{pending === 1 ? "" : "s"}: each reads its manifest and model header from the registry the first time.</div>}
       {hidden > 0 && <div className="hint">{hidden} tag{hidden === 1 ? "" : "s"} hidden by the filters.</div>}
+      {fit && speeds.size > 0 && <div className="hint">Speed is a benchmark&apos;s median generation rate on that host, for the same model build; hover it for the conditions.</div>}
     </div>
   );
 }

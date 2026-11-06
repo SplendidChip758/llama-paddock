@@ -70,6 +70,12 @@ const actions: Record<string, (inst: Instance, body: Body) => Promise<unknown>> 
       source = "registry";
     }
     const hosts = [inst.id, ...[...paddock().instances.keys()].filter((id) => id !== inst.id)].map((id) => fitHost(getState(id), m.digest));
+    // one GPU of this host instead of all of them, as the library's fit filter can ask
+    if (body.gpu !== undefined && body.gpu !== null) {
+      const gpu = hosts[0].gpus?.find((x) => x.index === body.gpu);
+      if (!gpu) throw new HttpError(400, `"gpu" must be the index of one of ${inst.name}'s GPUs`);
+      hosts[0] = { ...hosts[0], gpus: [gpu] };
+    }
     const measurements = m.digest ? modelSizes(m.digest) : [];
     const result: FitResult = { model: m, source, hosts, measurements, estimates: hosts.map((h) => estimateFit(m, h, measurements, ctx as number | null | undefined)) };
     return result;

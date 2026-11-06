@@ -37,6 +37,10 @@ Pull by name (`qwen3:8b`, `gemma3:12b`, …). Progress shows in the Jobs drawer,
 - Search by name or description, and filter by capability (tools, vision, thinking, embedding, audio, cloud), parameter count and quantization. Sort by popularity or by newest.
 - Open a model to see every tag with its size, context window, input types and quantization. Aliases such as `latest` show the quantization of the tag they point to. Cloud tags are marked and have no size.
 - *Pull* fetches a tag to this host, or to every host ticked under *Pull to*.
+- *Fit on* estimates every tag of an opened model on a host at a context, with the same [fit estimate](fit-estimates.md) as the model editor: likely fits, likely CPU offload (with the share in VRAM) or insufficient capacity, and how confident it is. On a host with several GPUs, pick one to see what fits on it alone. *Hide what doesn't fit* hides the tags likely to offload or not fit; tags without enough information to estimate stay visible as *insufficient information*.
+- Where that host has [benchmarked](#benchmarks) the same model build (same digest), *Speed* shows the benchmark's median generation rate. Hover it for the conditions: date, case, runs, warm or cold, context, variation and GPU share.
+
+Estimating reads each tag's manifest from the registry, and the model header once per model size (its quantizations share one), so the first estimate of a large model takes a few seconds.
 
 Ollama has no search API, so the dashboard reads ollama.com's pages and caches them (searches for 10 minutes, tag lists for an hour). If ollama.com changes its pages and they can't be read, the browser says so; pulling by name keeps working. `model_library: false` in [`config.yaml`](configuration.md) turns the browser off.
 
