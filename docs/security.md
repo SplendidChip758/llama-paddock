@@ -95,6 +95,10 @@ This covers the dashboard's calls to agents. Its calls to Ollama on port 11434 c
 - Webhook requests don't follow redirects, so a message can't end up somewhere other than the URL you entered.
 - The dashboard sends requests to whatever URL a signed-in user enters for a channel. Anyone who can sign in can already control the hosts, so this adds no new access, but keep it in mind when you plan roles ([#10](https://github.com/SplendidChip758/llama-paddock/issues/10)).
 
+## Outbound connections
+
+The dashboard connects to your Ollama hosts and agents, and to the [notification channels](alerts.md) you set up. For the model library browser and [fit estimates](fit-estimates.md) of models that aren't pulled, it also reads `ollama.com`, `registry.ollama.ai` and, for `hf.co/` model names, Hugging Face. These requests send no credentials and nothing about your hosts, only the model names and searches you ask for. Set `model_library: false` in [`config.yaml`](configuration.md) to stop them.
+
 ## Ollama's own port
 
 Ollama's API has no authentication. Anyone who can reach port 11434 can pull, delete and run models without the dashboard. That's how Ollama is designed, and the dashboard can't change it: bind Ollama to the LAN and firewall it like the agent, or put it behind a proxy that checks a key ([setup examples](proxy.md#ollama-behind-a-proxy)). Give the host an `ollama_proxy_key` ([configuration](configuration.md#declarative-hosts), or **Proxy key** in Add host) and the dashboard sends it as `Authorization: Bearer <key>` on every Ollama call. The key is stored like agent tokens, in `hosts.json` (mode 600) or `config.yaml`, and never sent to the browser. Without TLS on the proxy it crosses the network in clear text, the same as agent tokens.

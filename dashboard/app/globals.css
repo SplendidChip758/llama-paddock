@@ -390,3 +390,17 @@ tr.selected td { background: var(--bg2); }
 .bench-compare tr.bench-differs td { background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .bench-warnings { margin: 0; padding-left: 16px; font-size: 12.5px; color: var(--muted); max-width: 38ch; }
 .fitpanel .hint { margin-top: 4px; }
+
+/* ---------- model library ---------- */
+.drawer.librarydrawer { width: min(760px, 100vw); }
+.librarylist { list-style: none; margin: 0 0 12px; padding: 0; border: 1px solid var(--line); border-radius: 8px; }
+.librarylist > li + li { border-top: 1px solid var(--line); }
+.libraryhead { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; width: 100%; padding: 10px 12px; background: none; border: 0; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.libraryhead:hover { background: var(--panel2); }
+.libraryhead .desc { font-size: 13px; color: var(--muted); }
+.libraryhead .faint { font-size: 12px; }
+.chip.dim { opacity: .4; }
+.librarylist .tablewrap { padding: 0 12px 10px; }
+.librarytags td, .librarytags th { white-space: nowrap; }
+.librarydrawer select { width: auto; }
+.libraryhead .name { font-weight: 600; font-family: var(--mono); }

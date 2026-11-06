@@ -251,8 +251,10 @@ A target is `{instance, name, checks}`, with `instance` a host ID or `@dashboard
 | Method | Path | Body / result |
 |---|---|---|
 | GET | `/api/instances/{id}/models` | Installed models from Ollama's `/api/tags`, each with `cloud`: `true` for an Ollama cloud model (Ollama reports `remote_host`, or the tag ends in `cloud`) |
+| GET | `/api/library` | Search the Ollama library: `?q=`, `&capability=tools\|vision\|thinking\|embedding\|audio\|cloud`, `&sort=popular\|newest`, `&page=` → `{models, has_more}`. Each model has `name` (what to pull), `path` (its page on ollama.com), `description`, `capabilities`, `sizes`, `pulls`, `tag_count` and `updated`. Read from ollama.com and cached for 10 minutes; 502 when ollama.com can't be reached or read, 404 with `model_library: false` |
+| GET | `/api/library/tags` | `?model=qwen3` (or `user/model`) → the model with `tags`: each with `name` (`qwen3:8b`), `digest` (12 hex digits; aliases share one), `size` (bytes as ollama.com rounds them; null for cloud tags), `context`, `input`, `quantization` and `cloud`. Cached for an hour |
 | POST | `/api/instances/{id}/models/show` | `{model}` → details, parsed parameters, system prompt and native context length |
-| POST | `/api/instances/{id}/models/fit` | `{model, num_ctx?}` → `{model, hosts, measurements, estimates}`: where the model would fit at that context on every host, this one first. Read-only. See [Fit estimates](fit-estimates.md) |
+| POST | `/api/instances/{id}/models/fit` | `{model, num_ctx?}` → `{model, source, hosts, measurements, estimates}`: where the model would fit at that context on every host, this one first. A model this host doesn't have is read from its registry (`source: "registry"`); 404 when the registry doesn't have it either. Read-only. See [Fit estimates](fit-estimates.md) |
 | POST | `/api/instances/{id}/models/pull` | `{model}` → background job |
 | POST | `/api/instances/{id}/models/create` | `{model, from, parameters?, system?}` → background job |
 | POST | `/api/instances/{id}/models/load` | `{model, keep_alive?}` |

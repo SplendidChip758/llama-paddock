@@ -30,6 +30,12 @@
  *   --write-config FILE  write a dashboard config.yaml for these hosts and keep running
  *   --help
  *
+ * Model registry, on the control port: GET /_sim/registry/v2/<repo>/manifests/<tag> and its blobs,
+ * like registry.ollama.ai (point the dashboard's model_registry_url at http://<bind>:<B>/_sim/registry),
+ * and ollama.com's library pages: GET /_sim/ollama.com/search and /_sim/ollama.com/<path>/tags
+ * (model_library_url: http://<bind>:<B>/_sim/ollama.com). GET /_sim/library-requests lists the
+ * pages asked for.
+ *
  * Control API (no auth; it binds to --bind like everything else):
  *   GET  /_sim/hosts                    every host: URLs, credentials, scenario
  *   GET  /_sim/hosts/<id>               one host, plus its pull log and request counts
@@ -190,16 +196,19 @@ function makeModel(name, extra = {}) {
   const cloud = CLOUD_NAME.test(name) ? { remote_model: name.replace(CLOUD_NAME, "").replace(/:$/, ""), remote_host: "https://ollama.com:443", size: 384 } : {};
   const f = FAMILIES.find((x) => x.match.test(name));
   const params = Number(/(\d+(?:\.\d+)?)b\b/i.exec(name)?.[1] ?? (1 + unit(name) * 7).toFixed(1));
+  // bytes per parameter of the quantization the tag names; Q4_K_M when it names none
+  const quant = /(q8_0|fp16|bf16)$/i.exec(name)?.[1].toLowerCase();
+  const perParam = { q8_0: 1.07, fp16: 2, bf16: 2 }[quant] ?? 0.6;
   return {
     name,
     model: name,
     modified_at: new Date().toISOString(),
     // roughly a Q4_K_M file: ~0.6 bytes per parameter
-    size: Math.round(params * 1e9 * 0.6 + unit(name + "s") * 2e8),
+    size: Math.round(params * 1e9 * perParam + unit(name + "s") * 2e8),
     digest: hash(name),
     details: {
       parent_model: "", format: "gguf", family: f.family, families: [f.family],
-      parameter_size: `${params}B`, quantization_level: "Q4_K_M",
+      parameter_size: `${params}B`, quantization_level: { q8_0: "Q8_0", fp16: "F16", bf16: "BF16" }[quant] ?? "Q4_K_M",
     },
     arch: f.arch,
     ctx: f.ctx,
@@ -212,6 +221,16 @@ function makeModel(name, extra = {}) {
     ...extra,
   };
 }
+
+/**
+ * The shape behind the KV cache the simulator charges: 32 layers × 8 KV heads × (128 + 128) × 2 bytes
+ * = 128 KiB per token. /api/show and the registry's GGUF headers both report it.
+ */
+const ARCH_INFO = { block_count: 32, embedding_length: 4096, "attention.head_count": 32, "attention.head_count_kv": 8, vocab_size: 128256 };
+const modelInfo = (m) => ({
+  "general.architecture": m.arch, "general.parameter_count": m.params, [`${m.arch}.context_length`]: m.ctx,
+  ...Object.fromEntries(Object.entries(ARCH_INFO).map(([k, v]) => [`${m.arch}.${k}`, v])),
+});
 
 const tagView = (m) => ({
   name: m.name, model: m.model, ...(m.remote_host ? { remote_model: m.remote_model, remote_host: m.remote_host } : {}),
@@ -566,12 +585,7 @@ const ollamaRoutes = {
       template: m.template,
       ...(m.system ? { system: m.system } : {}),
       details: m.details,
-      // the shape behind the KV cache the simulator charges: 32 layers × 8 KV heads × (128 + 128) × 2 bytes = 128 KiB per token
-      model_info: {
-        "general.architecture": m.arch, "general.parameter_count": m.params, [`${m.arch}.context_length`]: m.ctx,
-        [`${m.arch}.block_count`]: 32, [`${m.arch}.embedding_length`]: 4096, [`${m.arch}.attention.head_count`]: 32,
-        [`${m.arch}.attention.head_count_kv`]: 8, [`${m.arch}.vocab_size`]: 128256,
-      },
+      model_info: modelInfo(m),
       capabilities: m.capabilities,
       modified_at: m.modified_at,
     };
@@ -1123,9 +1137,236 @@ async function handleWebhook(req, res, name, action) {
   throw new HttpErr(405, "see the header of test/sim/paddock-sim.mjs");
 }
 
+// ------------------------------------------------------------------ model registry
+// The Ollama registry's API as the dashboard reads it for models that aren't pulled: manifests, the
+// config blob, and the weights blob through a redirect (registry.ollama.ai redirects to a CDN),
+// with Range support. The weights are a real GGUF header followed by zeros. Any library/<name>:<tag>
+// exists, made up from its name like a pull would, except names containing "missing".
+
+/** A GGUF file's start: header and metadata, with a 1000-token vocabulary to skip over. */
+function ggufHeader(m) {
+  const parts = [];
+  const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); parts.push(b); };
+  const u64 = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); parts.push(b); };
+  const str = (s) => { const b = Buffer.from(s); u64(b.length); parts.push(b); };
+  const kvs = [
+    ["general.architecture", 8, m.arch], ["general.name", 8, m.name],
+    [`${m.arch}.context_length`, 4, m.ctx],
+    ...Object.entries(ARCH_INFO).map(([k, v]) => [`${m.arch}.${k}`, 4, v]),
+  ];
+  parts.push(Buffer.from("GGUF"));
+  u32(3);
+  u64(291); // tensors; their infos aren't written, the dashboard never reads that far
+  u64(kvs.length + 1);
+  for (const [k, type, v] of kvs) {
+    str(k);
+    u32(type);
+    if (type === 8) str(v);
+    else u32(v);
+  }
+  str("tokenizer.ggml.tokens");
+  u32(9);
+  u32(8);
+  u64(1000);
+  for (let i = 0; i < 1000; i++) str(`tok${i}`);
+  return Buffer.concat(parts);
+}
+
+function registryModel(repo, tag) {
+  const name = repo.replace(/^library\//, "") + ":" + tag;
+  if (/missing/.test(name)) throw new HttpErr(404, "manifest unknown");
+  const m = makeModel(name);
+  const config = Buffer.from(JSON.stringify({ model_format: "gguf", model_family: m.details.family, model_type: m.details.parameter_size, file_type: "Q4_K_M" }));
+  return { m, config, configDigest: `sha256:${hash(config.toString())}`, weightsDigest: `sha256:${hash(m.name + " weights")}`, header: ggufHeader(m) };
+}
+
+function handleRegistry(req, res, url) {
+  const man = /^\/_sim\/registry\/v2\/(.+)\/manifests\/([^/]+)$/.exec(url.pathname);
+  if (man) {
+    const r = registryModel(man[1], man[2]);
+    registryBlobs.set(r.configDigest, r);
+    registryBlobs.set(r.weightsDigest, r);
+    // the digest a pull of this tag reports in /api/tags, as a registry may send it
+    res.setHeader("Docker-Content-Digest", `sha256:${r.m.digest}`);
+    return sendJson(res, 200, {
+      schemaVersion: 2, mediaType: "application/vnd.docker.distribution.manifest.v2+json",
+      config: { mediaType: "application/vnd.docker.container.image.v1+json", digest: r.configDigest, size: r.config.length },
+      layers: [
+        { mediaType: "application/vnd.ollama.image.model", digest: r.weightsDigest, size: r.m.size },
+        { mediaType: "application/vnd.ollama.image.template", digest: `sha256:${hash(r.m.template)}`, size: r.m.template.length },
+      ],
+    });
+  }
+  const blob = /^\/_sim\/registry\/v2\/(.+)\/blobs\/(sha256:[0-9a-f]+)$/.exec(url.pathname);
+  if (blob) {
+    // the registry sends blobs to its CDN, which the dashboard has to follow
+    res.writeHead(307, { Location: url.pathname.replace("/_sim/registry/", "/_sim/registry-cdn/") });
+    return res.end();
+  }
+  const cdn = /^\/_sim\/registry-cdn\/v2\/(.+)\/blobs\/(sha256:[0-9a-f]+)$/.exec(url.pathname);
+  if (!cdn) throw new HttpErr(404, "not found");
+  const r = registryBlobs.get(cdn[2]);
+  if (!r) throw new HttpErr(404, `blob unknown in ${cdn[1]}`);
+  if (cdn[2] === r.configDigest) return sendJson(res, 200, JSON.parse(r.config.toString()));
+  const size = r.m.size;
+  const range = /^bytes=(\d+)-(\d+)?$/.exec(req.headers.range ?? "");
+  const start = range ? Number(range[1]) : 0;
+  const end = Math.min(size - 1, range?.[2] !== undefined ? Number(range[2]) : size - 1);
+  if (start >= size) {
+    res.writeHead(416);
+    return res.end();
+  }
+  // only ever asked for the start: the header and a little after it
+  const body = Buffer.alloc(Math.min(end - start + 1, 64 * MiB));
+  if (start < r.header.length) r.header.copy(body, 0, start, Math.min(r.header.length, start + body.length));
+  res.writeHead(range ? 206 : 200, { "Content-Type": "application/octet-stream", "Content-Length": body.length, ...(range ? { "Content-Range": `bytes ${start}-${start + body.length - 1}/${size}` } : {}) });
+  res.end(body);
+}
+
+// ------------------------------------------------------------------ ollama.com
+// The library's search and tags pages, in the markup ollama.com serves (as of 2026), for the
+// dashboard's library browser. Models and sizes are made up like everything else here, and agree
+// with what a pull or the registry gives for the same tag.
+const LIBRARY = [
+  { path: "library/qwen3", desc: "Qwen3 is the latest generation of large language models in the Qwen series.", caps: ["tools", "thinking"], sizes: ["0.6b", "4b", "8b", "14b", "32b"], latest: "8b", pulls: 42_600_000, ctx: 40960, days: 400 },
+  { path: "library/llama3.2", desc: "Meta's Llama 3.2 goes small with 1B and 3B models.", caps: ["tools"], sizes: ["1b", "3b"], latest: "3b", pulls: 51_000_000, ctx: 131072, days: 700 },
+  { path: "library/gemma3", desc: "The current, most capable model that runs on a single GPU.", caps: ["vision"], sizes: ["1b", "4b", "12b", "27b"], latest: "4b", pulls: 23_000_000, ctx: 131072, days: 200, input: "Text, Image" },
+  { path: "library/nomic-embed-text", desc: "A high-performing open embedding model with a large token context window.", caps: ["embedding"], sizes: [], latest: "v1.5", pulls: 40_000_000, ctx: 2048, days: 900 },
+  { path: "library/gpt-oss", desc: "OpenAI's open-weight models designed for powerful reasoning & agentic tasks.", caps: ["tools", "thinking", "cloud"], sizes: ["20b", "120b"], latest: "20b", pulls: 14_700_000, ctx: 131072, days: 30, cloud: ["20b-cloud", "120b-cloud"] },
+  { path: "library/deepseek-r1", desc: "DeepSeek-R1 is a family of open reasoning models.", caps: ["tools", "thinking"], sizes: ["1.5b", "7b", "14b", "70b", "671b"], latest: "7b", pulls: 75_000_000, ctx: 131072, days: 160 },
+  { path: "someone/tiny-coder", desc: "A small coding model.", caps: ["tools"], sizes: ["1.5b"], latest: "1.5b", pulls: 1234, ctx: 32768, days: 2 },
+];
+const LIBRARY_PAGE = 4;
+const escHtml = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const shortCount = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n));
+const pullName = (path) => path.replace(/^library\//, "");
+const dayText = (d) => new Date(Date.UTC(2026, 10, 5) - d * 86_400_000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/** Every tag of a library model: latest, each size, and its quantizations. Aliases share a digest. */
+function libraryTags(l) {
+  const tags = [];
+  const sizes = l.sizes.length ? l.sizes : [l.latest];
+  for (const size of sizes) {
+    const base = l.sizes.length ? size : "v1.5";
+    for (const q of ["", "-q4_K_M", "-q8_0", "-fp16"]) {
+      const tag = `${base}${q}`;
+      const canonical = `${pullName(l.path)}:${base}${q === "" ? "-q4_K_M" : q}`;
+      tags.push({ tag, digest: hash(canonical).slice(0, 12), size: makeModel(canonical).size });
+    }
+  }
+  const latest = tags.find((t) => t.tag === l.latest);
+  tags.unshift({ ...latest, tag: "latest" });
+  for (const c of l.cloud ?? []) tags.push({ tag: c, digest: hash(c).slice(0, 12), size: null });
+  return tags;
+}
+
+function librarySearchPage(url) {
+  const q = (url.searchParams.get("q") ?? "").toLowerCase();
+  const c = url.searchParams.get("c");
+  const p = Math.max(1, Number(url.searchParams.get("p") ?? 1));
+  let found = LIBRARY.filter((l) => (!q || l.path.includes(q) || l.desc.toLowerCase().includes(q)) && (!c || l.caps.includes(c)));
+  if (url.searchParams.get("o") === "newest") found = [...found].sort((a, b) => a.days - b.days);
+  const slice = found.slice((p - 1) * LIBRARY_PAGE, p * LIBRARY_PAGE);
+  const items = slice.map((l) => `
+<li  class="border-t-[0.5px] border-line first:border-t-0">
+  <a href="/${l.path}" class="group grid grid-cols-1 gap-x-4 px-4 py-6">
+    <div class="flex min-w-0 items-baseline gap-2.5">
+      <h2 class="min-w-0 truncate text-xl font-medium" title="${escHtml(pullName(l.path))}">
+        <span >${escHtml(pullName(l.path))}</span>
+      </h2>
+      <span class="flex-none text-[15px] tabular-nums text-muted" title="Updated ${dayText(l.days)}">${l.days}d</span>
+    </div>
+    <div class="order-last mt-3 flex flex-wrap items-center gap-2">${l.caps.map((x) => `<span  class="inline-flex items-center rounded-md bg-indigo-50 px-2">${x}</span>`).join("")}
+    </div>
+    <p class="mt-1 line-clamp-2 text-[15px] leading-6 text-black">${escHtml(l.desc)}</p>
+    <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+      <span class="inline-flex items-center gap-1.5 tabular-nums" title="${l.pulls.toLocaleString("en-US")} downloads"><svg width="15" height="15" aria-hidden="true"><path d="M12 3.5v12"/></svg><span >${shortCount(l.pulls)}</span></span>
+      <span class="inline-flex items-center gap-1.5 tabular-nums"><svg width="15" height="15" aria-hidden="true"><circle cx="8" cy="8" r="1"/></svg><span >${libraryTags(l).length} tags</span></span>
+      ${l.sizes.map((x) => `<span  class="inline-flex items-center rounded-md bg-[#ddf4ff] px-2">${x}</span>`).join("\n      ")}
+    </div>
+  </a>
+</li>`).join("\n");
+  return `<!doctype html><html><head><title>${escHtml(q)} · Ollama</title></head><body>
+<div hidden data-result-count="${slice.length}" data-has-more="${p * LIBRARY_PAGE < found.length}"></div>
+<ul role="list" class="overflow-hidden rounded-3xl">${items}</ul></body></html>`;
+}
+
+function libraryTagsPage(path) {
+  const l = LIBRARY.find((x) => x.path === path);
+  if (!l) return null;
+  const name = pullName(path);
+  const rows = libraryTags(l).map((t) => `
+          <div class="group px-4 py-3">
+            <a href="/${path}:${t.tag}" class="md:hidden flex flex-col space-y-[6px] group">
+              <div class="flex items-center font-medium"><span class="group-hover:underline">${escHtml(name)}:${t.tag}</span></div>
+              <div class="flex flex-col text-neutral-500 text-[13px]">
+                <span>
+                  <span class="font-mono">
+                    ${t.digest}</span> • ${t.size === null ? "Low Usage" : `${(t.size / 1e9).toFixed(1)}GB`} • ${Math.round(l.ctx / 1024)}K context window  •
+                  <span class="hidden sm:inline">
+                    ${l.input ?? "Text"} input •
+                    ${Math.round(l.days / 30)} months ago
+                  </span>
+                </span>
+                  <div class="flex sm:hidden">
+                    ${l.input ?? "Text"} input •
+                    ${Math.round(l.days / 30)} months ago
+                  </div>
+              </div>
+            </a>
+            <div class="hidden md:flex flex-col space-y-[6px]">
+              <span class="flex items-center font-medium col-span-6 group text-sm">
+                <a href="/${path}:${t.tag}" class="group-hover:underline">${escHtml(name)}:${t.tag}</a>
+              </span>
+            </div>
+          </div>`).join("");
+  return `<!doctype html><html><head><title>${escHtml(name)}/tags</title><meta name="description" content="${escHtml(l.desc)}"/></head><body>
+<main>
+  <p class="flex space-x-5 text-[13px] font-medium text-neutral-500">
+    <span class="flex items-center"><span >${shortCount(l.pulls)}</span><span class="hidden sm:flex">&nbsp;Downloads</span></span>
+    <span class="flex items-center" title="Nov 5, 2026 8:18 PM UTC"><span class="hidden sm:flex">Updated&nbsp;</span><span >${l.days} days ago</span></span>
+  </p>
+  <div id="summary"><h2 id="summary-display"><span id="summary-content">
+    ${escHtml(l.desc)}
+  </span></h2></div>
+  <div class="mb-0 flex flex-wrap gap-2">
+    ${l.caps.map((x) => `<span class="inline-flex items-center rounded-md bg-indigo-50">${x}</span>`).join("\n    ")}
+    ${l.sizes.map((x) => `<span  class="inline-flex items-center rounded-md bg-[#ddf4ff]">${x}</span>`).join("\n    ")}
+  </div>
+<section class="w-full max-w-full mt-8">
+  <div class="min-w-full divide-y divide-gray-200">${rows}
+  </div>
+</section>
+</main></body></html>`;
+}
+
+function handleLibrarySite(req, res, url) {
+  const path = url.pathname.replace(/^\/_sim\/ollama\.com/, "");
+  libraryRequests.push(path + url.search);
+  let html = null;
+  if (path === "/search") html = librarySearchPage(url);
+  const t = /^\/([^/]+\/[^/]+)\/tags$/.exec(path);
+  if (t) html = libraryTagsPage(t[1]);
+  if (html === null) {
+    res.writeHead(404, { "Content-Type": "text/html" });
+    return res.end("<html><body>Not found</body></html>");
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(html);
+}
+
+/** Paths the library site was asked for, so tests can see what the dashboard cached. */
+const libraryRequests = [];
+
+/** Blobs by digest, filled as their manifests are served. */
+const registryBlobs = new Map();
+
 async function handleControl(req, res) {
   const url = new URL(req.url, "http://control");
   try {
+    if (req.method === "GET" && /^\/_sim\/registry/.test(url.pathname)) return handleRegistry(req, res, url);
+    if (req.method === "GET" && /^\/_sim\/ollama\.com\//.test(url.pathname)) return handleLibrarySite(req, res, url);
+    if (req.method === "GET" && url.pathname === "/_sim/library-requests") return sendJson(res, 200, { requests: libraryRequests });
     const wh = /^\/_sim\/webhook\/([A-Za-z0-9_.-]+)(?:\/(fail))?$/.exec(url.pathname);
     if (wh) return await handleWebhook(req, res, wh[1], wh[2]);
     if (req.method === "GET" && (url.pathname === "/_sim" || url.pathname === "/_sim/hosts")) {

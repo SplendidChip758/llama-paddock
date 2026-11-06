@@ -797,6 +797,8 @@ export interface FitEstimate {
 /** POST /api/instances/{id}/models/fit: the inputs, so the editor can estimate other contexts without asking again. */
 export interface FitResult {
   model: FitModel;
+  /** host: installed there, read with /api/show · registry: not pulled, read from its registry's manifest and GGUF header */
+  source: "host" | "registry";
   /** the requested host first */
   hosts: FitHost[];
   measurements: FitMeasurement[];
@@ -848,4 +850,45 @@ export interface SecuritySummary {
   /** failing checks that aren't dismissed, across the dashboard and every host */
   failing: number;
   dismissed: number;
+}
+
+// ============================================================================ model library (#30)
+/** A model in the Ollama library, from ollama.com's search page or the model's own page. */
+export interface LibraryModel {
+  /** what to pull: qwen3, or user/model for community models */
+  name: string;
+  /** its page on ollama.com: library/qwen3, user/model */
+  path: string;
+  description: string | null;
+  /** tools, vision, thinking, embedding, audio, cloud */
+  capabilities: string[];
+  /** parameter sizes it comes in: 8b, 0.6b, e4b, 8x7b */
+  sizes: string[];
+  pulls: number | null;
+  tag_count: number | null;
+  /** as the site words it: "October 30, 2026" */
+  updated: string | null;
+}
+
+export interface LibraryTag {
+  /** the full name to pull: qwen3:8b */
+  name: string;
+  tag: string;
+  /** the first 12 hex digits of the manifest digest: tags with the same one are aliases */
+  digest: string;
+  /** bytes, as rounded on the site; null for cloud tags */
+  size: number | null;
+  /** tokens */
+  context: number | null;
+  /** text, image, audio */
+  input: string[];
+  /** from the tag name, or a tag with the same digest */
+  quantization: string | null;
+  cloud: boolean;
+  updated: string | null;
+}
+
+export interface LibrarySearch {
+  models: LibraryModel[];
+  has_more: boolean;
 }
