@@ -2,7 +2,7 @@
 
 Before you load a model at a bigger context, the dashboard estimates how much memory it will need and where it will sit on each host: fully in VRAM, partly on the CPU, or not at all. The estimate is in the [model editor](usage.md#models), under **Fit estimate**, and updates as you change `num_ctx`, `num_gpu` or `num_batch`.
 
-An estimate is a prediction, not a measurement. It says what it assumed, and how confident it is.
+An estimate is a prediction, not a measurement. It says how confident it is; the [API](#api) also lists what it assumed.
 
 ## What it shows
 
@@ -19,8 +19,6 @@ Below the verdict:
 - The breakdown: **weights** (the model's files), **KV cache** (grows with the context), **buffers** (compute buffers) and the total, which is what `/api/ps` would report as the loaded model's `size`.
 - **Largest context likely fully in VRAM**, with **use** to set it as `num_ctx`.
 - The loaded models Ollama would unload first, when the model doesn't fit beside them. Ollama unloads idle models to make room, so this isn't a failure, but it means the models will push each other out ([reloads](context-and-reloads.md#reloads)).
-- **Assumptions**: every setting the estimate guessed, and anything that makes it rough.
-- **Other hosts**: the same model at the same context on every other host, as if it were pulled there.
 
 The context is the editor's `num_ctx`, or else `OLLAMA_CONTEXT_LENGTH`, or else Ollama's default of 4,096, capped at what the model supports.
 
@@ -60,4 +58,4 @@ A model split across several GPUs is one step less confident.
 
 ## API
 
-`POST /api/instances/{id}/models/fit` with `{model, num_ctx?}` returns the estimate for every host (this one first), along with the inputs: the model's metadata, each host's GPUs, RAM and settings, and the recorded measurements. See [the API](api.md#models-and-jobs).
+`POST /api/instances/{id}/models/fit` with `{model, num_ctx?}` returns the estimate for every host (this one first, others as if the model were pulled there), each with the assumptions behind it, along with the inputs: the model's metadata, each host's GPUs, RAM and settings, and the recorded measurements. See [the API](api.md#models-and-jobs).

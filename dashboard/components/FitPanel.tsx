@@ -44,16 +44,15 @@ export function FitPanel({ instanceId, model, params, onContext }: {
   }, [instanceId, model]);
 
   const ctx = intParam(params.num_ctx);
-  const estimates = useMemo(() => {
-    if (!data) return [];
+  const e = useMemo(() => {
+    if (!data) return null;
     // the editor's parameters are what the new model's Modelfile will hold
     const m = { ...data.model, num_ctx: null, num_gpu: intParam(params.num_gpu), num_batch: intParam(params.num_batch) };
-    return data.hosts.map((h) => estimateFit(m, h, data.measurements, ctx));
+    return estimateFit(m, data.hosts[0], data.measurements, ctx);
   }, [data, ctx, params.num_gpu, params.num_batch]);
 
   if (error) return <div className="hint">Fit estimate unavailable: {error}</div>;
-  if (!data) return <div className="hint">Estimating fit…</div>;
-  const [e, ...others] = estimates;
+  if (!e) return <div className="hint">Estimating fit…</div>;
 
   return (
     <div className="fitpanel">
@@ -87,28 +86,6 @@ export function FitPanel({ instanceId, model, params, onContext }: {
         <div className="hint" style={{ color: "var(--warn)" }}>
           Won&apos;t fit beside what&apos;s loaded now: Ollama would unload {e.evicts.join(", ")} first.
         </div>
-      )}
-      {e.assumptions.length > 0 && (
-        <details style={{ marginTop: 6 }}>
-          <summary className="sub" style={{ cursor: "pointer" }}>Assumptions</summary>
-          <ul className="fit-assumptions">{e.assumptions.map((a) => <li key={a}>{a}</li>)}</ul>
-        </details>
-      )}
-      {others.length > 0 && (
-        <details style={{ marginTop: 6 }}>
-          <summary className="sub" style={{ cursor: "pointer" }}>Other hosts (if pulled there)</summary>
-          <table className="fit-hosts">
-            <tbody>
-              {others.map((o) => (
-                <tr key={o.instance}>
-                  <td>{o.instance_name}</td>
-                  <td><VerdictChip e={o} /></td>
-                  <td className="sub">{o.summary}{o.max_gpu_context ? ` Up to ${fmtNum(o.max_gpu_context)} tokens fully in VRAM.` : ""}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </details>
       )}
     </div>
   );
