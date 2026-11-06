@@ -43,9 +43,9 @@ Measurements from the host itself come first. Without any, measurements from oth
 
 ## Models that aren't pulled
 
-A model the host doesn't have, such as `qwen3:8b` or `hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M`, is read from its registry instead: the manifest gives the exact size of its files, and the first few MB of its weights give the GGUF metadata the KV cache formula needs. Nothing is downloaded to the host. The manifest's digest is the one Ollama reports once the model is pulled, so measurements from hosts that have it loaded still [calibrate](#calibration) the estimate.
+A model the host doesn't have, such as `qwen3:8b` or `hf.co/bartowski/Llama-3.2-1B-Instruct-GGUF:Q4_K_M`, is read from an allowed registry source instead: the manifest gives the exact size of its files, and the first few MB of its weights give the GGUF metadata the KV cache formula needs. Nothing is downloaded to the host. The manifest's digest is the one Ollama reports once the model is pulled, so measurements from hosts that have it loaded still [calibrate](#calibration) the estimate.
 
-Names without a host resolve to the Ollama registry (`model_registry_url`, `https://registry.ollama.ai` by default); `hf.co/` names go to Hugging Face. Manifests are cached for an hour, metadata for as long as the dashboard runs. `model_library: false` in [`config.yaml`](configuration.md) stops these requests: the estimate then needs the model pulled on the host.
+Names without a host resolve to the Ollama registry (`model_registry_url`, `https://registry.ollama.ai` by default). Host-prefixed names are only supported for explicit allowlisted hosts (`hf.co` and `huggingface.co` for Hugging Face); other hosts are rejected. Manifests are cached for an hour, metadata for as long as the dashboard runs. `model_library: false` in [`config.yaml`](configuration.md) stops these requests: the estimate then needs the model pulled on the host.
 
 A GGUF file uploaded for a [new model](usage.md#models) is estimated from its header the same way, before the model is created.
 

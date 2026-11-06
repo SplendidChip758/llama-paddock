@@ -1,3 +1,15 @@
+## [0.9.0-dev.8](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.7...v0.9.0-dev.8) (2026-11-06)
+
+### Features
+
+* **dashboard:** browse and search the Ollama library from the Models tab ([#133](https://github.com/SplendidChip758/llama-paddock/issues/133)) ([3157210](https://github.com/SplendidChip758/llama-paddock/commit/3157210e2c24f49b29f08b2df64b947a145c1b12)), closes [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#30](https://github.com/SplendidChip758/llama-paddock/issues/30)
+
+## [0.9.0-dev.7](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.6...v0.9.0-dev.7) (2026-11-06)
+
+### Features
+
+* **dashboard:** estimate whether a model fits a host at a context ([#132](https://github.com/SplendidChip758/llama-paddock/issues/132)) ([7219bb4](https://github.com/SplendidChip758/llama-paddock/commit/7219bb468ed5341c3504f2e684accfd146f06dea)), closes [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#31](https://github.com/SplendidChip758/llama-paddock/issues/31)
+
 ## [0.9.0-dev.6](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.5...v0.9.0-dev.6) (2026-11-06)
 
 ### Features
