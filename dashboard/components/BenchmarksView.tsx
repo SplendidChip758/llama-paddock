@@ -395,8 +395,12 @@ function ResultsModal({ items, onClose, onChanged }: { items: BenchmarkInfo[]; o
   const speedRows = (c: BenchCase): Row[] => {
     const s = items.map((b) => summaryOf(b, c));
     const row = (label: string, pick: (x: BenchCaseSummary) => BenchStat | null, fmt: (n: number) => string, high: boolean): Row => {
-      const b = best(s.map((x) => x && pick(x)?.median), high);
-      return { label, values: s.map((x) => (x ? <StatCell s={pick(x)} fmt={fmt} best={b != null && pick(x)?.median === b} /> : <span className="faint">not run</span>)) };
+      const medians = s.map((x) => (x ? pick(x)?.median : null));
+      const b = best(medians, high);
+      // judged as shown: two figures that round to the same text are a tie, not a win
+      const shown = medians.filter((m): m is number => m != null).map(fmt);
+      const win = b != null && new Set(shown).size > 1 ? fmt(b) : null;
+      return { label, values: s.map((x, i) => (x ? <StatCell s={pick(x)} fmt={fmt} best={win != null && medians[i] != null && fmt(medians[i]!) === win} /> : <span className="faint">not run</span>)) };
     };
     return [
       row("Generation tok/s", (x) => x.tps, rate, true),
@@ -498,7 +502,7 @@ function ResultsModal({ items, onClose, onChanged }: { items: BenchmarkInfo[]; o
             {one.state === "running" ? "Cancel benchmark" : "Delete result"}
           </button>
         )}
-        <span className="grow faint" style={{ fontSize: 12.5 }}>{items.length > 1 ? "The best median is in bold. ± is how much the runs varied." : "± is how much the runs varied."}</span>
+        <span className="grow faint" style={{ fontSize: 12.5 }}>{items.length > 1 ? "The best median is in green. ± is how much the runs varied." : "± is how much the runs varied."}</span>
         <button className="btn sm" onClick={onClose}>Close</button>
       </div>
     </Modal>
