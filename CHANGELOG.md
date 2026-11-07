@@ -1,3 +1,10 @@
+## [0.9.0-dev.14](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.13...v0.9.0-dev.14) (2026-11-07)
+
+### Features
+
+* **dashboard:** more UI refinements ([#141](https://github.com/SplendidChip758/llama-paddock/issues/141)) ([d6b46a6](https://github.com/SplendidChip758/llama-paddock/commit/d6b46a6f36bfe99afbb90a49e72905201f16189e))
+* **install:** let both updaters switch between stable, dev and a tag ([#140](https://github.com/SplendidChip758/llama-paddock/issues/140)) ([e8abe1d](https://github.com/SplendidChip758/llama-paddock/commit/e8abe1d3a993b565dc25740e92d6faa03bd19f80))
+
 ## [0.9.0-dev.13](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.12...v0.9.0-dev.13) (2026-11-07)
 
 ### Features
