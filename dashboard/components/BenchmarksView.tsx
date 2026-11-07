@@ -1,11 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
 import { api, fmtBytes, instPath } from "@/lib/format";
 import { splitText } from "@/lib/split";
 import type { BenchCase, BenchCaseSummary, BenchMode, BenchRun, BenchStat, BenchmarkInfo, TagModel } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
+import { Modal } from "./ui";
 
 const CASES: { id: BenchCase; name: string; what: string }[] = [
   { id: "short", name: "Short prompt", what: "a short question: first token and generation speed" },
@@ -59,6 +60,8 @@ export function BenchmarksView() {
   const [list, setList] = useState<BenchmarkInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
+  /** the results open in the modal: one row clicked, or the ticked ones compared */
+  const [viewing, setViewing] = useState<string[] | null>(null);
   const [model, setModel] = useState("");
 
   const load = useCallback(() => {
@@ -81,7 +84,10 @@ export function BenchmarksView() {
 
   const models = useMemo(() => [...new Set((list ?? []).map((b) => b.model))].sort(), [list]);
   const shown = (list ?? []).filter((b) => !model || b.model === model);
-  const chosen = selected.map((id) => list?.find((b) => b.id === id)).filter((b): b is BenchmarkInfo => !!b);
+  const pick = (ids: string[]) => ids.map((id) => list?.find((b) => b.id === id)).filter((b): b is BenchmarkInfo => !!b);
+  // looked up on every render, so a running benchmark fills in while it's open
+  const viewed = viewing ? pick(viewing) : [];
+  const chosen = pick(selected);
   const toggle = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
 
   const started = (bs: BenchmarkInfo[]) => {
@@ -108,12 +114,17 @@ export function BenchmarksView() {
 
       {error && <div className="notice bad">{error}</div>}
 
-      {chosen.length > 0 && <Compare items={chosen} onClear={() => setSelected([])} />}
+      {viewed.length > 0 && <ResultsModal items={viewed} onClose={() => setViewing(null)} onChanged={load} />}
 
       <div className="card">
         <div className="card-head">
           <h3>{list ? plural(shown.length, "result") : "Results"}</h3>
           <div className="row">
+            {chosen.length > 0 && <button className="ghost sm" onClick={() => setSelected([])}>Clear</button>}
+            <button className="btn primary sm" onClick={() => setViewing(chosen.map((b) => b.id))} disabled={chosen.length < 2}
+              title={chosen.length < 2 ? "Tick two or more results to compare them" : ""}>
+              Compare{chosen.length ? ` (${chosen.length})` : ""}
+            </button>
             <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model">
               <option value="">All models</option>
               {models.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -123,7 +134,7 @@ export function BenchmarksView() {
         </div>
         {list === null ? <div className="empty">{error ? "Couldn't load benchmarks" : "Loading benchmarks…"}</div>
           : !shown.length ? <div className="empty">No benchmarks yet{readOnly ? "." : " — run one above."}</div>
-          : <ResultsTable items={shown} selected={selected} onToggle={toggle} onChanged={load} />}
+          : <ResultsTable items={shown} selected={selected} onToggle={toggle} onOpen={(id) => setViewing([id])} onChanged={load} />}
       </div>
     </>
   );
@@ -260,23 +271,37 @@ function RunForm({ onStarted }: { onStarted: (bs: BenchmarkInfo[]) => void }) {
 }
 
 // ============================================================================ the list
-function ResultsTable({ items, selected, onToggle, onChanged }: {
-  items: BenchmarkInfo[]; selected: string[]; onToggle: (id: string) => void; onChanged: () => void;
-}) {
-  const { readOnly, toast, refreshJobs } = usePaddock();
-  const remove = (b: BenchmarkInfo) => {
-    if (b.state !== "running" && !confirm(`Delete this benchmark of ${b.model} on ${b.instance_name}?`)) return;
-    api(`/api/benchmarks/${b.id}`, { method: "DELETE" })
+/** Cancel a running benchmark, or delete a finished one after asking. Resolves true once it's gone. */
+function useRemove(onChanged: () => void) {
+  const { toast, refreshJobs } = usePaddock();
+  return (b: BenchmarkInfo): Promise<boolean> => {
+    if (b.state !== "running" && !confirm(`Delete this benchmark of ${b.model} on ${b.instance_name}?`)) return Promise.resolve(false);
+    return api(`/api/benchmarks/${b.id}`, { method: "DELETE" })
       .then(() => {
         onChanged();
         void refreshJobs();
+        return true;
       })
-      .catch((e) => toast((e as Error).message, "bad"));
+      .catch((e) => {
+        toast((e as Error).message, "bad");
+        return false;
+      });
+  };
+}
+
+function ResultsTable({ items, selected, onToggle, onOpen, onChanged }: {
+  items: BenchmarkInfo[]; selected: string[]; onToggle: (id: string) => void; onOpen: (id: string) => void; onChanged: () => void;
+}) {
+  const { readOnly } = usePaddock();
+  const remove = useRemove(onChanged);
+  // a click anywhere on a row opens it, except on the row's own checkbox and buttons
+  const rowClick = (e: MouseEvent, id: string) => {
+    if (!(e.target as HTMLElement).closest("input, button, a, label")) onOpen(id);
   };
 
   return (
     <div className="tablewrap">
-      <table>
+      <table className="bench-results">
         <thead>
           <tr>
             <th><span className="sr-only">Compare</span></th>
@@ -290,11 +315,11 @@ function ResultsTable({ items, selected, onToggle, onChanged }: {
         </thead>
         <tbody>
           {items.map((b) => (
-            <tr key={b.id} className={selected.includes(b.id) ? "selected" : ""}>
+            <tr key={b.id} className={selected.includes(b.id) ? "selected" : ""} onClick={(e) => rowClick(e, b.id)}>
               <td><input type="checkbox" checked={selected.includes(b.id)} onChange={() => onToggle(b.id)} aria-label={`Compare ${b.model} on ${b.instance_name}`} /></td>
               <td className="faint num">{when(b.started)}</td>
               <td>{b.instance_name}</td>
-              <td><span className="name">{b.model}</span>{b.conditions?.quantization && <span className="faint"> · {b.conditions.quantization}</span>}</td>
+              <td><button type="button" className="linkbtn name" onClick={() => onOpen(b.id)}>{b.model}</button>{b.conditions?.quantization && <span className="faint"> · {b.conditions.quantization}</span>}</td>
               <td className="faint">{b.spec.mode} · {b.spec.num_ctx} ctx · ×{b.spec.repeat}</td>
               <td className="r"><StatCell s={summaryOf(b, "short")?.tps} fmt={rate} /></td>
               <td className="r"><StatCell s={summaryOf(b, "short")?.ttft_ms} fmt={secs} /></td>
@@ -353,7 +378,9 @@ function conditionRows(items: BenchmarkInfo[]): { label: string; values: string[
 
 const differs = (values: string[]) => new Set(values.filter((v) => v !== "–")).size > 1;
 
-function Compare({ items, onClear }: { items: BenchmarkInfo[]; onClear: () => void }) {
+function ResultsModal({ items, onClose, onChanged }: { items: BenchmarkInfo[]; onClose: () => void; onChanged: () => void }) {
+  const { readOnly } = usePaddock();
+  const remove = useRemove(onChanged);
   const [runs, setRuns] = useState<Map<string, BenchRun[]> | null>(null);
   const cases = BENCH_ORDER.filter((c) => items.some((b) => b.spec.cases.includes(c)));
   const conds = conditionRows(items);
@@ -387,67 +414,94 @@ function Compare({ items, onClear }: { items: BenchmarkInfo[]; onClear: () => vo
       .catch(() => setRuns(new Map()));
   };
 
+  const one = items.length === 1 ? items[0] : null;
+  // a subtitle only when every result shares it, as when comparing hosts with one model and set-up
+  const same = (f: (b: BenchmarkInfo) => string) => (new Set(items.map(f)).size === 1 ? f(items[0]) : null);
+  const subtitle = one
+    ? `${when(one.started)} · ${one.spec.mode} · ${one.spec.num_ctx} ctx · ${plural(one.spec.repeat, "run")} per prompt`
+    : [same((b) => b.model), same((b) => `${b.spec.mode} · ${b.spec.num_ctx} ctx · ${plural(b.spec.repeat, "run")} per prompt`)].filter(Boolean).join(" · ");
+
   return (
-    <div className="card" style={{ marginBottom: 16 }}>
-      <div className="card-head">
-        <h3>{items.length > 1 ? `Comparing ${items.length} results` : "Result"}</h3>
-        <div className="row">
-          <button className="ghost sm" onClick={runs ? () => setRuns(null) : showRuns}>{runs ? "Hide runs" : "Show runs"}</button>
-          <button className="ghost sm" onClick={onClear}>Close</button>
+    <Modal onClose={onClose} labelledBy="bench-modal-title" className="bench-modal">
+      <div className="modal-head">
+        <div className="grow" style={{ flex: 1, minWidth: 0 }}>
+          <h2 id="bench-modal-title">
+            {one ? <>{one.instance_name} · {one.model} <StateChip b={one} /></> : `Comparing ${items.length} results`}
+          </h2>
+          {subtitle && <div className="sub">{subtitle}</div>}
         </div>
+        <button className="ghost sm" onClick={runs ? () => setRuns(null) : showRuns} aria-pressed={!!runs}>{runs ? "Hide runs" : "Show runs"}</button>
+        <button className="ghost" onClick={onClose} aria-label="Close">✕</button>
       </div>
-      {keyDiffs.length > 0 && (
-        <div className="notice warn">
-          These ran with a different {keyDiffs.join(", ")}, so their speeds don&apos;t measure the same thing. Compare them with care.
-        </div>
-      )}
-      <div className="tablewrap">
-        <table className="bench-compare">
-          <thead>
-            <tr>
-              <th />
-              {items.map((b) => (
-                <th key={b.id} style={{ textTransform: "none" }}>
-                  <div>{b.instance_name}</div>
-                  <div className="faint" style={{ fontWeight: 400 }}>{b.model} · {when(b.started)}</div>
-                  <StateChip b={b} />
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {cases.map((c) => (
-              <Fragment key={c}>
-                <tr className="bench-group"><th colSpan={items.length + 1}>{caseName(c)}</th></tr>
-                {speedRows(c).map((r) => (
-                  <tr key={r.label}><td className="faint">{r.label}</td>{r.values.map((v, i) => <td key={i}>{v}</td>)}</tr>
-                ))}
-              </Fragment>
-            ))}
-            <tr className="bench-group"><th colSpan={items.length + 1}>Conditions</th></tr>
-            {conds.map((r) => {
-              const d = items.length > 1 && differs(r.values);
-              return (
-                <tr key={r.label} className={d ? "bench-differs" : ""}>
-                  <td className="faint">{r.label}{d && <span className="chip warn" style={{ marginLeft: 6 }}>differs</span>}</td>
-                  {r.values.map((v, i) => <td key={i} className="mono">{v}</td>)}
+      <div className="modal-body">
+        {keyDiffs.length > 0 && (
+          <div className="notice warn">
+            These ran with a different {keyDiffs.join(", ")}, so their speeds don&apos;t measure the same thing. Compare them with care.
+          </div>
+        )}
+        <div className="tablewrap">
+          <table className="bench-compare">
+            {/* one result: its host, model and date are already in the title */}
+            {!one && (
+              <thead>
+                <tr>
+                  <th />
+                  {items.map((b) => (
+                    <th key={b.id} style={{ textTransform: "none" }}>
+                      <div>{b.instance_name}</div>
+                      <div className="faint" style={{ fontWeight: 400 }}>{b.model} · {when(b.started)}</div>
+                      <StateChip b={b} />
+                    </th>
+                  ))}
                 </tr>
-              );
-            })}
-            <tr>
-              <td className="faint">Warnings</td>
-              {items.map((b) => (
-                <td key={b.id}>
-                  {b.error && <div className="bad-text">{b.error}</div>}
-                  {b.warnings.length ? <ul className="bench-warnings">{b.warnings.map((w) => <li key={w}>{w}</li>)}</ul> : !b.error && <span className="faint">none</span>}
-                </td>
+              </thead>
+            )}
+            <tbody>
+              {cases.map((c) => (
+                <Fragment key={c}>
+                  <tr className="bench-group"><th colSpan={items.length + 1}>{caseName(c)}</th></tr>
+                  {speedRows(c).map((r) => (
+                    <tr key={r.label}><td className="faint">{r.label}</td>{r.values.map((v, i) => <td key={i}>{v}</td>)}</tr>
+                  ))}
+                </Fragment>
               ))}
-            </tr>
-          </tbody>
-        </table>
+              <tr className="bench-group"><th colSpan={items.length + 1}>Conditions</th></tr>
+              {conds.map((r) => {
+                const d = items.length > 1 && differs(r.values);
+                return (
+                  <tr key={r.label} className={d ? "bench-differs" : ""}>
+                    <td className="faint">{r.label}{d && <span className="chip warn" style={{ marginLeft: 6 }}>differs</span>}</td>
+                    {r.values.map((v, i) => <td key={i} className="mono">{v}</td>)}
+                  </tr>
+                );
+              })}
+              <tr>
+                <td className="faint">Warnings</td>
+                {items.map((b) => (
+                  <td key={b.id}>
+                    {b.error && <div className="bad-text">{b.error}</div>}
+                    {b.warnings.length ? <ul className="bench-warnings">{b.warnings.map((w) => <li key={w}>{w}</li>)}</ul> : !b.error && <span className="faint">none</span>}
+                  </td>
+                ))}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        {runs && items.map((b) => <RunsTable key={b.id} b={b} runs={runs.get(b.id) ?? []} />)}
       </div>
-      {runs && items.map((b) => <RunsTable key={b.id} b={b} runs={runs.get(b.id) ?? []} />)}
-    </div>
+      <div className="modal-foot">
+        {one && !readOnly && (
+          // cancelling keeps the finished runs, so the result stays open; a deleted one is gone
+          <button className={one.state === "running" ? "ghost sm" : "danger sm"}
+            onClick={() => void remove(one).then((gone) => gone && one.state !== "running" && onClose())}
+            title={one.state === "running" ? "Stop it; the finished runs are kept" : "Delete this result"}>
+            {one.state === "running" ? "Cancel benchmark" : "Delete result"}
+          </button>
+        )}
+        <span className="grow faint" style={{ fontSize: 12.5 }}>{items.length > 1 ? "The best median is in bold. ± is how much the runs varied." : "± is how much the runs varied."}</span>
+        <button className="btn sm" onClick={onClose}>Close</button>
+      </div>
+    </Modal>
   );
 }
 

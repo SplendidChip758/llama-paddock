@@ -128,6 +128,34 @@ export function Drawer({ open, onClose, className, children }: { open: boolean; 
   );
 }
 
+/**
+ * A centred dialog over the page, for detail too wide for a drawer. The native <dialog> keeps focus
+ * inside it and makes the page behind inert; Escape or a click on the backdrop closes it.
+ */
+export function Modal({ onClose, labelledBy, className, children }: { onClose: () => void; labelledBy: string; className?: string; children: ReactNode }) {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const d = ref.current;
+    if (d && !d.open) d.showModal();
+    return () => d?.close();
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      className={`modal ${className ?? ""}`}
+      aria-labelledby={labelledBy}
+      onCancel={(e) => {
+        e.preventDefault();
+        onClose();
+      }}
+      // the dialog has no padding, so a click on the dialog itself is a click on the backdrop
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      {children}
+    </dialog>
+  );
+}
+
 /** A button that opens a small panel under it, for detail that shouldn't take room on the page. Escape or a click outside closes it. */
 export function Popover({ label, className, title, children }: { label: ReactNode; className?: string; title?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false);
