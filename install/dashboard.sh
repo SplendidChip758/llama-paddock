@@ -10,8 +10,9 @@
 # PADDOCK_UNINSTALL=1 removes it again (on a Proxmox host: destroys the dashboard CT).
 #
 # Options (environment variables):
-#   PADDOCK_VERSION   latest (default) | dev | v1.2.3 | source  — "dev" is the newest release
-#                     including prereleases (see dashboard-dev.sh); "source" builds PADDOCK_BRANCH
+#   PADDOCK_VERSION   latest (default; "stable" is the same) | dev | v1.2.3 | source  — "dev" is the
+#                     newest release including prereleases (see dashboard-dev.sh); "source" builds
+#                     PADDOCK_BRANCH
 #   PADDOCK_BRANCH    git branch for source builds and helper files (default: main)
 #   PADDOCK_REPO      GitHub repo (default: SplendidChip758/llama-paddock)
 #   PADDOCK_PORT      port to listen on (default: 8080)
@@ -28,6 +29,7 @@ set -euo pipefail
 REPO="${PADDOCK_REPO:-SplendidChip758/llama-paddock}"
 BRANCH="${PADDOCK_BRANCH:-main}"
 VERSION="${PADDOCK_VERSION:-latest}"
+[[ $VERSION == stable ]] && VERSION=latest
 PORT="${PADDOCK_PORT:-8080}"
 SELF_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/install/dashboard.sh"
 APP_DIR=/opt/llama-paddock
@@ -170,8 +172,9 @@ guess_gateway() {
 # A prerelease channel or tag (dev, v1.2.0-dev.3)
 is_prerelease() { [[ $VERSION == dev || $VERSION == v*-* ]]; }
 # What update-llama-paddock installs by default: stay on the channel this was installed from
+# (a prerelease tag counts as the prerelease channel, a stable tag as stable)
 CHANNEL=latest
-[[ $VERSION == dev ]] && CHANNEL=dev
+is_prerelease && CHANNEL=dev
 
 prerelease_notice() {
   local text="You are installing a PRERELEASE of llama-paddock (${VERSION}, from the ${BRANCH} branch).
@@ -698,7 +701,8 @@ EOF
 
   cat > /usr/local/bin/update-llama-paddock <<EOF
 #!/usr/bin/env bash
-# Update llama-paddock to the newest ${CHANNEL} release (pass a tag like v1.2.0 to pin one)
+# Update llama-paddock to the newest ${CHANNEL} release.
+# Pass "stable", "dev" (prereleases) or a tag like v1.2.0 to switch channel or pin one
 export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
 exec bash -c "\$(curl -fsSL ${SELF_URL})"
 EOF

@@ -45,7 +45,7 @@ See [Updates and backups](operations.md) before upgrading or switching channels.
 
 | Option | Default | Purpose |
 |---|---|---|
-| `PADDOCK_VERSION` | `latest` | a release tag (`v1.2.0`), `dev` for the newest release including [prereleases](operations.md#prereleases), or `source` to build `PADDOCK_BRANCH` (default: `main`) |
+| `PADDOCK_VERSION` | `latest` | `stable` (the same as `latest`), a release tag (`v1.2.0`), `dev` for the newest release including [prereleases](operations.md#prereleases), or `source` to build `PADDOCK_BRANCH` (default: `main`) |
 | `PADDOCK_PORT` | `8080` | Dashboard listen port |
 | `PADDOCK_LOCAL=1` | | install on the Proxmox host itself instead of creating a CT |
 | `PADDOCK_YES=1` | | non-interactive, accept defaults |
