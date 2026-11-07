@@ -6,6 +6,7 @@ export const PALETTES = [
   // swatches: background, primary and secondary of the dark version
   { id: "paddock", name: "Paddock", swatch: ["#0b1018", "#45d6ae", "#61a5fa"] },
   { id: "classic", name: "Classic", swatch: ["#13110e", "#c8a04a", "#7fb069"] },
+  { id: "phosphor", name: "Phosphor", swatch: ["#070b07", "#3be36b", "#ffb000"] },
 ] as const;
 export type Palette = (typeof PALETTES)[number]["id"];
 export const MODES = ["system", "light", "dark"] as const;
@@ -15,12 +16,13 @@ const PALETTE_KEY = "paddock.palette";
 const MODE_KEY = "paddock.mode";
 
 /** Runs inline in <head> before the first paint, so a saved choice doesn't flash the default theme. */
-export const THEME_SCRIPT = `try{var d=document.documentElement,p=localStorage.getItem("${PALETTE_KEY}"),m=localStorage.getItem("${MODE_KEY}");if(p==="classic")d.dataset.palette=p;if(m==="light"||m==="dark")d.dataset.theme=m}catch(e){}`;
+const NON_DEFAULT = PALETTES.filter((p) => p.id !== "paddock").map((p) => `p==="${p.id}"`).join("||");
+export const THEME_SCRIPT = `try{var d=document.documentElement,p=localStorage.getItem("${PALETTE_KEY}"),m=localStorage.getItem("${MODE_KEY}");if(${NON_DEFAULT})d.dataset.palette=p;if(m==="light"||m==="dark")d.dataset.theme=m}catch(e){}`;
 
 export function currentTheme(): { palette: Palette; mode: Mode } {
   const d = document.documentElement.dataset;
   return {
-    palette: d.palette === "classic" ? "classic" : "paddock",
+    palette: PALETTES.find((p) => p.id === d.palette)?.id ?? "paddock",
     mode: d.theme === "light" || d.theme === "dark" ? d.theme : "system",
   };
 }

@@ -1,6 +1,6 @@
 /* ---------- themes ----------
-   Two palettes, each dark and light. Paddock (the brand palette, brand/tokens.css) is the default;
-   data-palette="classic" picks the original warm one. The mode follows the OS unless data-theme
+   Three palettes, each dark and light. Paddock (the brand palette, brand/tokens.css) is the default;
+   data-palette="classic" picks the original warm one and "phosphor" a terminal green and amber one. The mode follows the OS unless data-theme
    is "light" or "dark". lib/theme.ts sets both attributes before the first paint, so the light
    blocks are repeated: once for the OS preference and once for an explicit choice. */
 :root {
@@ -29,6 +29,11 @@
   --text: #ece4d6; --muted: #a29684; --faint: #6e6457; --accent: #c8a04a; --accent2: #e3c27a; --on-accent: #1a150c;
   --ok: #7fb069; --warn: #e0a43a; --bad: #d9614c; --info: #6fa3c7;
 }
+:root[data-palette="phosphor"] {
+  --bg: #070b07; --bg2: #0a100a; --panel: #0f160f; --panel2: #162116; --line: #21352a;
+  --text: #d9f2d9; --muted: #9db89d; --faint: #7f9b80; --accent: #3be36b; --accent2: #ffb000; --on-accent: #041004;
+  --ok: #3be36b; --warn: #ffd24a; --bad: #ff6b5e; --info: #5fd0d0;
+}
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     --bg: #f5f8fb; --bg2: #edf2f7; --panel: #ffffff; --panel2: #eef3f8; --line: #d5dee8;
@@ -41,6 +46,11 @@
     --text: #2a2419; --muted: #6b5f4d; --faint: #9a8e7b; --accent: #a87d22; --accent2: #8a6414; --on-accent: #1a150c;
     --ok: #7fb069; --warn: #e0a43a; --bad: #d9614c; --info: #6fa3c7;
   }
+  :root[data-palette="phosphor"]:not([data-theme="dark"]) {
+    --bg: #f3f6ee; --bg2: #e9eee1; --panel: #fcfdf9; --panel2: #eef2e6; --line: #cfd8c2;
+    --text: #0d1a0d; --muted: #46583f; --faint: #566a50; --accent: #1a7a2e; --accent2: #8a5a00; --on-accent: #ffffff;
+    --ok: #1a7a2e; --warn: #946200; --bad: #c0392b; --info: #0e7490;
+  }
 }
 :root[data-theme="light"] {
   --bg: #f5f8fb; --bg2: #edf2f7; --panel: #ffffff; --panel2: #eef3f8; --line: #d5dee8;
@@ -52,6 +62,11 @@
   --bg: #f4efe6; --bg2: #ebe4d7; --panel: #fffdf8; --panel2: #f3ede2; --line: #ddd2c0;
   --text: #2a2419; --muted: #6b5f4d; --faint: #9a8e7b; --accent: #a87d22; --accent2: #8a6414; --on-accent: #1a150c;
   --ok: #7fb069; --warn: #e0a43a; --bad: #d9614c; --info: #6fa3c7;
+}
+:root[data-palette="phosphor"][data-theme="light"] {
+  --bg: #f3f6ee; --bg2: #e9eee1; --panel: #fcfdf9; --panel2: #eef2e6; --line: #cfd8c2;
+  --text: #0d1a0d; --muted: #46583f; --faint: #566a50; --accent: #1a7a2e; --accent2: #8a5a00; --on-accent: #ffffff;
+  --ok: #1a7a2e; --warn: #946200; --bad: #c0392b; --info: #0e7490;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); }

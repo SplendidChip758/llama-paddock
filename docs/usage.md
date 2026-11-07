@@ -172,6 +172,6 @@ Removing a parameter in the model editor may not remove a value inherited from t
 The **◐** button in the header picks the theme:
 
 - **Mode:** **System** follows your operating system's light or dark setting. **Light** and **Dark** fix it.
-- **Theme:** **Paddock** (the default, teal and blue) or **Classic** (the warm brown and gold of earlier versions).
+- **Theme:** **Paddock** (the default, teal and blue), **Classic** (the warm brown and gold of earlier versions) or **Phosphor** (green and amber on near-black, like a terminal).
 
 The choice is remembered in your browser, not your account, so each browser and device keeps its own.
