@@ -1,3 +1,9 @@
+## [0.9.0-dev.13](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.12...v0.9.0-dev.13) (2026-11-07)
+
+### Features
+
+* **dashboard:** adopt the brand palette and logo, keep the old look as Classic ([#139](https://github.com/SplendidChip758/llama-paddock/issues/139)) ([52c3efb](https://github.com/SplendidChip758/llama-paddock/commit/52c3efb55643e36976af6cd28772673c43e944d0)), closes [#37](https://github.com/SplendidChip758/llama-paddock/issues/37)
+
 ## [0.9.0-dev.12](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.11...v0.9.0-dev.12) (2026-11-07)
 
 ### Features
