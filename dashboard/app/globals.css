@@ -1,5 +1,5 @@
 /* ---------- themes ----------
-   Four palettes, each dark and light (Midnight dark only). Paddock (the brand palette, brand/tokens.css) is the default;
+   Four palettes, each dark and light (Midnight is always dark). Paddock (the brand palette, brand/tokens.css) is the default;
    data-palette="classic" picks the original warm one, "phosphor" a terminal green and amber one and "midnight" true black. The mode follows the OS unless data-theme
    is "light" or "dark". lib/theme.ts sets both attributes before the first paint, so the light
    blocks are repeated: once for the OS preference and once for an explicit choice. */
@@ -34,12 +34,6 @@
   --text: #d9f2d9; --muted: #9db89d; --faint: #7f9b80; --accent: #3be36b; --accent2: #ffb000; --on-accent: #041004;
   --ok: #3be36b; --warn: #ffd24a; --bad: #ff6b5e; --info: #5fd0d0;
 }
-/* Midnight is dark only: it has no light block, so in light mode it shows Paddock's light colours */
-:root[data-palette="midnight"] {
-  --bg: #000000; --bg2: #05070a; --panel: #0b0f15; --panel2: #131923; --line: #1e2836;
-  --text: #eaf1f8; --muted: #a3b1c2; --faint: #8b9bb0; --accent: #45d6ae; --accent2: #61a5fa; --on-accent: #000000;
-  --ok: #45d6ae; --warn: #f5b84a; --bad: #f2707a; --info: #61a5fa;
-}
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
     --bg: #f5f8fb; --bg2: #edf2f7; --panel: #ffffff; --panel2: #eef3f8; --line: #d5dee8;
@@ -73,6 +67,14 @@
   --bg: #f3f6ee; --bg2: #e9eee1; --panel: #fcfdf9; --panel2: #eef2e6; --line: #cfd8c2;
   --text: #0d1a0d; --muted: #46583f; --faint: #566a50; --accent: #1a7a2e; --accent2: #8a5a00; --on-accent: #ffffff;
   --ok: #1a7a2e; --warn: #946200; --bad: #c0392b; --info: #0e7490;
+}
+/* Midnight has no light version: it stays dark whatever the mode, so this comes last and the
+   html: prefix outranks every light block above */
+html:root[data-palette="midnight"] {
+  --bg: #000000; --bg2: #05070a; --panel: #0b0f15; --panel2: #131923; --line: #1e2836;
+  --text: #eaf1f8; --muted: #a3b1c2; --faint: #8b9bb0; --accent: #45d6ae; --accent2: #61a5fa; --on-accent: #000000;
+  --ok: #45d6ae; --warn: #f5b84a; --bad: #f2707a; --info: #61a5fa;
+  color-scheme: dark;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.45 var(--sans); }
@@ -370,6 +372,7 @@ pre.logs .wrn { color: var(--warn); }
 .thememenu summary::after { content: none; }
 .thememenu .menu { min-width: 210px; gap: 2px; }
 .thememenu .menu-label { font: 10.5px var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--faint); padding: 6px 10px 2px; }
+.thememenu .menu-hint { font-size: 12px; color: var(--faint); padding: 2px 10px 4px; }
 .thememenu [role="group"] { display: flex; flex-direction: column; }
 .thememenu .menu button { display: flex; align-items: center; gap: 8px; }
 .thememenu .menu button[aria-pressed="true"] { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }

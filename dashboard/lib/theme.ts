@@ -10,6 +10,8 @@ export const PALETTES = [
   { id: "midnight", name: "Midnight", swatch: ["#000000", "#45d6ae", "#61a5fa"] },
 ] as const;
 export type Palette = (typeof PALETTES)[number]["id"];
+/** Palettes that have no light version and ignore the mode. */
+export const DARK_ONLY: readonly Palette[] = ["midnight"];
 export const MODES = ["system", "light", "dark"] as const;
 export type Mode = (typeof MODES)[number];
 

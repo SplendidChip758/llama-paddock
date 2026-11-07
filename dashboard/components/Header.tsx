@@ -8,7 +8,7 @@ import { JobsDrawer } from "./JobsDrawer";
 import { statusOf } from "./ui";
 import { Logo } from "./Logo";
 import { api } from "@/lib/format";
-import { MODES, PALETTES, applyTheme, currentTheme, type Mode, type Palette } from "@/lib/theme";
+import { DARK_ONLY, MODES, PALETTES, applyTheme, currentTheme, type Mode, type Palette } from "@/lib/theme";
 import { loudAlerts } from "./AlertBits";
 
 export function Header({ version }: { version: string }) {
@@ -139,6 +139,7 @@ function ThemeMenu() {
     applyTheme(next.palette, next.mode);
     setTheme(next);
   };
+  const darkOnly = !!theme && DARK_ONLY.includes(theme.palette);
   return (
     <HeaderMenu className="thememenu" title="Theme" summary={<span aria-label="Theme">◐</span>}>
       {() => (
@@ -146,11 +147,12 @@ function ThemeMenu() {
           <div className="menu-label" id="theme-mode">Mode</div>
           <div role="group" aria-labelledby="theme-mode">
             {MODES.map((m) => (
-              <button key={m} aria-pressed={theme?.mode === m} onClick={() => theme && pick({ ...theme, mode: m })}>
+              <button key={m} aria-pressed={!darkOnly && theme?.mode === m} disabled={darkOnly} onClick={() => theme && pick({ ...theme, mode: m })}>
                 {MODE_NAMES[m]}
               </button>
             ))}
           </div>
+          {darkOnly && <div className="menu-hint">This theme is always dark.</div>}
           <div className="menu-label" id="theme-palette">Theme</div>
           <div role="group" aria-labelledby="theme-palette">
             {PALETTES.map((p) => (
