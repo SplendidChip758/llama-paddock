@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/logo/banner-dark.svg">
-    <img alt="llama-paddock" src="docs/logo/banner-light.svg" width="560">
+    <img alt="llama-paddock" src="docs/logo/banner-light.svg" width="418">
   </picture>
 </p>
 

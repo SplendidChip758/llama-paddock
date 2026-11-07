@@ -10,7 +10,7 @@ The logo, palette and components for llama-paddock's dashboard and website. The 
 | [`logo/mark-small.svg`](logo/mark-small.svg) | The icon for 16 px: the llama alone |
 | [`logo/llama.svg`](logo/llama.svg) | The bare pixel llama |
 
-`docs/logo/` and `dashboard/components/Logo.tsx` still hold the previous llama-and-fence mark. Replace them when the dashboard moves to this palette, so the README banner, the website's favicon and the app change together.
+The dashboard uses this palette as its default **Paddock** theme; the previous warm palette remains as **Classic** (`dashboard/app/globals.css`). `docs/logo/` holds copies of these files for the README banner and the website's favicon: `banner-*.svg` are the logo pack's wordmarks with the text converted to shapes, so they render without the font, and `logo-mark.svg` is `mark.svg`.
 
 ## Logo
 

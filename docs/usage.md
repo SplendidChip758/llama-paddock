@@ -166,3 +166,12 @@ Alert rules are checked against every poll; see [Alerts](alerts.md).
 Pulls and model creation run in the background and stay visible in the Jobs drawer across page refreshes. After a dashboard restart, running pulls resume if their host still exists. Running creates and benchmarks are marked interrupted; check the model list before trying a create again. A benchmark keeps the runs it finished.
 
 Removing a parameter in the model editor may not remove a value inherited from the base model. Set it explicitly to the value you want.
+
+## Theme
+
+The **◐** button in the header picks the theme:
+
+- **Mode:** **System** follows your operating system's light or dark setting. **Light** and **Dark** fix it.
+- **Theme:** **Paddock** (the default, teal and blue), **Classic** (the warm brown and gold of earlier versions) or **Phosphor** (green and amber on near-black, like a terminal).
+
+The choice is remembered in your browser, not your account, so each browser and device keeps its own.

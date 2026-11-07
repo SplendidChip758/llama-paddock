@@ -1,30 +1,22 @@
-/** The llama-paddock mark: a llama looking over a paddock fence. Same artwork as docs/logo/logo-mark.svg. */
-export function LogoMark({ size = 32 }: { size?: number }) {
-  return (
-    <svg viewBox="0 0 64 64" width={size} height={size} aria-hidden="true" className="logo-mark">
-      <rect width="64" height="64" rx="14" fill="#1b1814" />
-      <path
-        fill="#ece4d6"
-        d="M22 58 V32 C22 25 23.6 20.4 26.6 17.4 C24.4 14 23.4 9.6 24.2 5.4 Q24.6 4.4 25.4 5.2 C27.4 7.6 29.4 10.6 30.4 13.4 C30.8 13.3 31.4 13.2 31.8 13.2 C32 9.6 33 6.2 35 4 Q35.8 3.4 36 4.4 C36.8 7.6 36.6 11 35.8 14 C40.4 15.2 44.6 17.6 48 21 C50.4 23.4 49.8 27 46.8 27.8 L39 29.4 C36.6 30 35 32 35 34.6 V58 Z"
-      />
-      <circle cx="39.6" cy="20.4" r="1.75" fill="#1b1814" />
-      <path d="M44.6 26.2 Q46 26.6 47.4 25.9" stroke="#1b1814" strokeWidth="0.9" fill="none" strokeLinecap="round" />
-      <g fill="#c8a04a">
-        <rect x="7" y="35" width="5" height="24" rx="1.5" />
-        <rect x="52" y="35" width="5" height="24" rx="1.5" />
-        <rect x="4" y="40" width="56" height="5" rx="2" />
-        <rect x="4" y="50" width="56" height="5" rx="2" />
-      </g>
-    </svg>
-  );
-}
-
+/**
+ * The llama-paddock wordmark, built from parts so the name uses the page's font and the colours
+ * follow the theme: a pixel llama, a prompt, the name and a cursor (brand/README.md).
+ * The pixel art is drawn at 2x; other scales blur it.
+ */
 export function Logo() {
   return (
     <span className="logo">
-      <LogoMark size={32} />
-      <span className="logo-word">
-        llama<b>paddock</b>
+      <svg className="logo-llama" viewBox="0 0 12 13" width="24" height="26" aria-hidden="true">
+        <path
+          fillRule="evenodd"
+          d="M7 0h1v2h-1zM9 0h1v2h-1zM7 2h5v2h-5zM9 3h1v1h-1zM8 4h3v1h-3zM8 5h2v3h-2zM1 8h9v1h-9zM0 9h10v1h-10zM1 10h9v1h-9zM1 11h1v2h-1zM3 11h1v2h-1zM7 11h1v2h-1zM9 11h1v2h-1z"
+        />
+      </svg>
+      <svg className="logo-prompt" viewBox="0 0 5 7" width="10" height="14" aria-hidden="true">
+        <path d="M0 0h2v1h-2zM1 1h2v1h-2zM2 2h2v1h-2zM3 3h2v1h-2zM2 4h2v1h-2zM1 5h2v1h-2zM0 6h2v1h-2z" />
+      </svg>
+      <span className="logo-name">
+        llama-paddock<span className="logo-cursor">_</span>
       </span>
     </span>
   );

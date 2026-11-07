@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePaddock } from "./PaddockProvider";
 import { JobsDrawer } from "./JobsDrawer";
 import { statusOf } from "./ui";
 import { Logo } from "./Logo";
 import { api } from "@/lib/format";
+import { MODES, PALETTES, applyTheme, currentTheme, type Mode, type Palette } from "@/lib/theme";
 import { loudAlerts } from "./AlertBits";
 
 export function Header({ version }: { version: string }) {
@@ -56,6 +57,7 @@ export function Header({ version }: { version: string }) {
           <span>Jobs</span>
           <span className={`pill ${running ? "live" : ""}`}>{running || jobs.length}</span>
         </button>
+        <ThemeMenu />
         {me?.auth && me.username && <UserMenu username={me.username} role={me.role} />}
       </header>
       <JobsDrawer />
@@ -63,7 +65,13 @@ export function Header({ version }: { version: string }) {
   );
 }
 
-function UserMenu({ username, role }: { username: string; role?: string | null }) {
+/** A header dropdown: <details> with the dismissal a menu needs. The children get a close function. */
+function HeaderMenu({ className, summary, title, children }: {
+  className: string;
+  summary: ReactNode;
+  title: string;
+  children: (close: () => void) => ReactNode;
+}) {
   const ref = useRef<HTMLDetailsElement>(null);
   const [open, setOpen] = useState(false);
   const pathname = usePathname();
@@ -88,22 +96,74 @@ function UserMenu({ username, role }: { username: string; role?: string | null }
     };
   }, [open]);
   useEffect(close, [pathname]);
+  return (
+    <details className={`usermenu ${className}`} ref={ref} onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary title={title}>{summary}</summary>
+      {children(close)}
+    </details>
+  );
+}
+
+function UserMenu({ username, role }: { username: string; role?: string | null }) {
   const signOut = async () => {
     await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     window.location.assign("/login");
   };
   return (
-    <details className="usermenu" ref={ref} onToggle={(e) => setOpen(e.currentTarget.open)}>
-      <summary title={role === "viewer" ? "Account (read-only)" : "Account"}>
-        {username}{role === "viewer" && <span className="faint"> · viewer</span>}
-      </summary>
-      <div className="menu" onClick={(e) => (e.target as HTMLElement).closest("a") && close()}>
-        {role === "admin" && <Link href="/users">Users</Link>}
-        {role === "admin" && <Link href="/audit">Audit log</Link>}
-        <Link href="/tokens">API tokens</Link>
-        <Link href="/change-password">Change password</Link>
-        <button onClick={signOut}>Sign out</button>
-      </div>
-    </details>
+    <HeaderMenu
+      className="accountmenu"
+      title={role === "viewer" ? "Account (read-only)" : "Account"}
+      summary={<>{username}{role === "viewer" && <span className="faint"> · viewer</span>}</>}
+    >
+      {(close) => (
+        <div className="menu" onClick={(e) => (e.target as HTMLElement).closest("a") && close()}>
+          {role === "admin" && <Link href="/users">Users</Link>}
+          {role === "admin" && <Link href="/audit">Audit log</Link>}
+          <Link href="/tokens">API tokens</Link>
+          <Link href="/change-password">Change password</Link>
+          <button onClick={signOut}>Sign out</button>
+        </div>
+      )}
+    </HeaderMenu>
+  );
+}
+
+const MODE_NAMES: Record<Mode, string> = { system: "System", light: "Light", dark: "Dark" };
+
+/** Light/dark mode and palette. It stays open while choosing, so both can be changed in one go. */
+function ThemeMenu() {
+  const [theme, setTheme] = useState<{ palette: Palette; mode: Mode } | null>(null);
+  // read after mount: the inline script in app/layout.tsx has already applied the saved choice
+  useEffect(() => setTheme(currentTheme()), []);
+  const pick = (next: { palette: Palette; mode: Mode }) => {
+    applyTheme(next.palette, next.mode);
+    setTheme(next);
+  };
+  return (
+    <HeaderMenu className="thememenu" title="Theme" summary={<span aria-label="Theme">◐</span>}>
+      {() => (
+        <div className="menu">
+          <div className="menu-label" id="theme-mode">Mode</div>
+          <div role="group" aria-labelledby="theme-mode">
+            {MODES.map((m) => (
+              <button key={m} aria-pressed={theme?.mode === m} onClick={() => theme && pick({ ...theme, mode: m })}>
+                {MODE_NAMES[m]}
+              </button>
+            ))}
+          </div>
+          <div className="menu-label" id="theme-palette">Theme</div>
+          <div role="group" aria-labelledby="theme-palette">
+            {PALETTES.map((p) => (
+              <button key={p.id} aria-pressed={theme?.palette === p.id} onClick={() => theme && pick({ ...theme, palette: p.id })}>
+                <span className="swatch" aria-hidden="true">
+                  {p.swatch.map((c) => <i key={c} style={{ background: c }} />)}
+                </span>
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+    </HeaderMenu>
   );
 }
