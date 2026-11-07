@@ -1,6 +1,6 @@
 /* ---------- themes ----------
-   Three palettes, each dark and light. Paddock (the brand palette, brand/tokens.css) is the default;
-   data-palette="classic" picks the original warm one and "phosphor" a terminal green and amber one. The mode follows the OS unless data-theme
+   Four palettes, each dark and light (Midnight dark only). Paddock (the brand palette, brand/tokens.css) is the default;
+   data-palette="classic" picks the original warm one, "phosphor" a terminal green and amber one and "midnight" true black. The mode follows the OS unless data-theme
    is "light" or "dark". lib/theme.ts sets both attributes before the first paint, so the light
    blocks are repeated: once for the OS preference and once for an explicit choice. */
 :root {
@@ -33,6 +33,12 @@
   --bg: #070b07; --bg2: #0a100a; --panel: #0f160f; --panel2: #162116; --line: #21352a;
   --text: #d9f2d9; --muted: #9db89d; --faint: #7f9b80; --accent: #3be36b; --accent2: #ffb000; --on-accent: #041004;
   --ok: #3be36b; --warn: #ffd24a; --bad: #ff6b5e; --info: #5fd0d0;
+}
+/* Midnight is dark only: it has no light block, so in light mode it shows Paddock's light colours */
+:root[data-palette="midnight"] {
+  --bg: #000000; --bg2: #05070a; --panel: #0b0f15; --panel2: #131923; --line: #1e2836;
+  --text: #eaf1f8; --muted: #a3b1c2; --faint: #8b9bb0; --accent: #45d6ae; --accent2: #61a5fa; --on-accent: #000000;
+  --ok: #45d6ae; --warn: #f5b84a; --bad: #f2707a; --info: #61a5fa;
 }
 @media (prefers-color-scheme: light) {
   :root:not([data-theme="dark"]) {
