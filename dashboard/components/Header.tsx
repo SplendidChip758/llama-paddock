@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 import { usePaddock } from "./PaddockProvider";
 import { JobsDrawer } from "./JobsDrawer";
 import { statusOf } from "./ui";
@@ -63,16 +64,40 @@ export function Header({ version }: { version: string }) {
 }
 
 function UserMenu({ username, role }: { username: string; role?: string | null }) {
+  const ref = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const close = () => {
+    if (ref.current) ref.current.open = false;
+  };
+  // <details> only closes when its summary is clicked: also close it on a click elsewhere, on Escape,
+  // and after following one of its links, since the header stays mounted across pages
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && close();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      close();
+      ref.current?.querySelector("summary")?.focus();
+    };
+    document.addEventListener("pointerdown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  useEffect(close, [pathname]);
   const signOut = async () => {
     await api("/api/auth/logout", { method: "POST" }).catch(() => undefined);
     window.location.assign("/login");
   };
   return (
-    <details className="usermenu">
+    <details className="usermenu" ref={ref} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary title={role === "viewer" ? "Account (read-only)" : "Account"}>
         {username}{role === "viewer" && <span className="faint"> · viewer</span>}
       </summary>
-      <div className="menu">
+      <div className="menu" onClick={(e) => (e.target as HTMLElement).closest("a") && close()}>
         {role === "admin" && <Link href="/users">Users</Link>}
         {role === "admin" && <Link href="/audit">Audit log</Link>}
         <Link href="/tokens">API tokens</Link>
