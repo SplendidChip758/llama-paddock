@@ -290,6 +290,21 @@ label.field > span { display: block; font-size: 12.5px; color: var(--muted); mar
 .job .top-line { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
 .job .status { font-size: 12.5px; color: var(--muted); margin: 4px 0 6px; font-family: var(--mono); word-break: break-word; }
 
+/* modals */
+.modal {
+  padding: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text);
+  width: min(980px, calc(100vw - 32px)); max-width: none; max-height: calc(100vh - 64px);
+  box-shadow: 0 24px 60px rgba(0,0,0,.45);
+}
+.modal[open] { display: flex; flex-direction: column; }
+.modal::backdrop { background: rgba(0,0,0,.55); }
+.modal-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.modal-head h2 { margin: 0; font-size: 17px; text-transform: none; letter-spacing: normal; }
+.modal-head .sub { font-size: 12.5px; margin-top: 2px; }
+.modal-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 20px 16px; }
+.modal-foot { display: flex; align-items: center; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--line); }
+.modal-foot .grow { flex: 1; }
+
 /* alerts */
 .alertlist { display: grid; }
 .alertline { display: flex; gap: 12px; align-items: flex-start; padding: 10px 2px; border-bottom: 1px solid color-mix(in srgb, var(--line) 60%, transparent); }
@@ -445,6 +460,10 @@ code { font-family: var(--mono); font-size: .92em; background: var(--panel2); pa
 .bench-best { font-weight: 700; color: var(--text); }
 .bench-cv { font-size: 11px; }
 tr.selected td { background: var(--bg2); }
+.bench-results tbody tr { cursor: pointer; }
+.bench-results tbody tr:hover td { background: var(--panel2); }
+.linkbtn { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-align: left; }
+.linkbtn:hover { text-decoration: underline; }
 .bench-compare th, .bench-compare td { vertical-align: top; }
 .bench-compare tr.bench-group th { text-align: left; padding-top: 14px; color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
 .bench-compare tr.bench-differs td { background: color-mix(in srgb, var(--warn) 8%, transparent); }
