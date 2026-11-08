@@ -9,15 +9,18 @@ llama-paddock is the control plane for inference hardware you own. Gateways rout
 | | Milestone | Theme | Version |
 |---|---|---|---|
 | M1 | [Foundations](#m1-foundations) | Reliable history, secure connections, automated checks, Grafana | 0.x |
-| M2 | [Model workbench](#m2-model-workbench) | Find, size, create and benchmark models; later, test and tune them on your tasks | core 0.x; extensions 1.x |
-| M3 | [Alerts & diagnostics](#m3-alerts--diagnostics) | Find out when something breaks, and why | core 0.x; extensions 1.x |
-| M4 | [Access & displays](#m4-access--displays) | Permissions first, then more screens and themes | 0.x / 1.x |
-| M5 | [Updates](#m5-updates--10) | Tested upgrades, backup and recovery; optional Ollama updates | core ends with **1.0** |
-| M6 | [Platforms](#m6-platforms) | Agent platforms, local inference backends, GPU topology, shared PCs | Windows service base 0.x; rest 1.x |
+| M2 | [Model workbench](#m2-model-workbench) | Find, size, create and benchmark models | 0.x |
+| M3 | [Alerts & diagnostics](#m3-alerts--diagnostics) | Find out when something breaks, and why | 0.x |
+| M4 | [Access & displays](#m4-access--displays) | Users, scoped tokens, audit log, accessibility and themes | 0.x |
+| M5 | [Updates](#m5-updates--10) | Tested upgrades, backup and recovery | ends with **1.0** |
+| M6 | [Platforms](#m6-platforms) | Agent platforms, local inference backends, GPU topology, shared PCs | 1.x |
 | M7 | [Routing gateway](#m7-routing-gateway) | Transparent fleet gateway, providers and optimization | core 1.x; see Versioning |
-| M8 | [Fleet operations](#m8-fleet-operations) | Run many hosts as one, including their power | 1.x |
+| M8 | [Fleet operations](#m8-fleet-operations) | Run many hosts as one, including their power and Ollama versions | 1.x |
 | M9 | [Hardware-aware routing](#m9-hardware-aware-routing) | Route on real GPU state, cost and measured quality; learn from outcomes | 1.x; cloud tiers follow M7 providers |
 | M10 | [Managed runtimes](#m10-managed-runtimes) | Start, configure and stop runtimes from the dashboard, single-host multi-GPU | 1.x, optional |
+| M11 | [Model quality lab](#m11-model-quality-lab) | Test and tune models on your own tasks; builds on M2 | 1.x |
+| M12 | [Advanced diagnostics](#m12-advanced-diagnostics) | Hardware health, request explanations, SLOs, advisor cards; builds on M3 | 1.x |
+| M13 | [Displays](#m13-displays) | Wall display and installable PWA; builds on M4 | 1.x |
 | | [Later](#later) | Ideas awaiting a milestone | Unscheduled |
 
 This is the milestone scope, not a list of features already available. Some items may already be implemented on `dev` or in a release; use the linked issues and milestones for status, and the [user guides](docs/README.md) for current behavior.
@@ -28,8 +31,8 @@ Versions are cut by semantic-release from commit messages, so a milestone usuall
 
 - **0.x (now).** Anything may change. Breaking changes only bump the minor version.
 - **1.0** follows the M5 core and the release checklist below. It promises that supported stable upgrades within 1.x preserve configuration, data and API compatibility without hand-editing files or repairing migrations. Starting an update, running the documented Docker update command, or approving an update is still a normal operator action.
-- **Milestone completion and 1.0 readiness are separate.** M4's wall display/PWA/custom themes and M5's Ollama updater can finish after 1.0. Their full milestone scope remains below; neither is a release blocker. M2's core is the exception: the model workbench ships before 1.0, and its post-1.0 extensions (task suites, tuning) are explicitly not part of the gate.
-- **After 1.0**, new features are minor releases, however big they are. Platforms (M6), the gateway (M7), fleet operations (M8), routing (M9) and managed runtimes (M10) are additions, so they ship as 1.x. They don't depend on each other in a strict order, so work on them can overlap.
+- **1.0 finishes every 0.x milestone.** M1 to M5 are complete when 1.0 ships; nothing in them is deferred. Work that builds on them afterwards has its own milestone: M11 builds on the M2 workbench, M12 on M3 diagnostics, M13 on M4 access, and Ollama updates are part of M8 fleet operations.
+- **After 1.0**, new features are minor releases, however big they are. Platforms (M6), the gateway (M7), fleet operations (M8), routing (M9), managed runtimes (M10), the quality lab (M11), advanced diagnostics (M12) and displays (M13) are additions, so they ship as 1.x. They don't depend on each other in a strict order, so work on them can overlap.
 - **The major version goes up (2.0, 3.0, …)** when an upgrade breaks the supported compatibility contract, for example:
   - the dashboard can no longer talk to agents from the previous major, and they can't update themselves
   - a config key, env var or `/api` endpoint is removed or changes meaning
@@ -56,7 +59,7 @@ Versions are cut by semantic-release from commit messages, so a milestone usuall
 | [#48](https://github.com/SplendidChip758/llama-paddock/issues/48) | Dashboard update from the UI and the documented Docker path | Upgrade promise |
 | [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) | Run the checklist, record the evidence, make the deliberate semantic-release change | The gate itself |
 
-**Explicitly not in 1.0.0:** the Ollama updater (#74), the wall display (#11), the PWA (#12), themes, the Windows service's full feature set (#148), every other M6 to M10 item, and the M2 and M3 extensions below.
+**Explicitly not in 1.0.0:** anything in M6 to M13, including the Ollama updater (#74, now M8), the wall display and PWA (#11 and #12, now M13), the Windows service's full feature set (#148) and the quality lab (M11).
 
 ### Delivery order
 
@@ -64,11 +67,11 @@ Through 1.0.0: #82, then #59 and #18 together, then #86, then #15 and #87 togeth
 
 After 1.0.0, in slices, each gated by evidence before the next widens scope:
 
-1. **Existing-fleet workflow.** M3 extensions (GPU hardware health, slow-request explanation), the M6 Windows service full features, shared-PC mode and Docker Ollama, M8 maintenance mode, power profiles, sleep and wake, settings and model comparison, integration recipes. A pilot user can find and fix a recurring problem without scripts.
+1. **Existing-fleet workflow.** M12 advanced diagnostics (GPU hardware health, slow-request explanation), the M6 Windows service full features, shared-PC mode and Docker Ollama, M8 maintenance mode, power profiles, sleep and wake, settings and model comparison, integration recipes. A pilot user can find and fix a recurring problem without scripts.
 2. **Practical gateway.** M7 core with warm preference, bounded queues, locality, request IDs and the feedback endpoint. Fault tests prove safe cancellation and failover.
-3. **Measured effectiveness.** M2 extensions: task suites, outcome feedback, bounded configuration tuning, saved profiles with rollback. A real task gets measurably better.
+3. **Measured effectiveness.** M11 model quality lab: task suites, outcome feedback, bounded configuration tuning, saved profiles with rollback. A real task gets measurably better.
 4. **Hardware-aware routing.** M9 core: registry, profiles, scheduler, policies, budgets, cost and energy, traces. Then learned routing from the outcome data.
-5. **Broader operations.** More M6 backends, M10 single-host multi-GPU.
+5. **Broader operations.** More M6 backends, M10 single-host multi-GPU, M13 displays.
 6. **Optional systems.** Cross-node sharding, a GPU provisioner, the simulator, agent orchestration: each justified on its own, from Later.
 
 ### 1.0 release checklist
@@ -76,7 +79,7 @@ After 1.0.0, in slices, each gated by evidence before the next widens scope:
 This is the release gate; [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) tracks its implementation and verification. A milestone's full **done when** line is not an extra 1.0 gate, except where an item below names it.
 
 - M1's done-when checks pass, including verified connections and simulator regression checks. History and observed availability/model events survive restarts; missing observations remain unknown, and persistence failures are visible.
-- M2's core done-when checks pass: a model can be found in the library and created, a reproducible benchmark compares two hosts, and fit estimates state their assumptions and confidence. Unknown estimates and remote cloud models are clearly identified. The post-1.0 extensions are not part of this check.
+- M2's done-when checks pass: a model can be found in the library and created, a reproducible benchmark compares two hosts, and fit estimates state their assumptions and confidence. Unknown estimates and remote cloud models are clearly identified.
 - Core M3 alerts and GPU/context diagnostics have reproducible simulator checks, including firing, resolution, flapping and observation gaps.
 - M4 users, scoped API tokens and audit records work; permissions are enforced on the server, viewer/display credentials cannot mutate state, and existing login data migrates. Core controls work with a keyboard and expose accessible names.
 - The agent protocol has a documented compatibility range independent of dashboard/agent release numbers. CI covers supported older agents, incompatible agents, and upgrade order.
@@ -103,7 +106,7 @@ Several later features need these: alerts and benchmarks need stored data, and t
 
 ## M2: Model workbench
 
-Everything about choosing and tuning a model for your hardware. The core workbench, including library browsing, uploads and fit filters, is required for 1.0. The extensions after it measure what models actually achieve on your own tasks, and ship in 1.x.
+Everything about choosing and tuning a model for your hardware. The whole workbench, including library browsing, uploads and fit filters, is required for 1.0. Testing and tuning models on your own tasks builds on it in M11.
 
 - **GPU/CPU split everywhere.** The Monitor tab already shows the split for each loaded model. Show it on the fleet overview and in the Models tab too, and flag any model that isn't fully on the GPU, with a hint on what to change. Ollama's cloud models get their own badge, since prompts sent to them leave your network.
 - **Create a new model from scratch.** A **New model** button instead of only Edit or Copy. The base can be a library model (pulled if missing), a Hugging Face GGUF or an uploaded GGUF. Set parameters, system prompt and template, or start from presets.
@@ -113,18 +116,11 @@ Everything about choosing and tuning a model for your hardware. The core workben
 - **Benchmarks.** Run a standard prompt set and save prompt/generation tok/s, time to first token, load time, VRAM and split. Record model digest/quantization, context, parallelism, cache settings, hardware, Ollama/driver versions and cold versus warm state. Use repeated runs and show variation so comparisons across hosts and over time are meaningful; benchmarks are opt-in workloads.
 - **"Fits on this GPU" filter.** Use the estimates and their confidence at the selected host/context/concurrency. Keep models with insufficient metadata identifiable rather than presenting a guaranteed fit; show measured speed only with the benchmark conditions.
 
-### After 1.0
-
-- **Task suites.** Versioned sets of your own tasks per capability (coding change, debugging, JSON output, tool choice, summarizing, vision), with deterministic checks where possible: tests pass, schema valid, expected tool called, or an explicit human accept. Run the same suite against chosen local and authorized remote models with fixed prompts, sampling and context. Record digest, quantization, runtime settings, host, suite version and attempts. Show pass rate with sample size and uncertainty; a handful of tests is not a ranking. Uncovered capabilities show as unknown.
-- **Outcome feedback.** Accept an application-reported result for a gateway request (accepted, rejected, tests passed, retried) by request ID, scoped per key, metadata only. HTTP 200 is not success. Retries and model switches are weak signals, never ground truth. This is the signal that task suites, tuning and learned routing all consume.
-- **Tune a model on measured success.** Pick a model, a host and an objective (fastest interactive, longest usable context, lowest energy, balanced). Search a bounded set of per-model parameters (context, GPU layers, temperature, quantization variant, keep-alive) within an operator-set time and load budget on an approved host, run the task suite each time, and show pass rate, latency, VRAM, load delay and energy side by side. Save the winner as a versioned model variant, apply only with approval, keep the baseline for one-click rollback. Process-wide runtime settings, weight fine-tuning and LLM-generated prompt rewrites are out; human-authored prompt variants can be A/B tested.
-- **Regression comparisons.** Re-run a saved suite after an Ollama, driver or settings change and show whether quality, latency or memory moved. Immutable profiles, preview, rollback.
-
-**Done when:** you can find and create a model, compare a reproducible benchmark on two hosts, and assess fit with explicit assumptions and confidence. Unknown estimates and remote cloud models are clearly identified. These core checks are part of the 1.0 checklist. The extensions are done when a user defines a suite, tunes one model on their host, sees a measured pass-rate and latency change with sample size, applies it and rolls it back, and a runtime update that regresses a suite is flagged.
+**Done when:** you can find and create a model, compare a reproducible benchmark on two hosts, and assess fit with explicit assumptions and confidence. Unknown estimates and remote cloud models are clearly identified. These checks are part of the 1.0 checklist.
 
 ## M3: Alerts & diagnostics
 
-Know when something breaks and why, with evidence. The core ships before 1.0; the hardware health and gateway-aware diagnostics after it extend the same alert rules and GPU check.
+Know when something breaks and why, with evidence. Hardware health, request explanations and advisor cards build on these alert rules and the GPU check in M12.
 
 - **Alert rules.** GPU temperature, VRAM usage, host/agent offline, Ollama crashed or restarting, disk nearly full, model partly on CPU. Rules have thresholds, a duration ("for 2 minutes"), and apply to the whole fleet or to single hosts.
 - **Notification channels.** Generic webhook, Discord, Slack and email (SMTP). Each rule can go to one or more channels, and each channel has a test button.
@@ -135,46 +131,36 @@ Know when something breaks and why, with evidence. The core ships before 1.0; th
 - **Security checks.** A page that checks each host and the dashboard itself: Ollama reachable without its key, an agent still on plain HTTP, the default password unchanged, data files readable by others. Each failing check links to the fix, and can send an alert.
 - **Simulator coverage.** Extend M1's simulator for overheating, GPU loss, reload churn, disk pressure and notification delivery failures. Reuse it to verify alert durations, firing/resolution, repeat suppression, restarts and missing observations.
 
-### After 1.0
-
-- **GPU hardware health check.** For each GPU the agent reports PCIe link width and generation versus the card's maximum, Xid errors from the kernel log, ECC and retired-page counts, throttle reasons (power, thermal, voltage, HW slowdown) and an opt-in short VRAM test. The page says what it likely means ("running at x4; check the riser or slot") and whether the fix is a setting, a cable, a driver or the card. Built for second-hand GPUs; unknown stays unknown.
-- **Slow or failed request explanation.** One compact breakdown per gateway request: queue wait, cold load, prefill, generation, CPU offload, failure, with unknown components shown as such and the next diagnostic action apparent. Feeds M9 traces.
-- **Per-alias SLO alerts.** A gateway alias declares a target (for example p95 time to first token under 2 s). Alert rules fire when the gateway's own measurements miss it, linking to the explanation above.
-- **Advisor cards.** Rules-first recommendations grounded in existing telemetry: reload churn, memory pressure, unexpected CPU fallback, idle-energy mismatch, suite regressions. Each card shows the evidence, time range, confidence and a safe action (open a benchmark, show a config diff). Never changes anything itself. Accept, dismiss or mark unhelpful.
-
-**Done when:** offline and overheating scenarios each deliver firing and resolved notifications through configured channels without flapping spam; unexpected GPU fallback and context/reload risks show supporting evidence; and uptime includes observation coverage. The full milestone also delivers request logs and security checks. Core alert/diagnostic behavior is reproducible with the M1 simulator. The extensions are done when a GPU on a degraded link or with Xid errors is flagged with a likely cause, a slow request is explained by component, an SLO miss raises a normal alert, and advisor cards never fire without evidence.
+**Done when:** offline and overheating scenarios each deliver firing and resolved notifications through configured channels without flapping spam; unexpected GPU fallback and context/reload risks show supporting evidence; and uptime includes observation coverage. The full milestone also delivers request logs and security checks. Core alert/diagnostic behavior is reproducible with the M1 simulator.
 
 ## M4: Access & displays
 
-Users, scoped tokens, audit records and core accessibility are required before 1.0. Wall displays, PWA packaging and custom themes can follow without delaying it. Keep the shared credential design ready for display and gateway scopes.
+Users, scoped tokens, audit records, accessibility and themes, all before 1.0. The wall display and the PWA build on the same credentials in M13; keep the credential design ready for display and gateway scopes.
 
 - **Users and roles.** Several users, each with an **admin** role (full control) or a **viewer** role (read-only). Admins manage users in the UI. The current single login becomes the first admin.
 - **API tokens.** Tokens for scripts, Home Assistant and cron jobs, stored hashed and shown once. Enforce explicit scopes and user permissions on every request, with expiry/revocation and no privilege increase after a role change. Display links and gateway keys (M7) build on the same credential mechanism but have distinct scopes; a display token must not grant general API or gateway access.
 - **Audit log.** Who restarted, changed or deleted what, and when. Admins can filter it by user, host and action. No prompts, passwords or env values are recorded.
-- **Wall display.** A view-only page for a wall-mounted screen or TV: large fleet overview, no controls, auto-refresh, dark theme, works without signing in via a revocable display link/token.
-- **Mobile layout and PWA.** Usable on a phone. Installable as an app, with the alert badge visible.
 - **Themes.** A light / dark / system switch, built-in presets (including high contrast), and a custom theme editor for the accent, background, text and status colors, with a contrast check. Themes are saved per user and can be imported and exported as JSON. Charts and the wall display follow the theme.
 - **Accessibility.** Keyboard navigation, screen reader labels, status never shown by colour alone, and reduced motion, checked in CI so it doesn't regress.
 
-**Done when:** a viewer account can't change anything, a script can read the fleet with a viewer token, a TV shows the fleet from a display link, the dashboard works on a phone home screen and with a keyboard alone, and each user can pick or build their own color theme.
+**Done when:** a viewer account can't change anything, a script can read the fleet with a viewer token, the dashboard works with a keyboard alone and with a screen reader, and each user can pick or build their own color theme.
 
 ## M5: Updates → 1.0
 
-The core is safe upgrades and recovery on supported installations. The 1.0 checklist above is the release gate; Ollama updating is an optional follow-up, consistent with [#74](https://github.com/SplendidChip758/llama-paddock/issues/74).
+Safe upgrades and recovery on supported installations. The 1.0 checklist above is the release gate. Updating Ollama itself is fleet work and lives in M8.
 
 - **Agent repository.** Move agents to their own repo with independent releases. Report a protocol version and capabilities so compatibility does not rely on comparing agent and dashboard version numbers. Document the supported range and test mixed-version fleets and upgrade order. Required before agent updates, so part of 1.0.
 - **Windows service (base).** The Windows agent runs as a real Windows service with no logged-in user: service install and uninstall from the installer, start, stop and restart, logs in a known place, token and TLS identity preserved across updates, and a tested migration from the scheduled-task setup. The service starts and manages `ollama serve` itself in this version; the session helper for tray-app installs and the rest of the feature set follow in M6. Tracked as [#18](https://github.com/SplendidChip758/llama-paddock/issues/18) and part of 1.0.
 - **Agent updates.** Offer compatible releases on the selected stable/prerelease channel. Verify release assets against `SHA256SUMS`, preserve tokens and TLS identity, replace atomically, check health and provide a tested recovery path. Show per-host outcomes, allow staged rollouts and stop a bulk rollout when its health checks fail.
 - **Dashboard updates.** Check for a compatible newer release on the install's channel and show release notes. Installer installs use an admin-only, narrowly scoped privileged updater, a consistent full backup and post-update health checks. Docker installs show the image-update command; test that path and document its backup/restore steps. Do not promise one-click updates for unsupported installation methods.
 - **Backup and restore.** Provide an encrypted configuration export for moving hosts, credentials, settings and users to a new install. Separately take a consistent full pre-update backup, including the database/history and required config/auth files, with schema/application versions. A config-only export is not an update rollback. Test restoration with the matching application version and provide a CLI recovery path when the UI is unavailable.
-- **Ollama updates.** Optional after the 1.0 core: show versions, support pinning, stage updates and offer rollback to the recorded previous version after failed health/GPU checks. State supported install/runtime modes explicitly; Docker and externally managed installs show instructions until a tested update adapter exists.
-- **Prepare 1.0.** Verify the release checklist above and record the results in [#34](https://github.com/SplendidChip758/llama-paddock/issues/34), then make the deliberate semantic-release change. Optional display features and Ollama updates are not blockers.
+- **Prepare 1.0.** Verify the release checklist above and record the results in [#34](https://github.com/SplendidChip758/llama-paddock/issues/34), then make the deliberate semantic-release change.
 
-**Done when:** the core agent/dashboard upgrade and recovery paths pass the 1.0 checklist, including the documented Docker command path and restoration to a fresh install. Then 1.0 is tagged. The optional Ollama updater completes separately when its supported platforms pass update, pinning and rollback checks.
+**Done when:** the core agent/dashboard upgrade and recovery paths pass the 1.0 checklist, including the documented Docker command path and restoration to a fresh install. Then 1.0 is tagged.
 
 ## M6: Platforms
 
-The Windows service base ships before 1.0 (see M5); everything else here is 1.x. For inference backends: one adapter contract, then one additional backend end to end, then others by demand. Read-only support is a valid first tier.
+The Windows service base ships before 1.0 as part of M5; everything here is 1.x. For inference backends: one adapter contract, then one additional backend end to end, then others by demand. Read-only support is a valid first tier.
 
 - **Windows service, full features.** Service mode with the user-session helper so a tray-app Ollama and its user environment variables work; both modes supported and tested; the installer chooses the mode and the scheduled task stays as a fallback; environment editing in both modes. The tray icon acts as the session helper. Shared-PC mode builds on this.
 - **Windows tray icon.** Agent and Ollama status at a glance. A menu to open the dashboard, restart Ollama, open logs or copy the token. It also serves as the user-session helper for service mode.
@@ -230,9 +216,10 @@ Day-to-day work across many hosts: adding them, keeping them alike, and keeping 
 - **Usage-learned warm loading.** From M1 load events and gateway usage, learn which models are used when and where ("every weekday 09:00 on host A"). Recommend keep-alive and preload schedules with the trade-off shown: idle GPU power versus reload latency. Recommendation-only first; opt-in apply with cooldowns. Pins, schedules, shared-PC availability and in-flight requests are always respected.
 - **Power profiles and tokens per watt.** The agent sets a per-GPU power limit. Benchmark each card at a few limits and show tokens per watt. Offer eco, balanced and performance profiles per host, applied with approval, with a measured result and a reset on restart if wanted.
 - **Sleep and wake idle hosts.** Suspend or shut down a host after a configured idle period, excluding pinned models and shared PCs in use. Wake it by Wake-on-LAN or a Proxmox call when a request, a schedule or the warm-loading plan needs it; the gateway's wake-host hold covers the gap. Show expected and actual energy saved from measured GPU power.
+- **Ollama updates.** [#74](https://github.com/SplendidChip758/llama-paddock/issues/74): show Ollama versions across the fleet, support pinning, stage updates host by host and offer rollback to the recorded previous version after failed health/GPU checks. State supported install/runtime modes explicitly; Docker and externally managed installs show instructions until a tested update adapter exists.
 - **Fleet state over MQTT.** Optional: publish host, model and availability state so Home Assistant can show the fleet and trigger wake, sleep or shared-PC toggles.
 
-**Done when:** a new host joins the fleet without copying a token, a model and a set of Ollama settings can be rolled out to every host at once, a model pulled on one host reaches the others without touching the internet, and the dashboard shows which models waste disk and what the fleet's GPUs cost to run. A host sleeps when idle and a request wakes it; a model used every morning is warm before the first request; a power profile shows measured tokens per watt; a rented pod shows as remote.
+**Done when:** a new host joins the fleet without copying a token, a model and a set of Ollama settings can be rolled out to every host at once, a model pulled on one host reaches the others without touching the internet, and the dashboard shows which models waste disk and what the fleet's GPUs cost to run. A host sleeps when idle and a request wakes it; a model used every morning is warm before the first request; a power profile shows measured tokens per watt; a rented pod shows as remote; Ollama can be updated, pinned and rolled back on supported installs.
 
 ## M9: Hardware-aware routing
 
@@ -260,6 +247,37 @@ Start, configure and stop inference runtimes from the dashboard, with single-hos
 - **Health and benchmark comparison.** Member and endpoint status shown separately; one failure marks the endpoint degraded, stops new dispatch and raises an M3 alert with evidence. The same M2 suite runs against the deployment, a single-GPU alternative and CPU offload, so users see when distribution is slower.
 
 **Done when:** on a supported two-GPU host, a model that doesn't fit one GPU can be planned, approved, started, served through the gateway as one endpoint, benchmarked against alternatives and stopped with no orphaned process or reservation; incompatible GPU/runtime pairs are refused with a reason.
+
+## M11: Model quality lab
+
+Builds on the M2 workbench after 1.0: measure what models actually achieve on your own tasks, and tune them on that evidence instead of token speed alone.
+
+- **Task suites.** Versioned sets of your own tasks per capability (coding change, debugging, JSON output, tool choice, summarizing, vision), with deterministic checks where possible: tests pass, schema valid, expected tool called, or an explicit human accept. Run the same suite against chosen local and authorized remote models with fixed prompts, sampling and context. Record digest, quantization, runtime settings, host, suite version and attempts. Show pass rate with sample size and uncertainty; a handful of tests is not a ranking. Uncovered capabilities show as unknown.
+- **Outcome feedback.** Accept an application-reported result for a gateway request (accepted, rejected, tests passed, retried) by request ID, scoped per key, metadata only. HTTP 200 is not success. Retries and model switches are weak signals, never ground truth. The endpoint itself is M7's request identity and feedback; this milestone consumes it.
+- **Tune a model on measured success.** Pick a model, a host and an objective (fastest interactive, longest usable context, lowest energy, balanced). Search a bounded set of per-model parameters (context, GPU layers, temperature, quantization variant, keep-alive) within an operator-set time and load budget on an approved host, run the task suite each time, and show pass rate, latency, VRAM, load delay and energy side by side. Save the winner as a versioned model variant, apply only with approval, keep the baseline for one-click rollback. Process-wide runtime settings, weight fine-tuning and LLM-generated prompt rewrites are out; human-authored prompt variants can be A/B tested.
+- **Regression comparisons.** Re-run a saved suite after an Ollama, driver or settings change and show whether quality, latency or memory moved. Immutable profiles, preview, rollback.
+
+**Done when:** a user defines a suite, tunes one model on their host, sees a measured pass-rate and latency change with sample size, applies it and rolls it back; a runtime update that regresses a suite is flagged; uncovered capabilities show as unknown.
+
+## M12: Advanced diagnostics
+
+Builds on M3 after 1.0: hardware-level health the agent can see, request-level explanations the gateway can measure, and recommendations grounded in both.
+
+- **GPU hardware health check.** For each GPU the agent reports PCIe link width and generation versus the card's maximum, Xid errors from the kernel log, ECC and retired-page counts, throttle reasons (power, thermal, voltage, HW slowdown) and an opt-in short VRAM test. The page says what it likely means ("running at x4; check the riser or slot") and whether the fix is a setting, a cable, a driver or the card. Built for second-hand GPUs; unknown stays unknown.
+- **Slow or failed request explanation.** One compact breakdown per gateway request: queue wait, cold load, prefill, generation, CPU offload, failure, with unknown components shown as such and the next diagnostic action apparent. Feeds M9 traces.
+- **Per-alias SLO alerts.** A gateway alias declares a target (for example p95 time to first token under 2 s). Alert rules fire when the gateway's own measurements miss it, linking to the explanation above.
+- **Advisor cards.** Rules-first recommendations grounded in existing telemetry: reload churn, memory pressure, unexpected CPU fallback, idle-energy mismatch, suite regressions. Each card shows the evidence, time range, confidence and a safe action (open a benchmark, show a config diff). Never changes anything itself. Accept, dismiss or mark unhelpful.
+
+**Done when:** a GPU on a degraded link or with Xid errors is flagged with a likely cause on the simulator and on real hardware; a slow request is explained by component; an SLO miss raises a normal alert; advisor cards never fire without evidence.
+
+## M13: Displays
+
+Builds on M4's credentials after 1.0: more screens for the same fleet.
+
+- **Wall display.** A view-only page for a wall-mounted screen or TV: large fleet overview, no controls, auto-refresh, dark theme, works without signing in via a revocable display link/token.
+- **Mobile layout and PWA.** Usable on a phone. Installable as an app, with the alert badge visible.
+
+**Done when:** a TV shows the fleet from a revocable display link without signing in, and the dashboard works from a phone home screen with the alert badge visible.
 
 ## Later
 
