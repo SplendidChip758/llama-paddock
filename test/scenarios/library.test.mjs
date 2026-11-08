@@ -40,6 +40,16 @@ test("search lists models with their capabilities, sizes and pull counts, a page
     ["deepseek-r1", "gemma3", "gpt-oss", "llama3.2", "nomic-embed-text", "qwen3", "someone/tiny-coder"]);
 });
 
+test("later pages are asked for as the site's own scripts ask, or the site sends back the first", async () => {
+  // ollama.com answers ?page=2 only to htmx requests and redirects anything else to /search
+  const second = await get("/api/library?q=e&page=2");
+  const first = await get("/api/library?q=e");
+  assert.equal(first.has_more, true);
+  assert.ok(second.models.length > 0);
+  assert.equal(second.models.filter((m) => first.models.some((x) => x.path === m.path)).length, 0, "page 2 repeats page 1");
+  assert.ok((await requests()).includes("/search?q=e&page=2"));
+});
+
 test("search filters by text and capability, and sorts by newest", async () => {
   assert.deepEqual((await get("/api/library?q=qwen")).models.map((m) => m.name), ["qwen3"]);
   assert.deepEqual((await get("/api/library?capability=embedding")).models.map((m) => m.name), ["nomic-embed-text"]);

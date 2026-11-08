@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api, fmtNum, instPath } from "@/lib/format";
 import type { BenchmarkInfo, FitEstimate, FitResult, LibraryModel, LibrarySearch, LibraryTag } from "@/lib/types";
 import { VerdictChip } from "./FitPanel";
@@ -64,6 +64,8 @@ export function LibraryBrowser({ instanceId, onClose, onPulled }: { instanceId: 
   const [range, setRange] = useState(0);
   const [quant, setQuant] = useState(0);
   const [results, setResults] = useState<LibraryModel[] | null>(null);
+  const resultsRef = useRef<LibraryModel[] | null>(null);
+  resultsRef.current = results;
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -109,8 +111,10 @@ export function LibraryBrowser({ instanceId, onClose, onPulled }: { instanceId: 
     if (capability) params.set("capability", capability);
     try {
       const d = await api<LibrarySearch>(`/api/library?${params}`);
-      setResults((prev) => (p === 1 ? d.models : [...(prev ?? []), ...d.models.filter((m) => !prev?.some((x) => x.path === m.path))]));
-      setHasMore(d.has_more);
+      const fresh = p === 1 ? d.models : d.models.filter((m) => !resultsRef.current?.some((x) => x.path === m.path));
+      setResults((prev) => (p === 1 ? d.models : [...(prev ?? []), ...fresh]));
+      // a page with nothing new would leave More doing nothing on every click
+      setHasMore(d.has_more && fresh.length > 0);
       setPage(p);
       setError(null);
     } catch (e) {

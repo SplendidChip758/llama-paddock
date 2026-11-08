@@ -1265,7 +1265,8 @@ function handleRegistry(req, res, url) {
 
 // ------------------------------------------------------------------ ollama.com
 // The library's search and tags pages, in the markup ollama.com serves (as of 2026), for the
-// dashboard's library browser. Models and sizes are made up like everything else here, and agree
+// dashboard's library browser. Like the site, search pages after the first come only as htmx
+// fragments (HX-Request: true): a plain request for one is redirected to /search. Models and sizes are made up like everything else here, and agree
 // with what a pull or the registry gives for the same tag.
 const LIBRARY = [
   { path: "library/qwen3", desc: "Qwen3 is the latest generation of large language models in the Qwen series.", caps: ["tools", "thinking"], sizes: ["0.6b", "4b", "8b", "14b", "32b"], latest: "8b", pulls: 42_600_000, ctx: 40960, days: 400 },
@@ -1300,10 +1301,10 @@ function libraryTags(l) {
   return tags;
 }
 
-function librarySearchPage(url) {
+function librarySearchPage(url, htmx) {
   const q = (url.searchParams.get("q") ?? "").toLowerCase();
   const c = url.searchParams.get("c");
-  const p = Math.max(1, Number(url.searchParams.get("p") ?? 1));
+  const p = Math.max(1, Number(url.searchParams.get("page") ?? 1));
   let found = LIBRARY.filter((l) => (!q || l.path.includes(q) || l.desc.toLowerCase().includes(q)) && (!c || l.caps.includes(c)));
   if (url.searchParams.get("o") === "newest") found = [...found].sort((a, b) => a.days - b.days);
   const slice = found.slice((p - 1) * LIBRARY_PAGE, p * LIBRARY_PAGE);
@@ -1326,9 +1327,15 @@ function librarySearchPage(url) {
     </div>
   </a>
 </li>`).join("\n");
+  const more = p * LIBRARY_PAGE < found.length;
+  const next = new URLSearchParams({ page: String(p + 1), ...(q ? { q } : {}) });
+  // the last item loads the next page when it scrolls into view
+  const sentinel = more ? `
+<li   hx-get="/search?${escHtml(next)}"   hx-trigger="revealed"   hx-swap="outerHTML"   hx-target="this"   hx-include="[name=c], [name=o], [name=s]"   hx-replace-url="false" ></li>` : "";
+  if (htmx && p > 1) return items + sentinel;
   return `<!doctype html><html><head><title>${escHtml(q)} · Ollama</title></head><body>
-<div hidden data-result-count="${slice.length}" data-has-more="${p * LIBRARY_PAGE < found.length}"></div>
-<ul role="list" class="overflow-hidden rounded-3xl">${items}</ul></body></html>`;
+<div hidden data-result-count="${slice.length}" data-has-more="${more}"></div>
+<ul role="list" class="overflow-hidden rounded-3xl">${items}${sentinel}</ul></body></html>`;
 }
 
 function libraryTagsPage(path) {
@@ -1384,7 +1391,13 @@ function handleLibrarySite(req, res, url) {
   const path = url.pathname.replace(/^\/_sim\/ollama\.com/, "");
   libraryRequests.push(path + url.search);
   let html = null;
-  if (path === "/search") html = librarySearchPage(url);
+  if (path === "/search") {
+    if (Number(url.searchParams.get("page") ?? 1) > 1 && req.headers["hx-request"] !== "true") {
+      res.writeHead(303, { Location: "/_sim/ollama.com/search" });
+      return res.end();
+    }
+    html = librarySearchPage(url, req.headers["hx-request"] === "true");
+  }
   const t = /^\/([^/]+\/[^/]+)\/tags$/.exec(path);
   if (t) html = libraryTagsPage(t[1]);
   if (html === null) {

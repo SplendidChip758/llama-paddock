@@ -56,7 +56,7 @@ function StateChip({ b }: { b: BenchmarkInfo }) {
 }
 
 export function BenchmarksView() {
-  const { loaded, readOnly } = usePaddock();
+  const { loaded, readOnly, toast, refreshJobs } = usePaddock();
   const [list, setList] = useState<BenchmarkInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
@@ -89,6 +89,19 @@ export function BenchmarksView() {
   const viewed = viewing ? pick(viewing) : [];
   const chosen = pick(selected);
   const toggle = (id: string) => setSelected((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+
+  // running ones are left out: deleting one would cancel it, which is the row's Cancel
+  const deletable = chosen.filter((b) => b.state !== "running");
+  const removeChosen = async () => {
+    if (!confirm(`Delete ${plural(deletable.length, "benchmark result")}? This can't be undone.`)) return;
+    const done = await Promise.allSettled(deletable.map((b) => api(`/api/benchmarks/${b.id}`, { method: "DELETE" })));
+    const failed = done.filter((r) => r.status === "rejected");
+    const gone = deletable.filter((_, i) => done[i].status === "fulfilled").map((b) => b.id);
+    setSelected((s) => s.filter((id) => !gone.includes(id)));
+    if (failed.length) toast(`Couldn't delete ${plural(failed.length, "result")}: ${((failed[0] as PromiseRejectedResult).reason as Error).message}`, "bad");
+    load();
+    void refreshJobs();
+  };
 
   const started = (bs: BenchmarkInfo[]) => {
     setSelected(bs.map((b) => b.id));
@@ -125,6 +138,12 @@ export function BenchmarksView() {
               title={chosen.length < 2 ? "Tick two or more results to compare them" : ""}>
               Compare{chosen.length ? ` (${chosen.length})` : ""}
             </button>
+            {!readOnly && deletable.length > 0 && (
+              <button className="danger sm" onClick={() => void removeChosen()}
+                title={deletable.length < chosen.length ? "Running benchmarks are left out: cancel them on their row" : ""}>
+                Delete
+              </button>
+            )}
             <select value={model} onChange={(e) => setModel(e.target.value)} aria-label="Model">
               <option value="">All models</option>
               {models.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -294,9 +313,13 @@ function ResultsTable({ items, selected, onToggle, onOpen, onChanged }: {
 }) {
   const { readOnly } = usePaddock();
   const remove = useRemove(onChanged);
-  // a click anywhere on a row opens it, except on the row's own checkbox and buttons
+  // a click anywhere on a row opens it, except on its buttons and its first cell, which ticks it:
+  // a near miss on the box shouldn't open the result
   const rowClick = (e: MouseEvent, id: string) => {
-    if (!(e.target as HTMLElement).closest("input, button, a, label")) onOpen(id);
+    const t = e.target as HTMLElement;
+    if (t.closest("input, button, a, label")) return;
+    if (t.closest("td.pick")) onToggle(id);
+    else onOpen(id);
   };
 
   return (
@@ -316,7 +339,7 @@ function ResultsTable({ items, selected, onToggle, onOpen, onChanged }: {
         <tbody>
           {items.map((b) => (
             <tr key={b.id} className={selected.includes(b.id) ? "selected" : ""} onClick={(e) => rowClick(e, b.id)}>
-              <td><input type="checkbox" checked={selected.includes(b.id)} onChange={() => onToggle(b.id)} aria-label={`Compare ${b.model} on ${b.instance_name}`} /></td>
+              <td className="pick"><label><input type="checkbox" checked={selected.includes(b.id)} onChange={() => onToggle(b.id)} aria-label={`Compare ${b.model} on ${b.instance_name}`} /></label></td>
               <td className="faint num">{when(b.started)}</td>
               <td>{b.instance_name}</td>
               <td><button type="button" className="linkbtn name" onClick={() => onOpen(b.id)}>{b.model}</button>{b.conditions?.quantization && <span className="faint"> · {b.conditions.quantization}</span>}</td>
@@ -327,10 +350,9 @@ function ResultsTable({ items, selected, onToggle, onOpen, onChanged }: {
               <td className="r"><StatCell s={summaryOf(b, "long_generation")?.tps} fmt={rate} /></td>
               <td><StateChip b={b} /></td>
               <td>
-                {!readOnly && (
-                  <button className="ghost sm" onClick={() => remove(b)} title={b.state === "running" ? "Stop it; the finished runs are kept" : "Delete this result"}>
-                    {b.state === "running" ? "Cancel" : "Delete"}
-                  </button>
+                {/* finished results are deleted from inside one, or ticked and deleted together */}
+                {!readOnly && b.state === "running" && (
+                  <button className="ghost sm" onClick={() => remove(b)} title="Stop it; the finished runs are kept">Cancel</button>
                 )}
               </td>
             </tr>

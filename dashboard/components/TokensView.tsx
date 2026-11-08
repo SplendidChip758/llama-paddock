@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { ago, api, untilText } from "@/lib/format";
+import { ago, api, untilText, copyText } from "@/lib/format";
 import { usePaddock } from "./PaddockProvider";
 import { Drawer } from "./ui";
 
@@ -68,13 +68,8 @@ export function TokensView() {
   };
 
   const copy = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast("Copied", "ok");
-    } catch {
-      // http:// pages have no clipboard API; the token is selectable instead
-      toast("Couldn't copy: select the token and copy it", "bad");
-    }
+    if (await copyText(text)) toast("Copied", "ok");
+    else toast("Couldn't copy: select the token and copy it", "bad");
   };
 
   if (!me) return <div className="empty">Loading…</div>;
