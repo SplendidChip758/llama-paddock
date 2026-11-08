@@ -27,6 +27,8 @@ Installer updates keep configuration and existing agent tokens. Docker updates r
 | `update-llama-paddock dev` | The newest release including [prereleases](#prereleases), and switches the install to the prerelease channel |
 | `update-llama-paddock v0.8.0` | That exact release. A prerelease tag (`v0.9.0-dev.3`) puts the install on the prerelease channel, a stable tag on the stable channel |
 
+If the install is already on the release the command would fetch, the updater says so and stops: nothing is downloaded, and the dashboard or agent isn't restarted. It still goes ahead when the service isn't running, to bring it back. To reinstall the same release anyway (to repair an install, say), set `PADDOCK_FORCE=1`: `PADDOCK_FORCE=1 update-llama-paddock`.
+
 An install follows the channel it was installed or last switched to, so a prerelease install keeps getting prereleases and a stable one keeps getting stable releases. The channel is not shared between the dashboard and its agents: update each with the argument you want, and keep the agents on a version the dashboard supports. Switching a prerelease install back to stable can leave a newer data format behind; read the [prerelease notes](#prereleases) first.
 
 ## Backups

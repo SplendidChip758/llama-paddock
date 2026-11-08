@@ -26,6 +26,8 @@
 #                        asked when interactive, unattended runs leave it alone unless set
 #   PADDOCK_CTID         Proxmox: container to install into (skips the prompt)
 #   PADDOCK_LOCAL=1      install here even on a Proxmox host
+#   PADDOCK_FORCE=1      reinstall even if the installed release is already the one asked for
+#                        (an update otherwise stops with "already on the latest version")
 #   PADDOCK_YES=1        non-interactive
 #   PADDOCK_UNINSTALL=1  remove the agent instead (Ollama and its settings are left alone)
 set -euo pipefail
@@ -222,6 +224,23 @@ resolve_release_tag() {
     });'
 }
 
+# True when the agent on disk already is the release $VERSION stands for, so an update has
+# nothing to do. Never for a branch, a local checkout or a stopped service (re-running repairs
+# it), nor with PADDOCK_FORCE set
+agent_is_current() {
+  [[ -z ${PADDOCK_FORCE-} && -f $PREFIX/paddock-agent.mjs && -f $PREFIX/VERSION ]] || return 1
+  systemctl is-active --quiet llama-paddock-agent || return 1
+  # run from a clone: fetch_agent installs those files, not a release
+  if [[ -f ${BASH_SOURCE[0]-} && -f "$(dirname "${BASH_SOURCE[0]}")/../agent/linux/paddock-agent.mjs" ]]; then return 1; fi
+  local want="$VERSION"
+  case $VERSION in
+    latest|dev) want=$(resolve_release_tag) ;;
+    v*) ;;
+    *) return 1 ;;
+  esac
+  [[ -n $want && $want == "$(cat "$PREFIX/VERSION")" ]]
+}
+
 # Where to get the agent files: a local checkout next to this script, or the repo at a ref
 fetch_agent() {
   local tmp="$1"
@@ -278,6 +297,18 @@ write_uninstaller() {
 
 # The agent's address on this machine: https:// unless it can't serve HTTPS (no key, or an old agent).
 # -k: it's the agent's own self-signed certificate, on the loopback interface.
+# Also run when an update finds nothing new, so a channel switch still takes effect
+write_updater() {
+  cat > /usr/local/bin/update-llama-paddock-agent <<EOF
+#!/usr/bin/env bash
+# Update the llama-paddock agent to the newest ${CHANNEL} release.
+# Pass "stable", "dev" (prereleases) or a tag like v1.2.0 to switch channel or pin one
+export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
+exec bash -c "\$(curl -fsSL ${SELF_URL})"
+EOF
+  chmod 755 /usr/local/bin/update-llama-paddock-agent
+}
+
 agent_local_url() {
   local port; port=$(sed -n 's/^PADDOCK_AGENT_PORT=//p' "$ENV_FILE")
   if curl -fsSk -o /dev/null "https://127.0.0.1:${port}/health" 2>/dev/null; then
@@ -327,6 +358,12 @@ local_install() {
   [[ -d /run/systemd/system ]] || die "systemd is required (this agent manages ollama.service)"
   command -v curl >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates >/dev/null; }
   ensure_node
+  if agent_is_current; then
+    write_updater
+    msg_ok "Agent is already on the latest version ($(cat "$PREFIX/VERSION")), nothing to update"
+    echo "   To reinstall it anyway:  PADDOCK_FORCE=1 update-llama-paddock-agent"
+    return
+  fi
 
   if ! systemctl list-unit-files ollama.service &>/dev/null || ! systemctl cat ollama.service &>/dev/null; then
     msg_warn "ollama.service not found — the agent will still report stats, but env editing/restart need Ollama installed as a systemd service"
@@ -382,14 +419,7 @@ EOF
   sed "s#@NODE@#$(command -v node)#" "$tmp/llama-paddock-agent.service" > "$UNIT_FILE"
   chmod 0644 "$UNIT_FILE"
 
-  cat > /usr/local/bin/update-llama-paddock-agent <<EOF
-#!/usr/bin/env bash
-# Update the llama-paddock agent to the newest ${CHANNEL} release.
-# Pass "stable", "dev" (prereleases) or a tag like v1.2.0 to switch channel or pin one
-export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
-exec bash -c "\$(curl -fsSL ${SELF_URL})"
-EOF
-  chmod 755 /usr/local/bin/update-llama-paddock-agent
+  write_updater
   write_uninstaller
 
   systemctl daemon-reload
