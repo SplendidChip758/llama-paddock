@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { api } from "@/lib/format";
+import { api, copyText } from "@/lib/format";
 import { usePaddock } from "./PaddockProvider";
 import { Drawer } from "./ui";
 
@@ -109,6 +109,10 @@ export function UsersView() {
               <span className="mono" style={{ userSelect: "all" }}>{handover.password}</span>
               <div className="hint">Pass it on privately. They choose their own when they first sign in. It isn&apos;t shown again.</div>
             </span>
+            <button className="btn sm" onClick={async () => {
+              if (await copyText(handover.password)) toast("Copied", "ok");
+              else toast("Couldn't copy: select the password and copy it", "bad");
+            }}>Copy</button>
             <button className="ghost sm" onClick={() => setHandover(null)} aria-label="Hide the temporary password">✕</button>
           </div>
         </div>

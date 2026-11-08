@@ -72,7 +72,7 @@ Each person can have their own account, with one of two roles:
 
 Admins manage accounts under **Users** in the account menu:
 
-- **Add user:** pick a name and a role. The dashboard makes a temporary password, shown once, for you to pass on. The new user must choose their own when they first sign in.
+- **Add user:** pick a name and a role. The dashboard makes a temporary password, shown once with a **Copy** button, for you to pass on. The new user must choose their own when they first sign in.
 - **Role:** takes effect at once, also for a user who is signed in. Making an admin a viewer also takes write access from their API tokens, for good.
 - **Reset password:** signs the user out everywhere and shows a new temporary password. Their API tokens keep working; revoke them under **API tokens** if needed.
 - **Remove:** signs the user out at once and removes their API tokens.

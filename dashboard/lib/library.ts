@@ -29,17 +29,22 @@ function cached<T>(key: string, ttl: number, load: () => Promise<T>): Promise<T>
   return value;
 }
 
-async function page(path: string): Promise<string> {
+/** `fragment`: ask as the site's own scripts do (htmx), which later search pages only answer. */
+async function page(path: string, fragment = false): Promise<string> {
   if (!libraryEnabled()) throw new HttpError(404, "the model library is turned off (model_library: false)");
   const base = paddock().settings.model_library_url;
   let r: Response;
   try {
-    r = await fetch(base + path, { headers: { "User-Agent": `llama-paddock/${version}`, Accept: "text/html" }, signal: AbortSignal.timeout(15_000) });
+    const headers: Record<string, string> = { "User-Agent": `llama-paddock/${version}`, Accept: "text/html" };
+    if (fragment) headers["HX-Request"] = "true";
+    // a redirect means the site didn't serve what was asked: a later search page sent back to the first
+    r = await fetch(base + path, { headers, redirect: fragment ? "manual" : "follow", signal: AbortSignal.timeout(15_000) });
   } catch (e) {
     const err = e as Error;
     throw new HttpError(502, `can't reach ${new URL(base).host}: ${err.name === "TimeoutError" ? "timed out" : err.message}`);
   }
   if (r.status === 404) throw new HttpError(404, "not found in the Ollama library");
+  if (fragment && r.status >= 300 && r.status < 400) throw new HttpError(502, `${new URL(base).host} has changed how it pages search results, so only the first page loads`);
   if (!r.ok) throw new HttpError(502, `${new URL(base).host} answered ${r.status}`);
   return r.text();
 }
@@ -107,8 +112,9 @@ export function parseSearch(html: string): LibrarySearch {
       updated: updatedTitle ? decode(updatedTitle) : null,
     });
   }
+  // the first page says so; later pages (htmx fragments) end with an item that loads the next one
   const more = /data-has-more="(true|false)"/i.exec(html)?.[1];
-  return { models, has_more: more ? more === "true" : models.length >= 20 };
+  return { models, has_more: more ? more === "true" : /hx-get="\/search\?[^"]*\bpage=\d/i.test(html) };
 }
 
 /** Quantization from a tag name: 8b-instruct-q4_K_M → q4_K_M */
@@ -179,9 +185,9 @@ export function searchLibrary(query: SearchQuery): Promise<LibrarySearch> {
   if (query.q) p.set("q", query.q);
   if (query.capability) p.set("c", query.capability);
   if (query.sort === "newest") p.set("o", "newest");
-  if (query.page > 1) p.set("p", String(query.page));
+  if (query.page > 1) p.set("page", String(query.page));
   return cached(`search?${p}`, SEARCH_TTL_MS, async () => {
-    const html = await page(`/search?${p}`);
+    const html = await page(`/search?${p}`, query.page > 1);
     const r = parseSearch(html);
     // a page with results in it that parse to nothing: the site has changed
     if (!r.models.length && /href="\/library\//.test(html)) throw new HttpError(502, "couldn't read ollama.com's search results; the page may have changed. Pulling by name still works.");
