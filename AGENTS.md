@@ -12,7 +12,7 @@ llama-paddock is a self-hosted dashboard for monitoring and managing a fleet of 
 | `install/*.sh` | One-liner installers (Proxmox LXC or local) | Served raw from the `main` and `dev` branches, not from releases: a merged change is live immediately |
 | `docs/` | User documentation, also built into the website's Docs section | Plain GitHub Markdown: each page starts with one `# Title` and links to other pages with relative `.md` paths. `docs/README.md` is the index and sets the website's sidebar: its `##` groups (Install, Configure, Use, Reference) and the entries under them, with indented entries nested |
 | `brand/` | Logo files, the palette as CSS variables (`tokens.css`) and the component rules | The reference for UI work: use its variables and components rather than new colours |
-| `test/` | `sim/paddock-sim.mjs` (simulated Ollama hosts and agents) and `scenarios/` (`node:test` behaviour tests run in CI) | Plain Node, no dependencies |
+| `test/` | `sim/paddock-sim.mjs` (simulated Ollama hosts and agents), `scenarios/` (`node:test` behaviour tests run in CI) and `e2e/` (Playwright browser tests run in CI) | `sim/` and `scenarios/` are plain Node with no dependencies; `e2e/` has its own `package.json` |
 | `.github/workflows/` | `ci` (PR checks), `pr-title`, `release` (semantic-release) | |
 
 Runtime data (hosts added in the UI, login, `paddock.db`) lives in `PADDOCK_DATA_DIR`. Files there hold secrets: write them with mode 600.
@@ -23,11 +23,14 @@ Before pushing, run what CI runs:
 
 ```bash
 (cd dashboard && npm ci && npm run typecheck && npm run build && npm run test:scenarios)
+(cd test/e2e && npm ci && npx playwright install chromium && npm test)
 node --check agent/linux/paddock-agent.mjs && node --check agent/windows/paddock-agent.mjs
 for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
 ```
 
-`test:scenarios` runs `test/scenarios/` with `node:test`: the built dashboard against simulated Ollama hosts and agents (`test/sim/paddock-sim.mjs`, no dependencies). For behaviour changes, add or extend a scenario there, and say in the PR what you ran.
+`test:scenarios` runs `test/scenarios/` with `node:test`: the built dashboard against simulated Ollama hosts and agents (`test/sim/paddock-sim.mjs`, no dependencies). For behaviour changes, add or extend a scenario there, and say in the PR what you ran. `test/e2e/` runs the same stack in Chromium with Playwright: when a change is visible only in the UI (a page, a form, a navigation), add a browser test there (CONTRIBUTING.md, Browser tests).
+
+To check a UI change yourself, use the Playwright MCP server from `.mcp.json` against a dev server running on the simulator, never against real hosts.
 
 Dev server: `cd dashboard && PADDOCK_DATA_DIR=../data npm run dev`. Without a real Ollama host, run the simulator (CONTRIBUTING.md, Simulated hosts).
 

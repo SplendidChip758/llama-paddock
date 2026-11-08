@@ -18,12 +18,13 @@ Before pushing, run the same checks as CI from the repository root:
 
 ```bash
 (cd dashboard && npm ci && npm run typecheck && npm run build && npm run test:scenarios)
+(cd test/e2e && npm ci && npx playwright install chromium && npm test)
 node --check agent/linux/paddock-agent.mjs
 node --check agent/windows/paddock-agent.mjs
 for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
 ```
 
-For behavior changes, also exercise the built dashboard against a real or simulated Ollama/agent, add a [scenario test](#scenario-tests) when the simulator can show the behavior, and describe what you ran in the PR. Keep the Linux and Windows agent APIs aligned. Update the relevant documentation and README entry points when adding settings, endpoints or behavior.
+For behavior changes, also exercise the built dashboard against a real or simulated Ollama/agent, add a [scenario test](#scenario-tests) when the simulator can show the behavior (or a [browser test](#browser-tests) when only the UI does), and describe what you ran in the PR. Keep the Linux and Windows agent APIs aligned. Update the relevant documentation and README entry points when adding settings, endpoints or behavior.
 
 Read [AGENTS.md](AGENTS.md) and the area-specific rules it links before changing code. Never commit runtime data, tokens, passwords or private host details.
 
@@ -99,6 +100,37 @@ npm run test:scenarios
 They use `node:test` and need no dependencies. Ports come from 18100–18119 (dashboard) and 11700–11799 (simulator and agent); set `PADDOCK_TEST_DASHBOARD_PORTS` or `PADDOCK_TEST_SIM_PORTS` (for example `19000-19019`) if those are taken. `PADDOCK_TEST_VERBOSE=1` streams the processes' output and `PADDOCK_TEST_KEEP=1` keeps the temporary data directories. When a test fails, the dashboard's and simulator's recent output is printed after it.
 
 When you change how the dashboard reacts to a host, add or extend a scenario. If the agent API changes, update the simulator with it: the `real-agent` test compares their shapes.
+
+### Browser tests
+
+`test/e2e/` drives the same stack in Chromium with [Playwright](https://playwright.dev): the first sign-in and forced password change, signed-out deep links, the fleet overview (hosts, GPUs, loaded models, a host going down and coming back), every host tab, and pulling a model. `global-setup.mjs` starts the simulator and the built dashboard with the scenario harness. The `setup` project signs in through the UI and saves the session for the other tests. Playwright is a dev dependency of `test/e2e/` only; the dashboard doesn't depend on it.
+
+```bash
+cd dashboard && npm run build
+cd ../test/e2e
+npm ci
+npx playwright install chromium   # once; on a bare Linux or WSL2 machine: npx playwright install --with-deps chromium
+npm test                          # --headed to watch, --ui for the interactive runner, --repeat-each 5 to check for flakes
+npx playwright show-report        # traces, screenshots and videos of failures
+```
+
+CI runs them in the `e2e` job and uploads the report when a test fails. Find elements by role, label or visible text (`getByRole`, `getByLabel`), not by CSS where you can avoid it, and wait with `expect(...)` instead of fixed sleeps. Tests share one dashboard and simulator and run one at a time, so a test that changes a host's scenario puts it back in a `finally`.
+
+### Browser automation for AI agents
+
+`.mcp.json` registers the [Playwright MCP server](https://github.com/microsoft/playwright-mcp), so Claude Code (and other MCP clients) can open the dashboard, click through it, read the page and take screenshots while working on a change. Claude Code asks you to approve the server the first time. It needs its own browser build once:
+
+```bash
+npx -y @playwright/mcp@0.0.83 install-browser chrome-for-testing
+```
+
+It runs headless. To watch the browser, override the server in your local scope without `--headless`; on WSL2 the window opens on the Windows desktop through WSLg:
+
+```bash
+claude mcp add --scope local playwright -- npx -y @playwright/mcp@0.0.83 --browser chromium --isolated --output-dir .playwright-mcp
+```
+
+Point it at a dev server against the [simulator](#simulated-hosts), never at a dashboard with real hosts.
 
 ## Start a change
 
