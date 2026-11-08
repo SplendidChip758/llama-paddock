@@ -31,6 +31,66 @@ jobs:
       # behaviour checks: the build above against simulated Ollama hosts and agents (test/sim)
       - run: npm run test:scenarios
 
+  # browser tests (test/e2e): Playwright drives Chromium against the build and the simulator. A job of
+  # its own, so it runs alongside the scenario tests and a failure says which side broke.
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            dashboard/package-lock.json
+            test/e2e/package-lock.json
+
+      - name: Build the dashboard
+        working-directory: dashboard
+        run: npm ci && npm run build
+
+      - name: Install Playwright
+        working-directory: test/e2e
+        run: npm ci
+
+      - name: Playwright version
+        id: pw
+        working-directory: test/e2e
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v6
+        id: browsers
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      # the browser comes from the cache when it can; the system libraries it needs never do
+      - name: Install Chromium
+        working-directory: test/e2e
+        env:
+          CACHED: ${{ steps.browsers.outputs.cache-hit }}
+        run: |
+          if [[ $CACHED == true ]]; then
+            npx playwright install-deps chromium
+          else
+            npx playwright install --with-deps chromium
+          fi
+
+      - name: Browser tests
+        working-directory: test/e2e
+        run: npm test
+
+      # traces, screenshots and videos of failed tests: unzip and run `npx playwright show-report`
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            test/e2e/playwright-report/
+            test/e2e/test-results/
+          retention-days: 14
+
   agents:
     runs-on: ubuntu-latest
     steps:
