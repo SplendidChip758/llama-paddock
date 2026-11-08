@@ -782,9 +782,9 @@ ct_notes() {
   local ip=$1 open="" channel=""
   # a DHCP address can change, so only link a static one
   [[ $CT_IP != dhcp && -n $ip ]] && open="
-  <p><a href='http://${ip}:${PORT}'><img src='https://img.shields.io/badge/📈-Open%20the%20dashboard-c8a04a' alt='Open the dashboard'/></a></p>"
+  <p><a href='http://${ip}:${PORT}'><img src='https://img.shields.io/badge/📈-Open%20the%20dashboard-0b7f62' alt='Open the dashboard'/></a></p>"
   is_prerelease && channel="
-  <p><img src='https://img.shields.io/badge/⚠️-Prerelease%20channel-8a6d2f' alt='Prerelease channel'/></p>"
+  <p><img src='https://img.shields.io/badge/⚠️-Prerelease%20channel-9a6400' alt='Prerelease channel'/></p>"
   cat <<EOF
 <div align='center'>
   <a href='https://github.com/${REPO}'><img src='https://raw.githubusercontent.com/${REPO}/main/docs/logo/logo-mark.svg' alt='llama-paddock' width='80' height='80'/></a>
