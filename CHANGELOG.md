@@ -1,3 +1,9 @@
+## [0.9.0-dev.16](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.15...v0.9.0-dev.16) (2026-11-08)
+
+### Bug Fixes
+
+* **dashboard:** load more library results and tidy benchmark actions ([#144](https://github.com/SplendidChip758/llama-paddock/issues/144)) ([ec7b5a2](https://github.com/SplendidChip758/llama-paddock/commit/ec7b5a2820b0697b5e0e623cc121239eb415ae4d))
+
 ## [0.9.0-dev.15](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.14...v0.9.0-dev.15) (2026-11-08)
 
 ### Features
