@@ -1,3 +1,100 @@
+## [0.9.0-dev.16](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.15...v0.9.0-dev.16) (2026-11-08)
+
+### Bug Fixes
+
+* **dashboard:** load more library results and tidy benchmark actions ([#144](https://github.com/SplendidChip758/llama-paddock/issues/144)) ([ec7b5a2](https://github.com/SplendidChip758/llama-paddock/commit/ec7b5a2820b0697b5e0e623cc121239eb415ae4d))
+
+## [0.9.0-dev.15](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.14...v0.9.0-dev.15) (2026-11-08)
+
+### Features
+
+* **dashboard:** further UI refinements ([#143](https://github.com/SplendidChip758/llama-paddock/issues/143)) ([e0f9eda](https://github.com/SplendidChip758/llama-paddock/commit/e0f9edaf76134a7e747d967ee315ead6a06489d2))
+
+## [0.9.0-dev.14](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.13...v0.9.0-dev.14) (2026-11-07)
+
+### Features
+
+* **dashboard:** more UI refinements ([#141](https://github.com/SplendidChip758/llama-paddock/issues/141)) ([d6b46a6](https://github.com/SplendidChip758/llama-paddock/commit/d6b46a6f36bfe99afbb90a49e72905201f16189e))
+* **install:** let both updaters switch between stable, dev and a tag ([#140](https://github.com/SplendidChip758/llama-paddock/issues/140)) ([e8abe1d](https://github.com/SplendidChip758/llama-paddock/commit/e8abe1d3a993b565dc25740e92d6faa03bd19f80))
+
+## [0.9.0-dev.13](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.12...v0.9.0-dev.13) (2026-11-07)
+
+### Features
+
+* **dashboard:** adopt the brand palette and logo, keep the old look as Classic ([#139](https://github.com/SplendidChip758/llama-paddock/issues/139)) ([52c3efb](https://github.com/SplendidChip758/llama-paddock/commit/52c3efb55643e36976af6cd28772673c43e944d0)), closes [#37](https://github.com/SplendidChip758/llama-paddock/issues/37)
+
+## [0.9.0-dev.12](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.11...v0.9.0-dev.12) (2026-11-07)
+
+### Features
+
+* **dashboard:** UI refinements ([#138](https://github.com/SplendidChip758/llama-paddock/issues/138)) ([f90d409](https://github.com/SplendidChip758/llama-paddock/commit/f90d409b3cc36f43960227d4b78f3fd8a6d32633))
+
+## [0.9.0-dev.11](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.10...v0.9.0-dev.11) (2026-11-06)
+
+### Bug Fixes
+
+* **dashboard:** read model headers from the registries' storage again ([#137](https://github.com/SplendidChip758/llama-paddock/issues/137)) ([ac6d71c](https://github.com/SplendidChip758/llama-paddock/commit/ac6d71c8dbb083f3319ae7f990e74b0cddc8f14c))
+
+## [0.9.0-dev.10](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.9...v0.9.0-dev.10) (2026-11-06)
+
+### Features
+
+* **dashboard:** filter the model library by what fits on a host ([#135](https://github.com/SplendidChip758/llama-paddock/issues/135)) ([d53b719](https://github.com/SplendidChip758/llama-paddock/commit/d53b71914a96066b5d8165e3f6016b36c4e0091f)), closes [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#30](https://github.com/SplendidChip758/llama-paddock/issues/30) [#29](https://github.com/SplendidChip758/llama-paddock/issues/29) [#33](https://github.com/SplendidChip758/llama-paddock/issues/33)
+
+## [0.9.0-dev.9](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.8...v0.9.0-dev.9) (2026-11-06)
+
+### Features
+
+* **dashboard:** create a new model from scratch ([#134](https://github.com/SplendidChip758/llama-paddock/issues/134)) ([a5ac495](https://github.com/SplendidChip758/llama-paddock/commit/a5ac495c77e9b8749481b4a17e513622f661b7dd)), closes [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#30](https://github.com/SplendidChip758/llama-paddock/issues/30) [#29](https://github.com/SplendidChip758/llama-paddock/issues/29)
+
+## [0.9.0-dev.8](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.7...v0.9.0-dev.8) (2026-11-06)
+
+### Features
+
+* **dashboard:** browse and search the Ollama library from the Models tab ([#133](https://github.com/SplendidChip758/llama-paddock/issues/133)) ([3157210](https://github.com/SplendidChip758/llama-paddock/commit/3157210e2c24f49b29f08b2df64b947a145c1b12)), closes [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#30](https://github.com/SplendidChip758/llama-paddock/issues/30)
+
+## [0.9.0-dev.7](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.6...v0.9.0-dev.7) (2026-11-06)
+
+### Features
+
+* **dashboard:** estimate whether a model fits a host at a context ([#132](https://github.com/SplendidChip758/llama-paddock/issues/132)) ([7219bb4](https://github.com/SplendidChip758/llama-paddock/commit/7219bb468ed5341c3504f2e684accfd146f06dea)), closes [#31](https://github.com/SplendidChip758/llama-paddock/issues/31) [#31](https://github.com/SplendidChip758/llama-paddock/issues/31)
+
+## [0.9.0-dev.6](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.5...v0.9.0-dev.6) (2026-11-06)
+
+### Features
+
+* **dashboard:** add security checks for each host and the dashboard ([#131](https://github.com/SplendidChip758/llama-paddock/issues/131)) ([8ba8703](https://github.com/SplendidChip758/llama-paddock/commit/8ba87037e210327281317f285464c716b30b9797)), closes [#83](https://github.com/SplendidChip758/llama-paddock/issues/83)
+
+## [0.9.0-dev.5](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.4...v0.9.0-dev.5) (2026-11-05)
+
+### Features
+
+* **dashboard:** add an audit log of who changed what ([#130](https://github.com/SplendidChip758/llama-paddock/issues/130)) ([f9a9bb7](https://github.com/SplendidChip758/llama-paddock/commit/f9a9bb74d02e06bf02d50afa81b4fe0578322fc4)), closes [#85](https://github.com/SplendidChip758/llama-paddock/issues/85)
+
+## [0.9.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.3...v0.9.0-dev.4) (2026-11-05)
+
+### Features
+
+* **dashboard:** add benchmarks with repeated runs and saved conditions ([#129](https://github.com/SplendidChip758/llama-paddock/issues/129)) ([f9d6298](https://github.com/SplendidChip758/llama-paddock/commit/f9d6298b5c79b529dd5226b5203a76a70921df9f)), closes [#17](https://github.com/SplendidChip758/llama-paddock/issues/17) [#17](https://github.com/SplendidChip758/llama-paddock/issues/17) [#32](https://github.com/SplendidChip758/llama-paddock/issues/32)
+
+## [0.9.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.2...v0.9.0-dev.3) (2026-11-05)
+
+### Features
+
+* **dashboard:** add scoped API tokens for scripts and integrations ([#128](https://github.com/SplendidChip758/llama-paddock/issues/128)) ([88ba0ce](https://github.com/SplendidChip758/llama-paddock/commit/88ba0ce4ac0b0d7d66992a2d50fd6667c78d0872)), closes [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) [#11](https://github.com/SplendidChip758/llama-paddock/issues/11) [#26](https://github.com/SplendidChip758/llama-paddock/issues/26) [#84](https://github.com/SplendidChip758/llama-paddock/issues/84)
+
+## [0.9.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0-dev.1...v0.9.0-dev.2) (2026-11-05)
+
+### Features
+
+* **dashboard:** add a test prompt page with tokens per second ([#127](https://github.com/SplendidChip758/llama-paddock/issues/127)) ([a2a5e73](https://github.com/SplendidChip758/llama-paddock/commit/a2a5e730c3285932fefd7221cae2dc85aa320f3f)), closes [#17](https://github.com/SplendidChip758/llama-paddock/issues/17)
+
+## [0.9.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0...v0.9.0-dev.1) (2026-11-05)
+
+### Features
+
+* **dashboard:** add user accounts with admin and viewer roles ([#126](https://github.com/SplendidChip758/llama-paddock/issues/126)) ([c14f48f](https://github.com/SplendidChip758/llama-paddock/commit/c14f48f4f58325473d8f9f6b1c2b00ac2baa0c5b)), closes [#10](https://github.com/SplendidChip758/llama-paddock/issues/10)
+
 ## [0.8.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.7.0...v0.8.0) (2026-11-05)
 
 ### Features

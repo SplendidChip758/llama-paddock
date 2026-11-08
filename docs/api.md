@@ -4,24 +4,89 @@ The dashboard exposes the JSON endpoints used by its UI. Paths below are relativ
 
 ## Authentication
 
-Dashboard requests use a session cookie, not the agent bearer token. Send JSON bodies with `Content-Type: application/json`; other content types are refused with 415.
+The browser uses a session cookie. Scripts, Home Assistant and cron jobs use an [API token](#api-tokens) instead. Neither is the agent's bearer token. Send JSON bodies with `Content-Type: application/json`; other content types are refused with 415.
 
 1. `POST /api/auth/login` with `{"username":"admin","password":"…"}`. Save the returned `paddock_session` cookie and send it on subsequent requests.
 2. If the response has `must_change: true`, call `POST /api/auth/password` with `{"password":"…"}` and save the replacement cookie. Other application endpoints return 403 until this is done. The new password must differ from the old one and contain at least eight characters.
-3. Sessions last seven days. Changing the password invalidates other sessions.
+3. Sessions last seven days. Changing the password invalidates other sessions, and so do an admin resetting it or removing the account.
 4. Failed logins return 401. After five failures from one address, or 20 from all addresses together, the login returns 429 for five minutes. See [Security](security.md).
-5. From a browser, requests other than `GET` must come from the dashboard's own origin, or they get 403. `curl` and scripts send no `Origin` or `Sec-Fetch-Site` header and are unaffected. See [Cross-site requests](security.md#cross-site-requests).
+5. Accounts have a [role](configuration.md#users-and-roles). A **viewer** may call every `GET` endpoint below except `/api/users` and `/api/audit`, plus `POST /api/instances/{id}/models/show`, `POST /api/instances/{id}/models/fit`, `POST /api/instances/{id}/gpu-check` and its own `/api/auth` routes. Anything else answers 403 with `code: "forbidden"`. An **admin** may call everything.
+6. From a browser, requests other than `GET` must come from the dashboard's own origin, or they get 403. `curl` and scripts send no `Origin` or `Sec-Fetch-Site` header and are unaffected. See [Cross-site requests](security.md#cross-site-requests).
 
 | Method | Path | Body / result |
 |---|---|---|
 | POST | `/api/auth/login` | `{username, password}` → `{ok, must_change}` and a session cookie |
-| GET | `/api/auth/me` | `{auth, username, must_change, min_password}` when auth is enabled; `{auth: false}` otherwise |
+| GET | `/api/auth/me` | `{auth, username, role, must_change, min_password}` when auth is enabled; `{auth: false, role: "admin"}` otherwise. With a token, `{auth, username, role, must_change, token: {id, kind, name, scopes}}`, where `scopes` is what the token may do now |
 | POST | `/api/auth/password` | `{current, password}`; `current` is optional during the forced first-login change |
 | POST | `/api/auth/logout` | Clears the session cookie |
 | GET | `/api/healthz` | `{ok, version}`; no login required |
 | GET | `/metrics` | Prometheus metrics; needs the scrape token instead of a login, and is off unless configured. See [Prometheus](prometheus.md) |
 
-`PADDOCK_AUTH=off` disables dashboard authentication. Only use it when another layer protects access. See [Login](configuration.md#login). Unauthenticated API requests normally return 401, and failed requests use a JSON `detail` field.
+`PADDOCK_AUTH=off` disables dashboard authentication, and every request has admin rights. Only use it when another layer protects access. See [Login](configuration.md#login). Unauthenticated API requests normally return 401, and failed requests use a JSON `detail` field.
+
+### API tokens
+
+Create a token under **API tokens** in the account menu, and send it on every request:
+
+```bash
+curl -H "Authorization: Bearer paddock_…" http://192.168.30.100:8080/api/instances
+```
+
+- A token belongs to a user and has **scopes**. `api:read` allows every `GET` endpoint and the `POST` requests that only read (those a viewer may make); `api:write` allows the rest. Viewers can only create `api:read` tokens.
+- A token never does more than its user's role allows at the time of the request. When an admin is made a viewer, their tokens lose `api:write` for good: making them an admin again doesn't restore it. Removing a user removes their tokens.
+- Tokens can't manage users, tokens or passwords (`/api/users`, `/api/tokens`, `/api/auth/*` except `GET /api/auth/me`): those need a signed-in browser, so a leaked token can't create another or lock its owner out. They answer 403 with `code: "session_only"`.
+- A missing scope answers 403 with `code: "forbidden"` and the `scope` that was needed. An unknown, revoked or expired token answers 401 with `code: "bad_token"`.
+- Five unknown or wrong tokens from one address lock that address out of token requests for five minutes (429 with `Retry-After`). This is counted apart from failed logins, and an expired token doesn't count. See [Security](security.md#api-tokens).
+- With a token, the `Authorization` header decides: a session cookie sent alongside is ignored. With `PADDOCK_AUTH=off` there are no tokens and the header is ignored.
+- Tokens are shown once and stored as a SHA-256 hash. They look like `paddock_<16 hex>_<43 characters>`, so secret scanners and log filters can spot them.
+
+A [Home Assistant RESTful sensor](https://www.home-assistant.io/integrations/sensor.rest/) that counts the hosts whose Ollama answers, with a read-only token kept in `secrets.yaml`:
+
+```yaml
+# configuration.yaml
+sensor:
+  - platform: rest
+    name: Ollama hosts up
+    resource: http://192.168.30.100:8080/api/instances
+    headers:
+      Authorization: !secret paddock_token   # secrets.yaml: paddock_token: "Bearer paddock_…"
+    value_template: "{{ value_json.instances | selectattr('ollama_ok') | list | length }}"
+    json_attributes:
+      - instances
+    scan_interval: 60
+```
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/tokens` | `{tokens}`: your own, each `{id, kind, name, scopes, created, expires, last_used, expired}`. Admins can add `?all=1` for every user's, with `user` |
+| POST | `/api/tokens` | `{name, scopes, expires_days}` → the token's fields plus `token` (201), the only time it is returned. `scopes` defaults to `["api:read"]`; `expires_days` is 1–3650, or `null`/omitted for never. 403 for a scope your role can't grant; 409 past 50 tokens |
+| DELETE | `/api/tokens/{id}` | Revokes your own token, or anyone's as an admin; 404 otherwise |
+
+`kind` is `api` for every token today. The wall display's links ([#11](https://github.com/SplendidChip758/llama-paddock/issues/11), scope `display:read`) and the gateway's client keys ([#26](https://github.com/SplendidChip758/llama-paddock/issues/26), scope `gateway:invoke`) will be credentials of other kinds with their own scopes, revoked and listed the same way. A display link will only open the display, and a gateway key only call `/v1`.
+
+## Users
+
+Admins only. With `PADDOCK_AUTH=off` these return 400. `{name}` is matched without regard to case.
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/users` | `{users}`: each `{username, role, must_change}` |
+| POST | `/api/users` | `{username, role}` → `{username, password}` (201). `role` is `admin` or `viewer` (default). `password` is a temporary one, returned only here, that must be changed at first sign-in. 409 if the name is taken |
+| PUT | `/api/users/{name}` | `{role}` → `{username, role, must_change}`; applies to the user's current sessions at once |
+| POST | `/api/users/{name}/reset` | → `{password}`: a new temporary password, returned only here; signs the user out |
+| DELETE | `/api/users/{name}` | Removes the account and signs it out |
+
+An admin can't change the role of, reset or remove their own account (400).
+
+## Audit log
+
+Admins only, with a session or a token whose user is an admin; 403 for viewers. What it records is described under [Security](security.md#audit-log).
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/audit` | `{entries, next, users, instances}`, newest first. Each entry is `{id, t, user, credential, credential_id, ip, action, instance, instance_name, target, detail}`. Filters: `?user=`, `?instance=` (a host id) and `?action=`, either one action such as `model.delete` or a group such as `model`. `limit` is 1–500 (default 100); pass `next` as `?before=` for older entries, until it is `null`. `users` and `instances` list who and which hosts appear in the log, for filters |
+
+`user` is `null` with `PADDOCK_AUTH=off` and for a failed sign-in to an account that doesn't exist. `credential` and `credential_id` name the API token a change came with, or are `null` for a browser. `instance_name` is the host's name at the time, so it survives the host being renamed or removed. The actions are `auth.login`, `auth.login_failed`, `auth.password`, `user.add`, `user.role`, `user.reset`, `user.remove`, `token.create`, `token.revoke`, `host.add`, `host.edit`, `host.remove`, `host.agent_https`, `host.agent_key`, `ollama.restart`, `ollama.gpu_fix`, `env.change`, `model.pull`, `model.create`, `model.upload`, `model.copy`, `model.delete`, `model.load`, `model.unload`, `job.cancel`, `alert.rules`, `alert.channels`, `alert.silence`, `alert.unsilence`, `benchmark.start`, `benchmark.cancel`, `benchmark.delete` and `settings.client_names`. New actions may be added.
 
 ## Hosts
 
@@ -154,14 +219,14 @@ A rule is `{id, name, kind, enabled, threshold, for_s, clear_s, hosts, channels}
 | Field | Meaning |
 |---|---|
 | `id` | Letters, digits, `_`, `.` or `-`. Omit it for a new rule to get one made from the name. Keep it when editing: alerts belong to the rule's ID |
-| `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable`, `ollama_crash`, `gpu_lost`, `context_short` or `reload_churn` (loads per hour, at most 10000); see [Alerts](alerts.md#rules) |
+| `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable`, `ollama_crash`, `gpu_lost`, `context_short`, `reload_churn` (loads per hour, at most 10000) or `insecure`; see [Alerts](alerts.md#rules) |
 | `threshold` | Above 0, at most 150 for `gpu_temp` and 100 for the percentages; `null` for the kinds without one |
 | `for_s`, `clear_s` | Whole seconds, 0 to 86400: how long the condition has to hold before firing, and be gone before resolving |
 | `hosts` | Host IDs, or `null` for every host including ones added later |
 | `channels` | Channel IDs to notify, `null` (or left out) for every channel including ones added later, or `[]` for none |
 | `enabled` | `false` keeps the rule without checking it |
 
-An active alert is `{rule, name, kind, instance, subject, state, since, fired_at, value, detail, unknown, flapping, silence}`. `subject` tells apart several alerts of one rule on a host: `gpu0`, `gpu1`, … for GPUs, the path for disks, empty otherwise. `state` is `pending` (the condition holds, but not yet for `for_s`) or `firing`. `since` is when the condition was first seen and `fired_at` when it fired. `unknown: true` means the last poll had no data for it, so it can neither fire nor resolve until data comes back; see [Missing data](alerts.md#missing-data). `value` is the reading in the threshold's unit, or `null`. `silence` is the silence or acknowledgement covering it, or `null`.
+An active alert is `{rule, name, kind, instance, subject, state, since, fired_at, value, detail, unknown, flapping, silence}`. `subject` tells apart several alerts of one rule on a host: `gpu0`, `gpu1`, … for GPUs, the path for disks, the check's ID for `insecure`, empty otherwise. `insecure` alerts of the dashboard's own checks have the `instance` `@dashboard`. `state` is `pending` (the condition holds, but not yet for `for_s`) or `firing`. `since` is when the condition was first seen and `fired_at` when it fired. `unknown: true` means the last poll had no data for it, so it can neither fire nor resolve until data comes back; see [Missing data](alerts.md#missing-data). `value` is the reading in the threshold's unit, or `null`. `silence` is the silence or acknowledgement covering it, or `null`.
 
 A silence is `{id, created, rule, instance, subject, until, until_resolved, note}`. `rule`, `instance` and `subject` say what it covers; `null` (or left out) covers any, but a silence needs a `rule`, an `instance`, or both. Give `duration_s` (60 to 2592000) to silence for a while, or `until_resolved: true` with all three of `rule`, `instance` and `subject` to acknowledge one active alert until it resolves (409 if it isn't active). Silences end by themselves; see [Silences](alerts.md#silences).
 
@@ -169,22 +234,83 @@ A channel is `{id, name, type, enabled, send_resolved, url, token, email}`, with
 
 A transition is `{id, t, rule, name, kind, instance, subject, state, value, detail, flapping}` with `state` `firing` or `resolved`. The rule's name and kind are copied, so they stay readable after the rule changes. Poll with `after` set to the last `id` you saw to follow new transitions. Transitions follow `history_retention_days`, except the latest one of an alert that is still firing.
 
+## Security checks
+
+| Method | Path | Body / result |
+|---|---|---|
+| GET | `/api/security` | `{targets, failing, dismissed}`: the [security checks](security-checks.md) of the dashboard and each host, and how many fail or are dismissed |
+| GET | `/api/security/dismissals` | `{dismissals}` |
+| POST | `/api/security/dismissals` | `{instance, check, note}` → `{dismissal}` (201): the check fails on purpose. `note` is required (at most 200 characters); dismissing again replaces it |
+| DELETE | `/api/security/dismissals/{instance}/{check}` | Counts a dismissed check again (404 if it isn't dismissed) |
+| POST | `/api/security/fix` | `{check: "data_files"}` → `{changed, failed}`: sets the data directory to 700 and its files to 600 |
+
+A target is `{instance, name, checks}`, with `instance` a host ID or `@dashboard` for the dashboard itself. A check is `{id, label, state, detail, fix, dismissal}`. `id` is `ollama_open`, `agent_http` or `agent_token` for hosts (the agent ones only for hosts with an agent), and `default_password`, `dashboard_http`, `data_files` or `api_tokens` for the dashboard (the password and token ones only with the login on). `state` is `pass`, `fail`, `unknown` or `dismissed`. `fix` is `null` or `{label}` with one of `href` (a dashboard page), `doc` (a page under `docs/` with its anchor) or `action` (`switch_https` or `chmod_data`, which the dashboard can apply). `dismissal` is `{instance, check, note, user, t}` or `null`. `GET /api/instances` also returns `security: {failing, dismissed}`.
+
 ## Models and jobs
 
 | Method | Path | Body / result |
 |---|---|---|
 | GET | `/api/instances/{id}/models` | Installed models from Ollama's `/api/tags`, each with `cloud`: `true` for an Ollama cloud model (Ollama reports `remote_host`, or the tag ends in `cloud`) |
+| GET | `/api/library` | Search the Ollama library: `?q=`, `&capability=tools\|vision\|thinking\|embedding\|audio\|cloud`, `&sort=popular\|newest`, `&page=` → `{models, has_more}`. Each model has `name` (what to pull), `path` (its page on ollama.com), `description`, `capabilities`, `sizes`, `pulls`, `tag_count` and `updated`. Read from ollama.com and cached for 10 minutes; 502 when ollama.com can't be reached or read, 404 with `model_library: false` |
+| GET | `/api/library/tags` | `?model=qwen3` (or `user/model`) → the model with `tags`: each with `name` (`qwen3:8b`), `digest` (12 hex digits; aliases share one), `size` (bytes as ollama.com rounds them; null for cloud tags), `context`, `input`, `quantization` and `cloud`. Cached for an hour |
 | POST | `/api/instances/{id}/models/show` | `{model}` → details, parsed parameters, system prompt and native context length |
+| POST | `/api/instances/{id}/models/fit` | `{model, num_ctx?}` → `{model, source, hosts, measurements, estimates}`: where the model would fit at that context on every host, this one first. A model this host doesn't have is read from its registry (`source: "registry"`); 404 when the registry doesn't have it either. `{blob}` instead of `model` estimates a GGUF uploaded to this host (`source: "upload"`). `gpu` (an index of this host's GPUs) estimates on that GPU alone. Read-only. See [Fit estimates](fit-estimates.md) |
 | POST | `/api/instances/{id}/models/pull` | `{model}` → background job |
-| POST | `/api/instances/{id}/models/create` | `{model, from, parameters?, system?}` → background job |
+| POST | `/api/instances/{id}/models/create` | `{model, from, parameters?, system?, template?, pull?}` → background job. `from` is the model to layer on; with `pull: true` a `from` the host doesn't have (a library or `hf.co/` name) is pulled first, in the same job. Or `{model, blob, …}` with the digest of an uploaded GGUF instead of `from` |
+| POST | `/api/instances/{id}/models/upload` | `{filename, size}` → `{id, chunk_size}`: start uploading a `.gguf` file for a new model. 507 when the dashboard's data directory lacks the space |
+| PUT | `/api/instances/{id}/models/upload/{uid}?offset=` | One chunk of the file as `application/octet-stream`, at most `chunk_size` bytes, at the offset received so far (409 otherwise) → `{received, size}`. The first chunk must start like a GGUF file |
+| POST | `/api/instances/{id}/models/upload/{uid}` | Finish: the dashboard hashes the file, sends it to Ollama's `/api/blobs` and deletes its copy → `{digest, filename, size, architecture, name, context_length, parameter_count}`. Pass `digest` as `blob` to `models/create` |
+| DELETE | `/api/instances/{id}/models/upload/{uid}` | Abandon an upload and delete what arrived. Uploads idle for an hour are dropped |
 | POST | `/api/instances/{id}/models/load` | `{model, keep_alive?}` |
 | POST | `/api/instances/{id}/models/unload` | `{model}` |
 | POST | `/api/instances/{id}/models/delete` | `{model}` |
 | POST | `/api/instances/{id}/models/copy` | `{source, destination}` |
+| POST | `/api/instances/{id}/chat` | `{model, messages, options?, keep_alive?, think?}` → the answer as newline-delimited JSON events; see [Test prompts](#test-prompts) |
+| GET | `/api/benchmarks` | `{benchmarks}`, newest first, without their runs. `?instance=<id>`, `?model=<name>`, `?limit=` 1–500 (default 100); see [Benchmarks](#benchmarks) |
+| POST | `/api/benchmarks` | `{model, instances, num_ctx?, repeat?, mode?, cases?}` → `{benchmarks}`, one per host, each started as a job |
+| GET | `/api/benchmarks/{bid}` | One benchmark with its `runs` |
+| DELETE | `/api/benchmarks/{bid}` | Cancels a running benchmark, keeping its finished runs, or deletes a finished one |
 | GET | `/api/jobs` | `{jobs}` containing job status and progress |
 | DELETE | `/api/jobs/{jid}` | Cancels a running job, or removes a finished job from the list |
 
 There is no `GET /api/jobs/{jid}`; find the returned job ID in `/api/jobs`. Pull and create responses are job objects, not streamed progress. Poll the jobs endpoint for updates. Pulls can resume after a dashboard restart; running creates are marked interrupted. See [History and jobs](usage.md#history-and-jobs).
+
+### Test prompts
+
+`POST /api/instances/{id}/chat` sends a chat to the host's Ollama (`/api/chat`) and streams the answer back. `messages` is a list of `{role, content}` with `role` `system`, `user` or `assistant`. `options` are Ollama's model options (`temperature`, `num_ctx`, …), `keep_alive` is passed on, and `think` turns thinking on or off for models that support it.
+
+Errors before the answer starts (an unknown model, an unreachable host, a bad body) are ordinary JSON errors with `{detail}`. Ollama answers once the model is loaded, so this can take a while for a large model; after 10 minutes without an answer the request fails with 504. Once Ollama starts answering, the response is `application/x-ndjson`, one event per line:
+
+| Event | Meaning |
+|---|---|
+| `{type: "token", content, thinking?}` | The next piece of the answer, and of the model's thinking if it has any |
+| `{type: "done", stats}` | The last line of a complete answer |
+| `{type: "error", detail}` | The answer failed partway; nothing follows |
+
+`stats` holds `ttft_ms` (from sending the request to the first token, timed by the dashboard, so it includes loading the model and reading the prompt), `wall_ms` (to the last line), Ollama's own `load_ms`, `prompt_tokens`, `prompt_ms`, `eval_ms`, `total_ms` and `tokens`, the rates `prompt_tps` and `tps` in tokens per second, and `done_reason` (`stop`, or `length` when `num_predict` cut it off). Ollama's figures are `null` if it left them out. Closing the connection stops the host generating. Viewers can't send prompts, since a prompt loads models.
+
+### Benchmarks
+
+`POST /api/benchmarks` runs the built-in prompt set against `model` on each host in `instances` (host IDs). The hosts run at the same time; a host already running a benchmark is refused with 409. Options:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `num_ctx` | `4096` | Context sent with every run, 512–262144 |
+| `repeat` | `3` | Runs of each prompt, 1–10 |
+| `mode` | `warm` | `warm` loads the model once and leaves that load out; `cold` unloads it before every run |
+| `cases` | all | Any of `short`, `long_context`, `long_generation` |
+
+Each benchmark is also a job (`kind: "benchmark"`, with `completed` and `total` counting runs), so it shows in the Jobs drawer and `DELETE /api/jobs/{jid}` cancels it too. A model the host doesn't have, or an Ollama cloud model, fails that host's benchmark with an `error`, not the request.
+
+A benchmark is `{id, batch, instance, instance_name, model, state, error, started, finished, spec, conditions, summary, warnings}`, plus `runs` from `GET /api/benchmarks/{bid}`. Benchmarks started together share a `batch`. `state` is `running`, `done`, `error` or `cancelled`; results are saved after every run, so a running benchmark's summary grows as it goes.
+
+- `spec`: `{set, cases, repeat, mode, num_ctx}`. `set` is the prompt set's version: results from different sets don't compare.
+- `conditions`: `digest`, `quantization`, `parameter_size`, `family`, `format`, `ollama_version`, `agent_version`, `dashboard_version`, `platform`, `context` (what Ollama loaded the model with), `env` (Ollama settings that change speed or memory, such as `OLLAMA_FLASH_ATTENTION` and `OLLAMA_KV_CACHE_TYPE`; unset ones are left out), `gpus` (`{name, mem_total_mib, driver}`), `cpu_count`, `mem_total` and `other_models` (loaded when it started). Anything the dashboard couldn't find out is `null`; `env`, `gpus`, `cpu_count` and `mem_total` need an agent.
+- `runs`: `{case, rep, t, state, stats, size, size_vram, split, context}`. `stats` is the same as a [test prompt](#test-prompts)'s. `state` is whether the model was loaded at the asked context just before the run (`warm`) or not (`cold`). `size`, `size_vram`, `split` and `context` come from `/api/ps` right after the run.
+- `summary`: per case, `{case, runs, excluded, tps, prompt_tps, ttft_ms, load_ms, prompt_tokens, tokens, size_vram, split}`. The four timings are `{median, min, max, cv}` over the runs whose `state` matches the mode, with `cv` the coefficient of variation in percent (`null` with one run). `excluded` counts the runs left out.
+- `warnings`: sentences on what makes the figures less comparable, such as other loaded models, a partial GPU/CPU split, runs that varied by more than 10%, or a model that changed during the runs.
+
+Results are kept until deleted: history retention doesn't remove them, and neither does removing the host. A benchmark running when the dashboard stops is marked `error` (`interrupted: the dashboard restarted`) and keeps its finished runs. Viewers can read results but not run or delete them.
 
 ## Environment, restart and logs
 

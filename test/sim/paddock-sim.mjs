@@ -30,6 +30,12 @@
  *   --write-config FILE  write a dashboard config.yaml for these hosts and keep running
  *   --help
  *
+ * Model registry, on the control port: GET /_sim/registry/v2/<repo>/manifests/<tag> and its blobs,
+ * like registry.ollama.ai (point the dashboard's model_registry_url at http://<bind>:<B>/_sim/registry),
+ * and ollama.com's library pages: GET /_sim/ollama.com/search and /_sim/ollama.com/<path>/tags
+ * (model_library_url: http://<bind>:<B>/_sim/ollama.com). GET /_sim/library-requests lists the
+ * pages asked for, and the reads of model weights from the registry ("weights <model> <range>").
+ *
  * Control API (no auth; it binds to --bind like everything else):
  *   GET  /_sim/hosts                    every host: URLs, credentials, scenario
  *   GET  /_sim/hosts/<id>               one host, plus its pull log and request counts
@@ -66,6 +72,8 @@
  * a prompt with keep_alive 0 loads, answers and unloads within the request, so no poll sees it loaded.
  * Pulling a name ending in "-cloud" or ":cloud" adds an Ollama cloud model: listed with
  * remote_host/remote_model, answering /api/generate, but never in /api/ps since it runs remotely.
+ * /api/generate and /api/chat stream a canned answer a word at a time, sim-1 fastest and each later
+ * host slower, and end with Ollama's timing stats (load, prompt and eval counts and durations).
  *   GET  /_sim/config.yaml              the same config.yaml as --write-config
  *
  * Request log: the simulated Ollama records each request it answers, as Ollama's log would (time,
@@ -188,16 +196,19 @@ function makeModel(name, extra = {}) {
   const cloud = CLOUD_NAME.test(name) ? { remote_model: name.replace(CLOUD_NAME, "").replace(/:$/, ""), remote_host: "https://ollama.com:443", size: 384 } : {};
   const f = FAMILIES.find((x) => x.match.test(name));
   const params = Number(/(\d+(?:\.\d+)?)b\b/i.exec(name)?.[1] ?? (1 + unit(name) * 7).toFixed(1));
+  // bytes per parameter of the quantization the tag names; Q4_K_M when it names none
+  const quant = /(q8_0|fp16|bf16)$/i.exec(name)?.[1].toLowerCase();
+  const perParam = { q8_0: 1.07, fp16: 2, bf16: 2 }[quant] ?? 0.6;
   return {
     name,
     model: name,
     modified_at: new Date().toISOString(),
     // roughly a Q4_K_M file: ~0.6 bytes per parameter
-    size: Math.round(params * 1e9 * 0.6 + unit(name + "s") * 2e8),
+    size: Math.round(params * 1e9 * perParam + unit(name + "s") * 2e8),
     digest: hash(name),
     details: {
       parent_model: "", format: "gguf", family: f.family, families: [f.family],
-      parameter_size: `${params}B`, quantization_level: "Q4_K_M",
+      parameter_size: `${params}B`, quantization_level: { q8_0: "Q8_0", fp16: "F16", bf16: "BF16" }[quant] ?? "Q4_K_M",
     },
     arch: f.arch,
     ctx: f.ctx,
@@ -210,6 +221,16 @@ function makeModel(name, extra = {}) {
     ...extra,
   };
 }
+
+/**
+ * The shape behind the KV cache the simulator charges: 32 layers × 8 KV heads × (128 + 128) × 2 bytes
+ * = 128 KiB per token. /api/show and the registry's GGUF headers both report it.
+ */
+const ARCH_INFO = { block_count: 32, embedding_length: 4096, "attention.head_count": 32, "attention.head_count_kv": 8, vocab_size: 128256 };
+const modelInfo = (m) => ({
+  "general.architecture": m.arch, "general.parameter_count": m.params, [`${m.arch}.context_length`]: m.ctx,
+  ...Object.fromEntries(Object.entries(ARCH_INFO).map(([k, v]) => [`${m.arch}.${k}`, v])),
+});
 
 const tagView = (m) => ({
   name: m.name, model: m.model, ...(m.remote_host ? { remote_model: m.remote_model, remote_host: m.remote_host } : {}),
@@ -252,11 +273,15 @@ function makeHost(n, o) {
     ollamaVersion: "0.12.6",
     agentVersion: repoAgentVersion(),
     pullSeconds: o.pullSeconds,
+    /** milliseconds per streamed token, so hosts compare differently side by side */
+    tokenMs: 20 + 10 * (n - 1),
     scenario: { ollama: "up", agent: "up", pull: "normal", create: "normal" },
     gpus: Array.from({ length: o.gpus[n - 1] }, (_, i) => ({
       index: i, uuid: `GPU-${hash(`${id}/${i}`).slice(0, 8)}-${hash(`${id}/${i}`).slice(8, 12)}-sim0-${hash(`${id}/${i}`).slice(12, 24)}`,
     })),
     models: new Map(SEED_MODELS.map((name) => [name, makeModel(name)])),
+    /** blobs pushed to /api/blobs: digest → { size } */
+    blobs: new Map(),
     /** name → { until: ms timestamp or Infinity, ctx, cpuOnly: options.num_gpu was 0 } */
     loaded: new Map(),
     /** model → bytes already downloaded, so a pull that was cut off resumes (Ollama keeps partial blobs) */
@@ -270,6 +295,8 @@ function makeHost(n, o) {
     requests: {},
     /** what Ollama's log would say about each request it answered: {t, status, duration_ms, client, method, path} */
     requestLog: [],
+    /** streamed answers that stopped early because the client hung up */
+    answersStopped: 0,
     restarts: 0,
     startedAt: Date.now(),
     pid: 1000 + n * 37,
@@ -449,10 +476,41 @@ async function pull(h, body, res) {
   }
 }
 
+/** Ollama's blob upload: HEAD says whether it has the blob, POST stores it if the body's sha256 matches. */
+async function blobRoute(h, req, res, digest) {
+  if (req.method === "HEAD") {
+    res.writeHead(h.blobs.has(digest) ? 200 : 404);
+    return res.end();
+  }
+  const sha = crypto.createHash("sha256");
+  let size = 0;
+  for await (const chunk of req) {
+    sha.update(chunk);
+    size += chunk.length;
+  }
+  if (`sha256:${sha.digest("hex")}` !== digest) return sendJson(res, 400, { error: "digest mismatch" });
+  h.blobs.set(digest, { size });
+  logLine(h, `received blob ${digest} (${size} bytes)`);
+  res.writeHead(201);
+  res.end();
+}
+
 async function create(h, body, res) {
   const name = fullName(String(body.model ?? ""));
   const out = ndjson(res);
-  const from = h.models.get(fullName(String(body.from ?? "")));
+  let from;
+  if (body.files && typeof body.files === "object") {
+    // a model from an uploaded GGUF: its size is the blob's
+    const [, digest] = Object.entries(body.files)[0] ?? [];
+    const blob = h.blobs.get(String(digest));
+    if (!blob) {
+      out.send({ error: `blob ${digest} not found` });
+      return out.end();
+    }
+    from = { ...makeModel(name), size: blob.size, parameters: "", template: "{{ .Prompt }}" };
+  } else {
+    from = h.models.get(fullName(String(body.from ?? "")));
+  }
   if (!from) {
     out.send({ error: `model '${body.from}' not found` });
     return out.end();
@@ -471,20 +529,26 @@ async function create(h, body, res) {
     ...from, name, model: name, digest: hash(name + Date.now()), modified_at: new Date().toISOString(),
     parameters: params.length ? params.join("\n") : from.parameters,
     system: typeof body.system === "string" ? body.system : from.system,
-    details: { ...from.details, parent_model: from.name },
+    template: typeof body.template === "string" ? body.template : from.template,
+    details: { ...from.details, parent_model: body.files ? "" : from.name },
   });
-  logLine(h, `created ${name} from ${from.name}`);
+  logLine(h, `created ${name} from ${body.files ? "an uploaded file" : from.name}`);
   out.send({ status: "success" });
   out.end();
 }
 
-async function generate(h, body, res) {
+const ANSWER = "This is a simulated response from llama-paddock's test host.";
+const ns = (ms) => Math.round(ms * 1e6);
+
+/** /api/generate and /api/chat: load the model if needed, then answer. `prompt` is the text to evaluate, if any. */
+async function answer(h, body, res, prompt, chat) {
   const m = needModel(h, body.model);
   const ka = keepAliveMs(body.keep_alive, h.env.OLLAMA_KEEP_ALIVE);
-  const base = { model: m.name, created_at: new Date().toISOString(), response: "", done: true };
+  const started = performance.now();
+  const base = { model: m.name, created_at: new Date().toISOString(), ...(chat ? { message: { role: "assistant", content: "" } } : { response: "" }), done: true };
   // a new load (or unload) replaces a runner that exited
   h.deadRunners.delete(m.name);
-  if (ka === 0 && !body.prompt) {
+  if (ka === 0 && !prompt) {
     h.loaded.delete(m.name);
     logLine(h, `unloaded ${m.name}`);
     return sendJson(res, 200, { ...base, done_reason: "unload" });
@@ -492,31 +556,50 @@ async function generate(h, body, res) {
   const cpuOnly = body.options?.num_gpu === 0 || /^num_gpu\s+"?0"?$/m.test(m.parameters ?? "");
   const ctx = Number(body.options?.num_ctx) || Number(/^num_ctx\s+"?(\d+)"?$/m.exec(m.parameters ?? "")?.[1]) ||
     Number(h.env.OLLAMA_CONTEXT_LENGTH) || 4096;
+  let loadMs = 0;
   // cloud models run remotely: Ollama forwards the request and loads nothing
   if (!m.remote_host && h.loaded.get(m.name)?.ctx !== ctx) {
     h.loaded.delete(m.name);
     await sleep(300);
+    loadMs = 300;
     if (cpuOnly || h.gpuLost || !h.gpus.length) logLine(h, "load_tensors: offloaded 0/29 layers to GPU");
     logLine(h, "llama runner started in 0.30 seconds");
     logLine(h, `loaded ${m.name}`);
   }
+  const words = ANSWER.split(/(?= )/);
+  const promptTokens = prompt ? prompt.split(/\s+/).filter(Boolean).length + 8 : 0;
+  const stats = (evalMs) => ({
+    total_duration: ns(performance.now() - started), load_duration: ns(loadMs),
+    prompt_eval_count: promptTokens, prompt_eval_duration: ns(promptTokens * 2),
+    eval_count: words.length, eval_duration: ns(evalMs),
+  });
+  const text = (t) => (chat ? { message: { role: "assistant", content: t } } : { response: t });
   if (ka === 0) {
     // answered, then unloaded at once: only the log shows the load
     h.loaded.delete(m.name);
     logLine(h, `unloaded ${m.name}`);
-    return sendJson(res, 200, { ...base, response: "This is a simulated response from llama-paddock's test host.", done_reason: "stop", eval_count: 12 });
+    return sendJson(res, 200, { ...base, ...text(ANSWER), done_reason: "stop", ...stats(words.length * h.tokenMs) });
   }
   if (!m.remote_host) h.loaded.set(m.name, { until: Date.now() + ka, ctx, cpuOnly });
-  if (!body.prompt) return sendJson(res, 200, { ...base, done_reason: "load" });
-  const text = "This is a simulated response from llama-paddock's test host.";
-  if (body.stream === false) return sendJson(res, 200, { ...base, response: text, done_reason: "stop", eval_count: 12 });
+  if (!prompt) return sendJson(res, 200, { ...base, done_reason: "load", total_duration: ns(performance.now() - started), load_duration: ns(loadMs) });
+  if (body.stream === false) return sendJson(res, 200, { ...base, ...text(ANSWER), done_reason: "stop", ...stats(words.length * h.tokenMs) });
   const out = ndjson(res);
-  for (const word of text.split(/(?= )/)) {
-    out.send({ model: m.name, created_at: new Date().toISOString(), response: word, done: false });
-    await sleep(30);
+  await sleep(promptTokens * 2);
+  const evalStart = performance.now();
+  for (const word of words) {
+    if (out.gone()) return void h.answersStopped++;
+    out.send({ model: m.name, created_at: new Date().toISOString(), ...text(word), done: false });
+    await sleep(h.tokenMs);
   }
-  out.send({ ...base, done_reason: "stop", eval_count: 12 });
+  out.send({ ...base, done_reason: "stop", ...stats(performance.now() - evalStart) });
   out.end();
+}
+
+const generate = (h, body, res) => answer(h, body, res, body.prompt ? String(body.prompt) : "", false);
+
+function chat(h, body, res) {
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  return answer(h, body, res, messages.map((x) => String(x?.content ?? "")).join(" "), true);
 }
 
 const ollamaRoutes = {
@@ -536,7 +619,7 @@ const ollamaRoutes = {
       template: m.template,
       ...(m.system ? { system: m.system } : {}),
       details: m.details,
-      model_info: { "general.architecture": m.arch, "general.parameter_count": m.params, [`${m.arch}.context_length`]: m.ctx },
+      model_info: modelInfo(m),
       capabilities: m.capabilities,
       modified_at: m.modified_at,
     };
@@ -544,6 +627,7 @@ const ollamaRoutes = {
   "POST /api/pull": async (h, req, res) => pull(h, await readBody(req), res),
   "POST /api/create": async (h, req, res) => create(h, await readBody(req), res),
   "POST /api/generate": async (h, req, res) => generate(h, await readBody(req), res),
+  "POST /api/chat": async (h, req, res) => chat(h, await readBody(req), res),
   "DELETE /api/delete": async (h, req) => {
     const m = needModel(h, (await readBody(req)).model);
     h.models.delete(m.name);
@@ -591,6 +675,8 @@ async function handleOllama(h, req, res) {
     res.writeHead(401, { "Content-Type": "text/plain", "WWW-Authenticate": "Bearer" });
     return res.end("401 Unauthorized");
   }
+  const blob = /^\/api\/blobs\/(sha256:[0-9a-f]{64})$/.exec(url.pathname);
+  if (blob && (req.method === "HEAD" || req.method === "POST")) return blobRoute(h, req, res, blob[1]);
   const route = ollamaRoutes[key];
   if (!route) {
     res.writeHead(404, { "Content-Type": "text/plain" });
@@ -1027,6 +1113,7 @@ function hostView(h, full = false) {
     pid: h.pid,
     dead_runners: [...h.deadRunners],
     requests: h.requests,
+    answers_stopped: h.answersStopped,
   };
 }
 
@@ -1086,9 +1173,253 @@ async function handleWebhook(req, res, name, action) {
   throw new HttpErr(405, "see the header of test/sim/paddock-sim.mjs");
 }
 
+// ------------------------------------------------------------------ model registry
+// The Ollama registry's API as the dashboard reads it for models that aren't pulled: manifests, the
+// config blob, and the weights blob through a redirect (registry.ollama.ai redirects to a CDN),
+// with Range support. The weights are a real GGUF header followed by zeros. Any library/<name>:<tag>
+// exists, made up from its name like a pull would, except names containing "missing".
+
+/** A GGUF file's start: header and metadata, with a 1000-token vocabulary to skip over. */
+function ggufHeader(m) {
+  const parts = [];
+  const u32 = (n) => { const b = Buffer.alloc(4); b.writeUInt32LE(n); parts.push(b); };
+  const u64 = (n) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(n)); parts.push(b); };
+  const str = (s) => { const b = Buffer.from(s); u64(b.length); parts.push(b); };
+  const kvs = [
+    ["general.architecture", 8, m.arch], ["general.name", 8, m.name],
+    [`${m.arch}.context_length`, 4, m.ctx],
+    ...Object.entries(ARCH_INFO).map(([k, v]) => [`${m.arch}.${k}`, 4, v]),
+  ];
+  parts.push(Buffer.from("GGUF"));
+  u32(3);
+  u64(291); // tensors; their infos aren't written, the dashboard never reads that far
+  u64(kvs.length + 1);
+  for (const [k, type, v] of kvs) {
+    str(k);
+    u32(type);
+    if (type === 8) str(v);
+    else u32(v);
+  }
+  str("tokenizer.ggml.tokens");
+  u32(9);
+  u32(8);
+  u64(1000);
+  for (let i = 0; i < 1000; i++) str(`tok${i}`);
+  return Buffer.concat(parts);
+}
+
+function registryModel(repo, tag) {
+  const name = repo.replace(/^library\//, "") + ":" + tag;
+  if (/missing/.test(name)) throw new HttpErr(404, "manifest unknown");
+  const m = makeModel(name);
+  const config = Buffer.from(JSON.stringify({ model_format: "gguf", model_family: m.details.family, model_type: m.details.parameter_size, file_type: "Q4_K_M" }));
+  return { m, config, configDigest: `sha256:${hash(config.toString())}`, weightsDigest: `sha256:${hash(m.name + " weights")}`, header: ggufHeader(m) };
+}
+
+function handleRegistry(req, res, url) {
+  const man = /^\/_sim\/registry\/v2\/(.+)\/manifests\/([^/]+)$/.exec(url.pathname);
+  if (man) {
+    const r = registryModel(man[1], man[2]);
+    registryBlobs.set(r.configDigest, r);
+    registryBlobs.set(r.weightsDigest, r);
+    // the digest a pull of this tag reports in /api/tags, as a registry may send it
+    res.setHeader("Docker-Content-Digest", `sha256:${r.m.digest}`);
+    return sendJson(res, 200, {
+      schemaVersion: 2, mediaType: "application/vnd.docker.distribution.manifest.v2+json",
+      config: { mediaType: "application/vnd.docker.container.image.v1+json", digest: r.configDigest, size: r.config.length },
+      layers: [
+        { mediaType: "application/vnd.ollama.image.model", digest: r.weightsDigest, size: r.m.size },
+        { mediaType: "application/vnd.ollama.image.template", digest: `sha256:${hash(r.m.template)}`, size: r.m.template.length },
+      ],
+    });
+  }
+  const blob = /^\/_sim\/registry\/v2\/(.+)\/blobs\/(sha256:[0-9a-f]+)$/.exec(url.pathname);
+  if (blob) {
+    // the registry sends blobs to its CDN, which the dashboard has to follow. Models named
+    // "elsewhere…" go to another host (localhost instead of 127.0.0.1), which it must refuse
+    const cdnPath = url.pathname.replace("/_sim/registry/", "/_sim/registry-cdn/");
+    const elsewhere = /\/elsewhere/.test(blob[1]) && blob[2] !== registryBlobs.get(blob[2])?.configDigest;
+    res.writeHead(307, { Location: elsewhere ? `http://localhost:${req.socket.localPort}${cdnPath}` : cdnPath });
+    return res.end();
+  }
+  const cdn = /^\/_sim\/registry-cdn\/v2\/(.+)\/blobs\/(sha256:[0-9a-f]+)$/.exec(url.pathname);
+  if (!cdn) throw new HttpErr(404, "not found");
+  const r = registryBlobs.get(cdn[2]);
+  if (!r) throw new HttpErr(404, `blob unknown in ${cdn[1]}`);
+  if (cdn[2] === r.configDigest) return sendJson(res, 200, JSON.parse(r.config.toString()));
+  libraryRequests.push(`weights ${r.m.name} ${req.headers.range ?? ""}`);
+  const size = r.m.size;
+  const range = /^bytes=(\d+)-(\d+)?$/.exec(req.headers.range ?? "");
+  const start = range ? Number(range[1]) : 0;
+  const end = Math.min(size - 1, range?.[2] !== undefined ? Number(range[2]) : size - 1);
+  if (start >= size) {
+    res.writeHead(416);
+    return res.end();
+  }
+  // only ever asked for the start: the header and a little after it
+  const body = Buffer.alloc(Math.min(end - start + 1, 64 * MiB));
+  if (start < r.header.length) r.header.copy(body, 0, start, Math.min(r.header.length, start + body.length));
+  res.writeHead(range ? 206 : 200, { "Content-Type": "application/octet-stream", "Content-Length": body.length, ...(range ? { "Content-Range": `bytes ${start}-${start + body.length - 1}/${size}` } : {}) });
+  res.end(body);
+}
+
+// ------------------------------------------------------------------ ollama.com
+// The library's search and tags pages, in the markup ollama.com serves (as of 2026), for the
+// dashboard's library browser. Like the site, search pages after the first come only as htmx
+// fragments (HX-Request: true): a plain request for one is redirected to /search. Models and sizes are made up like everything else here, and agree
+// with what a pull or the registry gives for the same tag.
+const LIBRARY = [
+  { path: "library/qwen3", desc: "Qwen3 is the latest generation of large language models in the Qwen series.", caps: ["tools", "thinking"], sizes: ["0.6b", "4b", "8b", "14b", "32b"], latest: "8b", pulls: 42_600_000, ctx: 40960, days: 400 },
+  { path: "library/llama3.2", desc: "Meta's Llama 3.2 goes small with 1B and 3B models.", caps: ["tools"], sizes: ["1b", "3b"], latest: "3b", pulls: 51_000_000, ctx: 131072, days: 700 },
+  { path: "library/gemma3", desc: "The current, most capable model that runs on a single GPU.", caps: ["vision"], sizes: ["1b", "4b", "12b", "27b"], latest: "4b", pulls: 23_000_000, ctx: 131072, days: 200, input: "Text, Image" },
+  { path: "library/nomic-embed-text", desc: "A high-performing open embedding model with a large token context window.", caps: ["embedding"], sizes: [], latest: "v1.5", pulls: 40_000_000, ctx: 2048, days: 900 },
+  { path: "library/gpt-oss", desc: "OpenAI's open-weight models designed for powerful reasoning & agentic tasks.", caps: ["tools", "thinking", "cloud"], sizes: ["20b", "120b"], latest: "20b", pulls: 14_700_000, ctx: 131072, days: 30, cloud: ["20b-cloud", "120b-cloud"] },
+  { path: "library/deepseek-r1", desc: "DeepSeek-R1 is a family of open reasoning models.", caps: ["tools", "thinking"], sizes: ["1.5b", "7b", "14b", "70b", "671b"], latest: "7b", pulls: 75_000_000, ctx: 131072, days: 160 },
+  { path: "someone/tiny-coder", desc: "A small coding model.", caps: ["tools"], sizes: ["1.5b"], latest: "1.5b", pulls: 1234, ctx: 32768, days: 2 },
+];
+const LIBRARY_PAGE = 4;
+const escHtml = (v) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const shortCount = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}K` : String(n));
+const pullName = (path) => path.replace(/^library\//, "");
+const dayText = (d) => new Date(Date.UTC(2026, 10, 5) - d * 86_400_000).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+
+/** Every tag of a library model: latest, each size, and its quantizations. Aliases share a digest. */
+function libraryTags(l) {
+  const tags = [];
+  const sizes = l.sizes.length ? l.sizes : [l.latest];
+  for (const size of sizes) {
+    const base = l.sizes.length ? size : "v1.5";
+    for (const q of ["", "-q4_K_M", "-q8_0", "-fp16"]) {
+      const tag = `${base}${q}`;
+      const canonical = `${pullName(l.path)}:${base}${q === "" ? "-q4_K_M" : q}`;
+      tags.push({ tag, digest: hash(canonical).slice(0, 12), size: makeModel(canonical).size });
+    }
+  }
+  const latest = tags.find((t) => t.tag === l.latest);
+  tags.unshift({ ...latest, tag: "latest" });
+  for (const c of l.cloud ?? []) tags.push({ tag: c, digest: hash(c).slice(0, 12), size: null });
+  return tags;
+}
+
+function librarySearchPage(url, htmx) {
+  const q = (url.searchParams.get("q") ?? "").toLowerCase();
+  const c = url.searchParams.get("c");
+  const p = Math.max(1, Number(url.searchParams.get("page") ?? 1));
+  let found = LIBRARY.filter((l) => (!q || l.path.includes(q) || l.desc.toLowerCase().includes(q)) && (!c || l.caps.includes(c)));
+  if (url.searchParams.get("o") === "newest") found = [...found].sort((a, b) => a.days - b.days);
+  const slice = found.slice((p - 1) * LIBRARY_PAGE, p * LIBRARY_PAGE);
+  const items = slice.map((l) => `
+<li  class="border-t-[0.5px] border-line first:border-t-0">
+  <a href="/${l.path}" class="group grid grid-cols-1 gap-x-4 px-4 py-6">
+    <div class="flex min-w-0 items-baseline gap-2.5">
+      <h2 class="min-w-0 truncate text-xl font-medium" title="${escHtml(pullName(l.path))}">
+        <span >${escHtml(pullName(l.path))}</span>
+      </h2>
+      <span class="flex-none text-[15px] tabular-nums text-muted" title="Updated ${dayText(l.days)}">${l.days}d</span>
+    </div>
+    <div class="order-last mt-3 flex flex-wrap items-center gap-2">${l.caps.map((x) => `<span  class="inline-flex items-center rounded-md bg-indigo-50 px-2">${x}</span>`).join("")}
+    </div>
+    <p class="mt-1 line-clamp-2 text-[15px] leading-6 text-black">${escHtml(l.desc)}</p>
+    <div class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+      <span class="inline-flex items-center gap-1.5 tabular-nums" title="${l.pulls.toLocaleString("en-US")} downloads"><svg width="15" height="15" aria-hidden="true"><path d="M12 3.5v12"/></svg><span >${shortCount(l.pulls)}</span></span>
+      <span class="inline-flex items-center gap-1.5 tabular-nums"><svg width="15" height="15" aria-hidden="true"><circle cx="8" cy="8" r="1"/></svg><span >${libraryTags(l).length} tags</span></span>
+      ${l.sizes.map((x) => `<span  class="inline-flex items-center rounded-md bg-[#ddf4ff] px-2">${x}</span>`).join("\n      ")}
+    </div>
+  </a>
+</li>`).join("\n");
+  const more = p * LIBRARY_PAGE < found.length;
+  const next = new URLSearchParams({ page: String(p + 1), ...(q ? { q } : {}) });
+  // the last item loads the next page when it scrolls into view
+  const sentinel = more ? `
+<li   hx-get="/search?${escHtml(next)}"   hx-trigger="revealed"   hx-swap="outerHTML"   hx-target="this"   hx-include="[name=c], [name=o], [name=s]"   hx-replace-url="false" ></li>` : "";
+  if (htmx && p > 1) return items + sentinel;
+  return `<!doctype html><html><head><title>${escHtml(q)} · Ollama</title></head><body>
+<div hidden data-result-count="${slice.length}" data-has-more="${more}"></div>
+<ul role="list" class="overflow-hidden rounded-3xl">${items}${sentinel}</ul></body></html>`;
+}
+
+function libraryTagsPage(path) {
+  const l = LIBRARY.find((x) => x.path === path);
+  if (!l) return null;
+  const name = pullName(path);
+  const rows = libraryTags(l).map((t) => `
+          <div class="group px-4 py-3">
+            <a href="/${path}:${t.tag}" class="md:hidden flex flex-col space-y-[6px] group">
+              <div class="flex items-center font-medium"><span class="group-hover:underline">${escHtml(name)}:${t.tag}</span></div>
+              <div class="flex flex-col text-neutral-500 text-[13px]">
+                <span>
+                  <span class="font-mono">
+                    ${t.digest}</span> • ${t.size === null ? "Low Usage" : `${(t.size / 1e9).toFixed(1)}GB`} • ${Math.round(l.ctx / 1024)}K context window  •
+                  <span class="hidden sm:inline">
+                    ${l.input ?? "Text"} input •
+                    ${Math.round(l.days / 30)} months ago
+                  </span>
+                </span>
+                  <div class="flex sm:hidden">
+                    ${l.input ?? "Text"} input •
+                    ${Math.round(l.days / 30)} months ago
+                  </div>
+              </div>
+            </a>
+            <div class="hidden md:flex flex-col space-y-[6px]">
+              <span class="flex items-center font-medium col-span-6 group text-sm">
+                <a href="/${path}:${t.tag}" class="group-hover:underline">${escHtml(name)}:${t.tag}</a>
+              </span>
+            </div>
+          </div>`).join("");
+  return `<!doctype html><html><head><title>${escHtml(name)}/tags</title><meta name="description" content="${escHtml(l.desc)}"/></head><body>
+<main>
+  <p class="flex space-x-5 text-[13px] font-medium text-neutral-500">
+    <span class="flex items-center"><span >${shortCount(l.pulls)}</span><span class="hidden sm:flex">&nbsp;Downloads</span></span>
+    <span class="flex items-center" title="Nov 5, 2026 8:18 PM UTC"><span class="hidden sm:flex">Updated&nbsp;</span><span >${l.days} days ago</span></span>
+  </p>
+  <div id="summary"><h2 id="summary-display"><span id="summary-content">
+    ${escHtml(l.desc)}
+  </span></h2></div>
+  <div class="mb-0 flex flex-wrap gap-2">
+    ${l.caps.map((x) => `<span class="inline-flex items-center rounded-md bg-indigo-50">${x}</span>`).join("\n    ")}
+    ${l.sizes.map((x) => `<span  class="inline-flex items-center rounded-md bg-[#ddf4ff]">${x}</span>`).join("\n    ")}
+  </div>
+<section class="w-full max-w-full mt-8">
+  <div class="min-w-full divide-y divide-gray-200">${rows}
+  </div>
+</section>
+</main></body></html>`;
+}
+
+function handleLibrarySite(req, res, url) {
+  const path = url.pathname.replace(/^\/_sim\/ollama\.com/, "");
+  libraryRequests.push(path + url.search);
+  let html = null;
+  if (path === "/search") {
+    if (Number(url.searchParams.get("page") ?? 1) > 1 && req.headers["hx-request"] !== "true") {
+      res.writeHead(303, { Location: "/_sim/ollama.com/search" });
+      return res.end();
+    }
+    html = librarySearchPage(url, req.headers["hx-request"] === "true");
+  }
+  const t = /^\/([^/]+\/[^/]+)\/tags$/.exec(path);
+  if (t) html = libraryTagsPage(t[1]);
+  if (html === null) {
+    res.writeHead(404, { "Content-Type": "text/html" });
+    return res.end("<html><body>Not found</body></html>");
+  }
+  res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+  res.end(html);
+}
+
+/** Paths the library site was asked for, so tests can see what the dashboard cached. */
+const libraryRequests = [];
+
+/** Blobs by digest, filled as their manifests are served. */
+const registryBlobs = new Map();
+
 async function handleControl(req, res) {
   const url = new URL(req.url, "http://control");
   try {
+    if (req.method === "GET" && /^\/_sim\/registry/.test(url.pathname)) return handleRegistry(req, res, url);
+    if (req.method === "GET" && /^\/_sim\/ollama\.com\//.test(url.pathname)) return handleLibrarySite(req, res, url);
+    if (req.method === "GET" && url.pathname === "/_sim/library-requests") return sendJson(res, 200, { requests: libraryRequests });
     const wh = /^\/_sim\/webhook\/([A-Za-z0-9_.-]+)(?:\/(fail))?$/.exec(url.pathname);
     if (wh) return await handleWebhook(req, res, wh[1], wh[2]);
     if (req.method === "GET" && (url.pathname === "/_sim" || url.pathname === "/_sim/hosts")) {

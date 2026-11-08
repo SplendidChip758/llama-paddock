@@ -31,7 +31,7 @@ function allowedBy(list: string[] | undefined, name: string) {
 }
 
 export function EnvTab({ st }: { st: InstanceSnapshot }) {
-  const { toast } = usePaddock();
+  const { toast, readOnly } = usePaddock();
   const [env, setEnv] = useState<EnvState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -107,7 +107,9 @@ export function EnvTab({ st }: { st: InstanceSnapshot }) {
   return (
     <>
       <div className="notice">
-        {windows ? (
+        {readOnly ? (
+          <>Ollama&apos;s settings on this host, from <span className="mono">{env.override_path}</span>. Your account is read-only.</>
+        ) : windows ? (
           <>
             Editing your <span className="mono">user environment variables</span> ({env.override_path}). Only Ollama-related variables are
             shown or changed. Saving restarts the Ollama app with the new values — loaded models will drop.
@@ -151,33 +153,35 @@ export function EnvTab({ st }: { st: InstanceSnapshot }) {
                 {meta && <div className="desc">{meta.d}</div>}
               </div>
               {meta?.opts ? (
-                <select value={v} onChange={(e) => set(e.target.value)}>
+                <select value={v} disabled={readOnly} onChange={(e) => set(e.target.value)}>
                   {meta.opts.map((o) => <option key={o} value={o}>{o === "" ? ph : o}</option>)}
                   {v && !meta.opts.includes(v) && <option value={v}>{v}</option>}
                 </select>
               ) : (
-                <input type="text" value={v} placeholder={ph} onChange={(e) => set(e.target.value)} />
+                <input type="text" value={v} placeholder={ph} readOnly={readOnly} onChange={(e) => set(e.target.value)} />
               )}
-              <button className="ghost sm" title="unset" disabled={v === ""} onClick={() => clearVar(k)}>✕</button>
+              <button className="ghost sm" title="unset" disabled={v === "" || readOnly} onClick={() => clearVar(k)}>✕</button>
             </div>
           );
         })}
-        <form className="row" style={{ marginTop: 14 }} onSubmit={addVar}>
+        {!readOnly && <form className="row" style={{ marginTop: 14 }} onSubmit={addVar}>
           <input type="text" placeholder="NEW_VARIABLE" style={{ maxWidth: 280 }} value={newKey} onChange={(e) => setNewKey(e.target.value)} autoComplete="off" />
           <input type="text" placeholder="value" className="grow" value={newVal} onChange={(e) => setNewVal(e.target.value)} autoComplete="off" />
           <button className="btn" type="submit">Add</button>
-        </form>
-        {env.allowed && (
+        </form>}
+        {env.allowed && !readOnly && (
           <div className="hint" style={{ marginTop: 6 }}>
             Only Ollama and GPU variables can be set from here ({env.allowed.join(", ")}). Other names need{" "}
             <span className="mono">PADDOCK_AGENT_ENV_ALLOW</span> in the agent&apos;s settings on the host.
           </div>
         )}
-        <div className="row" style={{ justifyContent: "flex-end", marginTop: 18 }}>
-          <button className="ghost" onClick={() => setValues({ ...original })}>Reset</button>
-          <button className="btn" disabled={saving} onClick={() => save(false)}>Save without restart</button>
-          <button className="btn primary" disabled={saving} onClick={() => save(true)}>Save &amp; restart Ollama</button>
-        </div>
+        {!readOnly && (
+          <div className="row" style={{ justifyContent: "flex-end", marginTop: 18 }}>
+            <button className="ghost" onClick={() => setValues({ ...original })}>Reset</button>
+            <button className="btn" disabled={saving} onClick={() => save(false)}>Save without restart</button>
+            <button className="btn primary" disabled={saving} onClick={() => save(true)}>Save &amp; restart Ollama</button>
+          </div>
+        )}
       </div>
 
       {Object.keys(external).length > 0 && (

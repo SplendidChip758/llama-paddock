@@ -49,6 +49,10 @@ export const ALERT_KINDS: Record<AlertKind, KindInfo> = {
     label: "Model reloading constantly", unit: "loads/h", threshold: 10, max: 10000, for_s: 0,
     help: "A model was loaded more often than the threshold in the last hour. Each model has its own alert. With the agent, loads too short for a poll to see are counted from Ollama's log as well.",
   },
+  insecure: {
+    label: "Security check failing", unit: null, threshold: null, for_s: 60,
+    help: "A check on the Security page fails: Ollama answering without a key, an agent over plain HTTP or with a weak token, and, when the rule covers every host, the dashboard's own checks. Each check has its own alert; dismissed checks don't count.",
+  },
 };
 
 export const isAlertKind = (k: unknown): k is AlertKind => typeof k === "string" && Object.hasOwn(ALERT_KINDS, k);
@@ -69,6 +73,7 @@ export const DEFAULT_RULES: AlertRule[] = (
     // off by default: a client may ask for a small context on purpose
     ["context-short", "context_short", false],
     ["reload-churn", "reload_churn", true],
+    ["insecure", "insecure", true],
   ] as const
 ).map(([id, kind, enabled]) => ({
   id, name: ALERT_KINDS[kind].label, kind, enabled,
@@ -98,5 +103,12 @@ export function parseDur(text: string): number | null {
 /** "85°C", "90%", "10 loads/h". */
 export const thresholdText = (value: number | null, unit: KindInfo["unit"]) => `${value}${unit && /^[a-z]/i.test(unit) ? " " : ""}${unit ?? ""}`;
 
-/** "GPU0", a disk's path, a model's name, or "" for the host itself. */
-export const subjectText = (subject: string) => subject.replace(/^gpu(\d+)$/, "GPU$1");
+/** "GPU0", a disk's path, a model's name, a security check, or "" for the host itself. */
+export const subjectText = (subject: string) =>
+  Object.hasOwn(SECURITY_SUBJECTS, subject) ? SECURITY_SUBJECTS[subject] : subject.replace(/^gpu(\d+)$/, "GPU$1");
+
+/** The security checks' ids as alert subjects (lib/security.ts has the same labels). */
+const SECURITY_SUBJECTS: Record<string, string> = {
+  ollama_open: "Ollama without a key", agent_http: "agent over HTTP", agent_token: "agent token",
+  default_password: "initial password", dashboard_http: "dashboard over HTTP", data_files: "data file modes", api_tokens: "API token expiry",
+};

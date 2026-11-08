@@ -7,7 +7,8 @@ import {
   type Instance, type InstanceInput, type Settings,
 } from "./config";
 import {
-  deleteHistory, deleteJobs, loadJobs, maintainHistory, modelEvents, recordObservations, recordSamples, saveJob, type ObservedSpan,
+  deleteHistory, deleteJobs, interruptBenchmarks, loadJobs, maintainHistory, modelEvents, recordModelSizes, recordObservations, recordSamples, saveJob, trimAudit,
+  type ObservedSpan,
 } from "./db";
 import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
 import { diagnoseGpu, isGpuLogLine, modelKey, ollamaRun, onCpu, readLog, type GpuEvidence } from "./gpucheck";
@@ -15,13 +16,16 @@ import { HttpError } from "./http-error";
 import {
   RELOAD_WINDOW_S, contextCheck, loadStats, reloadChurn, unseenLoads, type LoadStats, type ModelInfo,
 } from "./modelcheck";
+import { fitEnv, settingsKey } from "./fit";
 import { nativeContext, parseParameters } from "./params";
 import { startNotifications } from "./notify";
+import { dashboardChecks, forgetDismissals, hostChecks, probeOllama, summarize, type OllamaProbe } from "./security";
 import { forgetRequests, syncRequests } from "./requests";
 import { isCloudModel, withSplit } from "./split";
-import type {
-  AgentGpuCheck, AgentStats, EnvState, GpuCheck, GpuFixAction, HistoryPoint, HostEvent, InstanceSnapshot, JobInfo, LoadedModel, PsModel,
-  ReloadChurn,
+import {
+  DASHBOARD_TARGET,
+  type AgentGpuCheck, type AgentStats, type EnvState, type FitHost, type FitMeasurement, type GpuCheck, type GpuFixAction, type HistoryPoint, type HostEvent,
+  type InstanceSnapshot, type JobInfo, type LoadedModel, type PsModel, type ReloadChurn, type SecurityCheck, type SecurityTarget,
 } from "./types";
 
 // ============================================================================ errors
@@ -95,6 +99,11 @@ class InstanceState {
   runner_log: { t: number; starts: number[] } | null = null;
   runner_log_reading = false;
   runner_log_next = 0;
+  /** the size last recorded for each model, context and settings; see recordSizes() */
+  sizes_recorded = new Map<string, number>();
+  /** the security checks' probe of Ollama without its key; see refreshSecurityProbe() */
+  security_probe: OllamaProbe | null = null;
+  security_probing = false;
 
   constructor(public inst: Instance) {}
 
@@ -116,6 +125,13 @@ class InstanceState {
 
   unseenLoads(): number | null {
     return this.runner_log && unseenLoads(this.runner_log.starts, this.model_events ?? [], this.runner_log.t);
+  }
+
+  securityChecks(): SecurityCheck[] {
+    return hostChecks({
+      inst: this.inst, ollama_ok: this.ollama_ok, agent_ok: this.agent_ok, agent_https_fingerprint: this.agent_https_fingerprint,
+      env: this.env(), probe: this.security_probe,
+    });
   }
 
   reloadChurn(): ReloadChurn[] {
@@ -173,7 +189,12 @@ export function paddock(): Paddock {
       pollerStarted: false,
     };
     restoreJobs(g.__paddock);
-    startNotifications((id) => g.__paddock?.instances.get(id)?.inst.name ?? id);
+    try {
+      interruptBenchmarks();
+    } catch (e) {
+      console.error("[llama-paddock] marking interrupted benchmarks failed:", e);
+    }
+    startNotifications((id) => (id === DASHBOARD_TARGET ? "the dashboard" : g.__paddock?.instances.get(id)?.inst.name ?? id));
   }
   const p = g.__paddock;
   if (!p.pollerStarted) {
@@ -293,6 +314,7 @@ export function removeInstance(id: string) {
   deleteHistory(id);
   forgetAlerts(id, "the host was removed");
   forgetRequests(id);
+  forgetDismissals(id);
 }
 
 /** Accept the key an https:// agent presents now, e.g. after its key was replaced. */
@@ -389,7 +411,7 @@ export async function testConnection(body: InstanceInput & { id?: unknown }) {
 const agentHeaders = (inst: Instance): Record<string, string> =>
   inst.agent_token ? { Authorization: `Bearer ${inst.agent_token}` } : {};
 
-const ollamaHeaders = (inst: Instance, json: boolean): Record<string, string> => ({
+export const ollamaHeaders = (inst: Instance, json: boolean): Record<string, string> => ({
   ...(inst.ollama_proxy_key ? { Authorization: `Bearer ${inst.ollama_proxy_key}` } : {}),
   ...(json ? { "Content-Type": "application/json" } : {}),
 });
@@ -431,6 +453,49 @@ export async function ollama<T = any>(inst: Instance, method: string, path: stri
   if (!r.ok) throw new HttpError(r.status, await upstreamError(r));
   const text = await r.text();
   return (text ? JSON.parse(text) : {}) as T;
+}
+
+/** POST to Ollama for a streamed answer; resolves once the response headers arrive. */
+export async function ollamaPost(inst: Instance, path: string, body: unknown, signal: AbortSignal): Promise<Response> {
+  let r: Response;
+  try {
+    r = await fetch(`${inst.ollama_url}${path}`, {
+      method: "POST",
+      headers: ollamaHeaders(inst, true),
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch (e) {
+    if (signal.aborted) throw e;
+    throw new HttpError(502, `ollama unreachable: ${errText(e)}`);
+  }
+  const denied = ollamaAuthError(inst, r.status);
+  if (denied) throw new HttpError(502, denied);
+  if (!r.ok || !r.body) throw new HttpError(r.ok ? 502 : r.status, await upstreamError(r));
+  return r;
+}
+
+/** Ollama streams newline-delimited JSON objects. */
+export async function* ndjsonLines(r: Response): AsyncGenerator<any> {
+  const reader = r.body!.pipeThrough(new TextDecoderStream()).getReader();
+  let buf = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += value;
+      let nl: number;
+      while ((nl = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line) yield JSON.parse(line);
+      }
+    }
+    if (buf.trim()) yield JSON.parse(buf);
+  } finally {
+    // a consumer that stops early (an error line, a cancelled chat) mustn't leave the upstream open
+    reader.cancel().catch(() => undefined);
+  }
 }
 
 /** The agent presented a key other than the pinned one, so something else may be answering at its address. */
@@ -682,6 +747,14 @@ const polledHost = (st: InstanceState): PolledHost => ({
   ollama_ok: st.ollama_ok, ollama_error: st.ollama_error, agent_ok: st.agent_ok, agent_error: st.agent_error,
   stats: st.stats, ps: st.ps, restart_expected: st.restarting > 0 || Date.now() < st.restart_settled, gpu_check: st.gpuCheck(),
   models: { loaded: st.loadedModels(), stats: st.loadStats(), unseen: st.unseenLoads(), env: st.env() },
+  security: st.securityChecks(),
+});
+
+/** The dashboard's own security checks, as a host for the alert rules (only "insecure" rules apply to it). */
+const polledDashboard = (): PolledHost => ({
+  id: DASHBOARD_TARGET, t: Date.now() / 1000, has_agent: false, ollama_ok: true, ollama_error: null, agent_ok: false, agent_error: null,
+  stats: null, ps: [], restart_expected: false, gpu_check: null, models: { loaded: [], stats: [], unseen: null, env: null },
+  security: dashboardChecks(),
 });
 
 const MAINTAIN_EVERY_MS = 60_000;
@@ -718,13 +791,19 @@ async function pollLoop(p: Paddock) {
     const gapAfter = 3 * p.settings.poll_interval + 30;
     const changes = observed.map((st) => observe(st, gapAfter));
     observed.forEach((st, i) => trackModels(st, changes[i].events));
+    try {
+      recordModelSizes(observed.flatMap(newSizes));
+    } catch (e) {
+      console.error("[llama-paddock] saving model sizes failed:", e);
+    }
     for (const st of observed) {
       if (wantsGpuEvidence(st)) void refreshGpuEvidence(st);
       refreshModelState(st, p.settings.poll_interval);
     }
     if (round % REQUESTS_EVERY_POLLS === REQUESTS_EVERY_POLLS - 1) syncAllRequests(p);
+    for (const st of observed) refreshSecurityProbe(st, round);
     try {
-      evaluateAlerts(observed.map(polledHost), [...p.instances.keys()], gapAfter);
+      evaluateAlerts([...observed.map(polledHost), polledDashboard()], [...p.instances.keys(), DASHBOARD_TARGET], gapAfter);
     } catch (e) {
       console.error("[llama-paddock] evaluating alert rules failed:", e);
     }
@@ -740,6 +819,11 @@ async function pollLoop(p: Paddock) {
       if (started - maintained >= MAINTAIN_EVERY_MS) {
         maintained = started;
         maintainHistory(p.settings.history_retention_days);
+        try {
+          trimAudit(p.settings.audit_retention_days);
+        } catch (e) {
+          console.error("[llama-paddock] trimming the audit log failed:", e);
+        }
       }
     } catch (e) {
       console.error("[llama-paddock] saving metric history failed:", e);
@@ -747,6 +831,37 @@ async function pollLoop(p: Paddock) {
     const wait = Math.max(500, p.settings.poll_interval * 1000 - (Date.now() - started));
     await new Promise((r) => setTimeout(r, wait));
   }
+}
+
+// ============================================================================ security checks
+/** Ask Ollama without its key every this many polls (every 30 s at the default interval), and at once for a new or changed host. */
+const SECURITY_PROBE_EVERY_POLLS = 10;
+
+function refreshSecurityProbe(st: InstanceState, round: number) {
+  if (st.security_probing || !st.inst.ollama_proxy_key) return;
+  const scheduled = round % SECURITY_PROBE_EVERY_POLLS === 0;
+  if (st.security_probe && !scheduled) return;
+  // Ollama's environment says whether its own port is open: wait for the agent to report it, until the next scheduled probe
+  if (!st.security_probe && !scheduled && st.agent_ok && !st.env()) return;
+  st.security_probing = true;
+  void probeOllama(st.inst, st.env())
+    .then((r) => {
+      st.security_probe = r;
+    })
+    .catch((e) => console.error(`[llama-paddock] security probe of ${st.inst.id} failed:`, e))
+    .finally(() => {
+      st.security_probing = false;
+    });
+}
+
+/** Every host's checks and the dashboard's, for the Security page. */
+export function securityReport(): { targets: SecurityTarget[] } & ReturnType<typeof summarize> {
+  const p = paddock();
+  const targets: SecurityTarget[] = [
+    { instance: DASHBOARD_TARGET, name: "Dashboard", checks: dashboardChecks() },
+    ...[...p.instances.values()].map((st) => ({ instance: st.inst.id, name: st.inst.name, checks: st.securityChecks() })),
+  ];
+  return { targets, ...summarize(targets) };
 }
 
 // ============================================================================ GPU check
@@ -929,7 +1044,52 @@ async function readRunnerLog(st: InstanceState) {
   }
 }
 
-// ============================================================================ jobs (pull / create)
+// ============================================================================ fit estimates
+/**
+ * Loaded models whose size at this context and these settings hasn't been recorded yet, as fit
+ * estimates calibrate against them. Waits for an agent's environment, which decides the settings.
+ */
+function newSizes(st: InstanceState): (FitMeasurement & { digest: string })[] {
+  if (!st.ollama_ok || (st.inst.agent_url && !st.ollama_env)) return [];
+  const settings = settingsKey(fitEnv(st.env()));
+  const out: (FitMeasurement & { digest: string })[] = [];
+  for (const m of st.ps) {
+    const ctx = m.context_length;
+    if (!m.digest || !ctx || !(m.size > 0) || typeof m.size_vram !== "number" || isCloudModel(m)) continue;
+    const key = `${m.digest}|${ctx}|${settings}`;
+    if (st.sizes_recorded.get(key) === m.size) continue;
+    st.sizes_recorded.set(key, m.size);
+    out.push({ instance: st.inst.id, digest: m.digest, context: ctx, settings, size: m.size, size_vram: m.size_vram, t: st.updated! });
+  }
+  return out;
+}
+
+/** A host as fit estimates see it: GPUs, RAM, Ollama's settings and the other loaded models. */
+export function fitHost(st: InstanceState, digest: string | null): FitHost {
+  const stats = st.agent_ok ? st.stats : null;
+  let gpus: FitHost["gpus"] = null;
+  if (stats) {
+    const other = new Map<string, number>();
+    for (const p of stats.nvidia.processes ?? []) {
+      if (/ollama/i.test(p.name) || !p.mem_mib) continue;
+      other.set(p.gpu_uuid, (other.get(p.gpu_uuid) ?? 0) + p.mem_mib * 1024 * 1024);
+    }
+    gpus = stats.nvidia.available
+      ? stats.nvidia.gpus.filter((g) => g.mem_total_mib).map((g) => ({ index: g.index, name: g.name, total: g.mem_total_mib! * 1024 * 1024, other: other.get(g.uuid) ?? 0 }))
+      : [];
+  }
+  const mem = stats?.system.mem;
+  return {
+    id: st.inst.id,
+    name: st.inst.name,
+    gpus,
+    ram: mem ? { total: mem.total, available: Math.min(mem.total, mem.available + (stats!.system.ollama_process?.rss_total ?? 0)) } : null,
+    env: fitEnv(st.env()),
+    loaded: st.ps.filter((m) => m.digest !== digest && !isCloudModel(m)).map((m) => ({ name: m.name, size: m.size, size_vram: m.size_vram ?? 0 })),
+  };
+}
+
+// ============================================================================ jobs (pull / create / benchmark)
 export function jobInfo(j: Job): JobInfo {
   const { abort: _abort, path: _path, body: _body, savedAt: _savedAt, ...info } = j;
   return info;
@@ -978,51 +1138,65 @@ export function listJobs(): JobInfo[] {
 }
 
 export function startJob(kind: Job["kind"], inst: Instance, model: string, path: string, body: unknown, detail = ""): JobInfo {
+  const job = addJob(kind, inst, model, path, body, detail);
+  void runJob(job, inst);
+  return jobInfo(job);
+}
+
+function addJob(kind: Job["kind"], inst: Instance, model: string, path: string, body: unknown, detail: string, id?: string): Job {
   const p = paddock();
   const job: Job = {
-    id: crypto.randomBytes(6).toString("hex"), kind, instance: inst.id, model, detail,
+    id: id ?? crypto.randomBytes(6).toString("hex"), kind, instance: inst.id, model, detail,
     status: "queued", state: "running", completed: 0, total: 0, error: null,
     started: Date.now() / 1000, finished: null, abort: new AbortController(), path, body, savedAt: 0,
   };
   p.jobs.set(job.id, job);
   persistJob(job);
-  void runJob(job, inst);
+  return job;
+}
+
+/** What a task reports as it goes: shown in the Jobs drawer like a pull's progress. */
+export type TaskProgress = (p: { status?: string; completed?: number; total?: number }) => void;
+
+/**
+ * A job that is more than one Ollama request, such as a benchmark. It shows in the Jobs drawer and
+ * can be cancelled there, which aborts `signal`. After a restart it is marked interrupted, like a create.
+ */
+export function startTask(
+  kind: Job["kind"], inst: Instance, model: string, detail: string, id: string,
+  work: (progress: TaskProgress, signal: AbortSignal) => Promise<void>,
+): JobInfo {
+  const job = addJob(kind, inst, model, "", null, detail, id);
+  const progress: TaskProgress = (x) => {
+    if (x.status !== undefined) job.status = x.status;
+    if (x.completed !== undefined) job.completed = x.completed;
+    if (x.total !== undefined) job.total = x.total;
+    persistJob(job);
+  };
+  void tracked(job, () => work(progress, job.abort.signal));
   return jobInfo(job);
 }
 
-async function runJob(job: Job, inst: Instance) {
-  try {
-    const r = await fetch(`${inst.ollama_url}${job.path}`, {
-      method: "POST",
-      headers: ollamaHeaders(inst, true),
-      body: JSON.stringify(job.body),
-      signal: job.abort.signal,
-    });
-    if (!r.ok || !r.body) throw new Error(ollamaAuthError(inst, r.status) ?? (await upstreamError(r)));
-
-    // Ollama streams newline-delimited JSON status objects.
-    const reader = r.body.pipeThrough(new TextDecoderStream()).getReader();
-    let buf = "";
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buf += value;
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        const msg = JSON.parse(line);
-        if (msg.error) throw new Error(msg.error);
-        const statusChanged = !!msg.status && msg.status !== job.status;
-        if (msg.status) job.status = msg.status;
-        if (msg.total) {
-          job.total = msg.total;
-          job.completed = msg.completed ?? 0;
-        }
-        if (statusChanged || Date.now() - job.savedAt >= SAVE_PROGRESS_EVERY_MS) persistJob(job);
+function runJob(job: Job, inst: Instance) {
+  return tracked(job, async () => {
+    const r = await ollamaPost(inst, job.path, job.body, job.abort.signal);
+    for await (const msg of ndjsonLines(r)) {
+      if (msg.error) throw new Error(msg.error);
+      const statusChanged = !!msg.status && msg.status !== job.status;
+      if (msg.status) job.status = msg.status;
+      if (msg.total) {
+        job.total = msg.total;
+        job.completed = msg.completed ?? 0;
       }
+      if (statusChanged || Date.now() - job.savedAt >= SAVE_PROGRESS_EVERY_MS) persistJob(job);
     }
+  });
+}
+
+/** Run a job's work and record how it ended. */
+async function tracked(job: Job, work: () => Promise<void>) {
+  try {
+    await work();
     job.state = "done";
     job.status = "success";
   } catch (e) {

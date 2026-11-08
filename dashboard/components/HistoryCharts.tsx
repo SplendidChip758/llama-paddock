@@ -8,8 +8,9 @@ const RANGES = { "1h": 3600, "6h": 6 * 3600, "24h": 86400, "7d": 7 * 86400, "30d
 type Range = keyof typeof RANGES;
 const RANGE_KEY = "paddock.historyRange";
 const RESOLUTION: Record<number, string> = { 0: "every poll", 60: "1-minute averages", 900: "15-minute averages" };
-// one colour per GPU (or per in/out line), from the theme so light and dark both work
-const COLORS = ["var(--accent)", "var(--info)", "var(--ok)", "var(--warn)", "var(--bad)", "var(--accent2)", "var(--muted)", "var(--text)"];
+// one colour per GPU (or per in/out line), from the theme so light and dark both work. In the
+// Paddock palette ok matches accent and info matches accent2, so those two come late in the list
+const COLORS = ["var(--accent)", "var(--info)", "var(--warn)", "var(--bad)", "var(--ok)", "var(--accent2)", "var(--muted)", "var(--text)"];
 
 interface Series {
   name: string;

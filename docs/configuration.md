@@ -11,8 +11,12 @@ Copy [`config.example.yaml`](../config.example.yaml) to `config.yaml`. With Dock
 | `poll_interval` | `3` | Seconds between polls of each instance |
 | `history_points` | `400` | Recent samples returned for sparklines (about 20 minutes at 3 seconds) |
 | `history_retention_days` | `30` | Days of metric history, host events and alert transitions to retain; must be positive |
+| `audit_retention_days` | `365` | Days of [audit log](security.md#audit-log) to retain; must be positive |
 | `metrics_token` | unset | Bearer token for the Prometheus [`/metrics`](prometheus.md) endpoint; falls back to `PADDOCK_METRICS_TOKEN`. Without a token or `metrics_open`, `/metrics` is off |
 | `metrics_open` | `false` | `true` serves `/metrics` without a token; ignored when a token is set |
+| `model_library` | `true` | `false` stops the dashboard contacting ollama.com and the model registries (Hugging Face too, for `hf.co/` models): the [library browser](usage.md#models) is off and [fit estimates](fit-estimates.md) need the model pulled on the host. Falls back to `PADDOCK_MODEL_LIBRARY` |
+| `model_library_url` | `https://ollama.com` | Where the library browser reads search results and tag lists. Falls back to `PADDOCK_MODEL_LIBRARY_URL` |
+| `model_registry_url` | `https://registry.ollama.ai` | The registry that model names without a host resolve to, such as `qwen3:8b`. Falls back to `PADDOCK_MODEL_REGISTRY_URL` |
 | `instances` | `[]` | Declarative hosts; read-only in the UI |
 
 Raw polls are kept for up to 24 hours, one-minute averages for up to 7 days, and 15-minute averages up to the retention limit. Reducing retention also shortens the finer tiers. See the [history API](api.md#history) for the resolution returned by each range.
@@ -40,8 +44,8 @@ Only `ollama_url` is required; supply a stable, unique `id` using letters, digit
 |---|---|---|
 | `PADDOCK_CONFIG` | `/config/config.yaml` | Optional YAML file |
 | `PADDOCK_DATA_DIR` | `data` beside the config file | Writable persistent data directory; prefer an absolute path |
-| `PADDOCK_USERNAME` | `admin` | Initial account name |
-| `PADDOCK_PASSWORD` | generated when empty | Initial password |
+| `PADDOCK_USERNAME` | `admin` | Name of the first admin account |
+| `PADDOCK_PASSWORD` | generated when empty | Initial password of the first admin |
 | `PADDOCK_AUTH` | login enabled | Set to `off` only when access is protected elsewhere |
 | `PADDOCK_METRICS_TOKEN` | unset | Scrape token for [`/metrics`](prometheus.md), used when `metrics_token` isn't set in `config.yaml` |
 | `PADDOCK_TRUSTED_PROXIES` | `0` | Number of reverse proxies in front of the dashboard, so the login lockout can tell clients apart. See [Reverse proxies](proxy.md#the-dashboard-behind-a-proxy) |
@@ -50,12 +54,34 @@ Only `ollama_url` is required; supply a stable, unique `id` using letters, digit
 
 ## Login
 
-- `PADDOCK_USERNAME` / `PADDOCK_PASSWORD` set the **initial** login. The first sign-in requires choosing a new password, which is stored hashed (scrypt) in `auth.json` in the data directory. After that the env values are ignored.
+- `PADDOCK_USERNAME` / `PADDOCK_PASSWORD` set the **first admin** account. The first sign-in requires choosing a new password, which is stored hashed (scrypt) in `auth.json` in the data directory. After that the env values are ignored.
 - If `PADDOCK_PASSWORD` is empty, a random one is printed to the log on first start.
-- Change it later from the account menu (top right). Changing it signs out other sessions.
+- Change your password from the account menu (top right). Changing it signs out your other sessions.
 - Five wrong attempts lock that address out for 5 minutes, and 20 wrong attempts from all addresses together pause the login for everyone for 5 minutes. Behind a reverse proxy, set `PADDOCK_TRUSTED_PROXIES` so the per-address lockout sees the real client. See [Security](security.md).
-- **Forgot the password:** stop the dashboard, delete `auth.json` from the data directory (`/var/lib/llama-paddock`, or the Docker volume) and restart. The login is recreated from the env values.
-- `PADDOCK_AUTH=off` disables the login, e.g. when a reverse proxy with auth already sits in front of it. `/api/healthz` stays open for health checks.
+- **Forgot a password:** another admin can reset it under **Users**. If no admin can sign in, stop the dashboard, delete `auth.json` from the data directory (`/var/lib/llama-paddock`, or the Docker volume) and restart. This removes **every** account and every API token; the first admin is recreated from the env values.
+- `PADDOCK_AUTH=off` disables the login, e.g. when a reverse proxy with auth already sits in front of it. Everyone the proxy lets in then has full control, and there are no roles. `/api/healthz` stays open for health checks.
+
+### Users and roles
+
+Each person can have their own account, with one of two roles:
+
+| Role | Can |
+|---|---|
+| **admin** | Everything: add and edit hosts, pull and delete models, edit Ollama's environment, restart it, manage alerts and users, read the [audit log](security.md#audit-log) |
+| **viewer** | See everything an admin sees except users and the audit log, but change nothing. The buttons that change something are hidden, and the server refuses those requests with 403 |
+
+Admins manage accounts under **Users** in the account menu:
+
+- **Add user:** pick a name and a role. The dashboard makes a temporary password, shown once with a **Copy** button, for you to pass on. The new user must choose their own when they first sign in.
+- **Role:** takes effect at once, also for a user who is signed in. Making an admin a viewer also takes write access from their API tokens, for good.
+- **Reset password:** signs the user out everywhere and shows a new temporary password. Their API tokens keep working; revoke them under **API tokens** if needed.
+- **Remove:** signs the user out at once and removes their API tokens.
+
+Every user can create [API tokens](api.md#api-tokens) for scripts under **API tokens** in the account menu: read-only, or read and write for admins. Admins can also list and revoke everyone's.
+
+An admin can't change the role of, reset or remove their own account, so there is always an admin who can sign in. Usernames are matched without regard to case.
+
+Dashboards from before user accounts had a single login. On upgrade it becomes the first admin, with the same name and password. Whoever was signed in signs in once more.
 
 ## Data directory
 
@@ -65,6 +91,6 @@ Only `ollama_url` is required; supply a stable, unique `id` using letters, digit
 | Docker Compose | `paddock-data` volume, mounted at `/data` |
 | Source | The path set by `PADDOCK_DATA_DIR` |
 
-`hosts.json` stores hosts added in the UI, including agent tokens, proxy keys and pinned agent keys. `agent-pins.json` stores the agent keys pinned for `config.yaml` hosts without an `agent_fingerprint`. `auth.json` stores the login hash and session signing secret. `alert-rules.json` stores the [alert rules](alerts.md) once they have been changed in the dashboard, and `alert-channels.json` the [notification channels](alerts.md#notifications), including their webhook URLs and passwords. `request-clients.json` stores the names given to client addresses in the [request log](usage.md#requests). `paddock.db` stores metric history, host availability and model load events, alerts firing and resolving, alert silences, the request log, and jobs; SQLite may also create `paddock.db-wal` and `paddock.db-shm`.
+`hosts.json` stores hosts added in the UI, including agent tokens, proxy keys and pinned agent keys. `agent-pins.json` stores the agent keys pinned for `config.yaml` hosts without an `agent_fingerprint`. `auth.json` stores the user accounts, their password hashes and roles, and the session signing secret. `credentials.json` stores the [API tokens](api.md#api-tokens): their names, owners, scopes, expiry and hashes, never the tokens themselves. `alert-rules.json` stores the [alert rules](alerts.md) once they have been changed in the dashboard, and `alert-channels.json` the [notification channels](alerts.md#notifications), including their webhook URLs and passwords. `request-clients.json` stores the names given to client addresses in the [request log](usage.md#requests). `security-dismissals.json` stores the [security checks](security-checks.md#dismissing-a-check) dismissed and their notes. `paddock.db` stores metric history, host availability and model load events, alerts firing and resolving, alert silences, the request log, saved benchmarks, the [audit log](security.md#audit-log), and jobs; SQLite may also create `paddock.db-wal` and `paddock.db-shm`. `uploads/` holds a GGUF file for a [new model](usage.md#models) while it uploads, and is emptied once Ollama has it; the dashboard clears leftovers when it starts its next upload.
 
 Keep these files private (mode 600 on Linux) and retain the directory across upgrades. See [Backups](operations.md#backups) for copying SQLite data safely. Agent configuration is separate: [Linux](agent-linux.md) and [Windows](agent-windows.md#settings-and-updates).

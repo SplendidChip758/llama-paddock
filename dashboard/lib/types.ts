@@ -251,7 +251,7 @@ export interface HostEvent {
 }
 
 /** What an alert rule watches; see lib/rules.ts for each kind's unit and defaults. */
-export type AlertKind = "gpu_temp" | "vram" | "disk" | "host_unreachable" | "agent_unreachable" | "ollama_crash" | "gpu_lost" | "context_short" | "reload_churn";
+export type AlertKind = "gpu_temp" | "vram" | "disk" | "host_unreachable" | "agent_unreachable" | "ollama_crash" | "gpu_lost" | "context_short" | "reload_churn" | "insecure";
 
 export interface AlertRule {
   id: string;
@@ -458,7 +458,8 @@ export type JobState ="running" | "done" | "error" | "cancelled";
 
 export interface JobInfo {
   id: string;
-  kind: "pull" | "create";
+  /** benchmark: completed and total count runs, not bytes */
+  kind: "pull" | "create" | "benchmark";
   instance: string;
   model: string;
   detail: string;
@@ -487,6 +488,138 @@ export interface ShowResult {
   modified_at: string | null;
 }
 
+export interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+/** How fast a host answered one prompt. Times in milliseconds; null where Ollama didn't say. */
+export interface PromptStats {
+  /** from sending the request to the first token, measured by the dashboard: includes loading the model and reading the prompt */
+  ttft_ms: number | null;
+  /** from sending the request to the last line of the answer, measured by the dashboard */
+  wall_ms: number;
+  /** the rest are Ollama's own figures from the answer's final line */
+  load_ms: number | null;
+  prompt_tokens: number | null;
+  prompt_ms: number | null;
+  /** prompt evaluation rate, tokens per second */
+  prompt_tps: number | null;
+  tokens: number | null;
+  eval_ms: number | null;
+  /** generation rate, tokens per second */
+  tps: number | null;
+  total_ms: number | null;
+  done_reason: string | null;
+}
+
+/** One line of the chat stream from POST /api/instances/{id}/chat. */
+export type PromptEvent =
+  | { type: "token"; content: string; thinking?: string }
+  | { type: "done"; stats: PromptStats }
+  | { type: "error"; detail: string };
+
+// ============================================================================ benchmarks (#32)
+/** short: a short question · long_context: reading a long prompt · long_generation: writing a long answer */
+export type BenchCase = "short" | "long_context" | "long_generation";
+/** cold: the model is unloaded before every run, so each run includes loading it · warm: it is loaded first */
+export type BenchMode = "cold" | "warm";
+
+/** What was asked for. With the prompt set version, it is what makes two benchmarks comparable. */
+export interface BenchSpec {
+  /** version of the built-in prompt set; results from different sets don't compare */
+  set: string;
+  cases: BenchCase[];
+  repeat: number;
+  mode: BenchMode;
+  /** context sent as num_ctx with every run, so every host runs the model at the same size */
+  num_ctx: number;
+}
+
+/** One timed answer. */
+export interface BenchRun {
+  case: BenchCase;
+  /** 1-based repetition */
+  rep: number;
+  t: number;
+  /** whether the model was loaded at this context just before the run, as /api/ps showed it */
+  state: BenchMode;
+  stats: PromptStats;
+  /** the model's entry in /api/ps right after the run; null when it wasn't listed */
+  size: number | null;
+  size_vram: number | null;
+  split: ModelSplit | null;
+  context: number | null;
+}
+
+/** The host and model a benchmark ran on. null: not known, e.g. no agent to ask. */
+export interface BenchConditions {
+  digest: string | null;
+  quantization: string | null;
+  parameter_size: string | null;
+  family: string | null;
+  format: string | null;
+  ollama_version: string | null;
+  agent_version: string | null;
+  dashboard_version: string;
+  platform: Platform | null;
+  /** the context Ollama loaded the model with, from /api/ps */
+  context: number | null;
+  /** Ollama settings that change speed or memory use; unset ones are left out. null without an agent */
+  env: Record<string, string> | null;
+  gpus: { name: string; mem_total_mib: number | null; driver: string }[] | null;
+  cpu_count: number | null;
+  mem_total: number | null;
+  /** other models loaded when it started: they share VRAM with the benchmarked one */
+  other_models: string[];
+}
+
+export interface BenchStat {
+  median: number;
+  min: number;
+  max: number;
+  /** coefficient of variation in percent (standard deviation / mean); null with fewer than two runs */
+  cv: number | null;
+}
+
+/** One case over all of its runs in the benchmark's mode. */
+export interface BenchCaseSummary {
+  case: BenchCase;
+  runs: number;
+  /** runs left out because the model wasn't in the state the mode asks for (e.g. something unloaded it) */
+  excluded: number;
+  tps: BenchStat | null;
+  prompt_tps: BenchStat | null;
+  ttft_ms: BenchStat | null;
+  load_ms: BenchStat | null;
+  prompt_tokens: number | null;
+  tokens: number | null;
+  /** the most VRAM the model used, and its split in the last run */
+  size_vram: number | null;
+  split: ModelSplit | null;
+}
+
+export interface BenchmarkInfo {
+  id: string;
+  /** benchmarks started together on several hosts share a batch */
+  batch: string;
+  instance: string;
+  /** the host's name when it ran, kept after the host is renamed or removed */
+  instance_name: string;
+  model: string;
+  state: JobState;
+  error: string | null;
+  started: number;
+  finished: number | null;
+  spec: BenchSpec;
+  conditions: BenchConditions | null;
+  summary: BenchCaseSummary[];
+  /** things that make the figures less comparable */
+  warnings: string[];
+  /** only in GET /api/benchmarks/{bid} */
+  runs?: BenchRun[];
+}
+
 export interface EnvState {
   platform?: Platform;
   managed: Record<string, string>;
@@ -496,4 +629,268 @@ export interface EnvState {
   external: Record<string, string>;
   /** Names the agent lets the dashboard set (a trailing * allows a prefix). Agents before 0.6.0 accept any name. */
   allowed?: string[];
+}
+
+// ============================================================================ audit log
+/** What the audit log records, grouped by the part before the dot (the Action filter's groups). */
+export const AUDIT_ACTIONS = {
+  "auth.login": "Signed in",
+  "auth.login_failed": "Failed sign-in",
+  "auth.password": "Changed own password",
+  "user.add": "Added user",
+  "user.role": "Changed role",
+  "user.reset": "Reset password",
+  "user.remove": "Removed user",
+  "token.create": "Created token",
+  "token.revoke": "Revoked token",
+  "host.add": "Added host",
+  "host.edit": "Edited host",
+  "host.remove": "Removed host",
+  "host.agent_https": "Switched agent to HTTPS",
+  "host.agent_key": "Accepted agent key",
+  "ollama.restart": "Restarted Ollama",
+  "ollama.gpu_fix": "Ran a GPU fix",
+  "env.change": "Changed environment",
+  "model.pull": "Pulled model",
+  "model.create": "Created model",
+  "model.copy": "Copied model",
+  "model.delete": "Deleted model",
+  "model.load": "Loaded model",
+  "model.unload": "Unloaded model",
+  "model.upload": "Uploaded a GGUF file",
+  "job.cancel": "Cancelled or cleared job",
+  "alert.rules": "Changed alert rules",
+  "alert.channels": "Changed alert channels",
+  "alert.silence": "Silenced alerts",
+  "alert.unsilence": "Ended a silence",
+  "benchmark.start": "Started benchmark",
+  "benchmark.cancel": "Cancelled benchmark",
+  "benchmark.delete": "Deleted benchmark",
+  "settings.client_names": "Renamed request clients",
+  "security.dismiss": "Dismissed a security check",
+  "security.undismiss": "Restored a security check",
+  "security.fix": "Fixed data file permissions",
+} as const;
+export type AuditAction = keyof typeof AUDIT_ACTIONS;
+
+export const AUDIT_GROUPS: Record<string, string> = {
+  auth: "Sign-in", user: "Users", token: "API tokens", host: "Hosts", ollama: "Ollama service", env: "Environment",
+  model: "Models", job: "Jobs", alert: "Alerts", benchmark: "Benchmarks", settings: "Settings", security: "Security",
+};
+
+/**
+ * One audit record. Never holds prompts, passwords, tokens or environment values: only names,
+ * which env keys changed and the like.
+ */
+export interface AuditEntry {
+  id: number;
+  /** unix seconds */
+  t: number;
+  /** who: null when the login is off (PADDOCK_AUTH=off) or a failed sign-in names no account */
+  user: string | null;
+  /** the API token the request came with, by name and id; null for a browser session */
+  credential: string | null;
+  credential_id: string | null;
+  /** the client address, as the brute-force guard sees it */
+  ip: string | null;
+  action: AuditAction;
+  /** host id and its name at the time, kept after the host is renamed or removed */
+  instance: string | null;
+  instance_name: string | null;
+  /** what was acted on: a model, user, token, rule… */
+  target: string | null;
+  detail: string;
+}
+
+// ============================================================================ fit estimates
+/** What a fit estimate needs to know about a model, from /api/show and /api/tags; see fitModel() in lib/fit.ts. */
+export interface FitModel {
+  name: string;
+  digest: string | null;
+  /** the model's files on disk (/api/tags size): weights, plus a projector for vision models. null when it isn't pulled */
+  weights: number | null;
+  architecture: string | null;
+  /** the context it was trained for */
+  max_context: number | null;
+  layers: number | null;
+  /** KV heads per layer; models can vary them, and layers without attention have 0 */
+  kv_heads: number[] | null;
+  heads: number | null;
+  key_length: number | null;
+  value_length: number | null;
+  embedding: number | null;
+  vocab: number | null;
+  /** sliding-window attention: the window, and how many layers use it (null: not known for this architecture) */
+  sliding: { window: number; layers: number | null } | null;
+  /** has state-space (recurrent) layers, whose memory doesn't follow the KV cache formula */
+  recurrent: boolean;
+  /** Modelfile parameters that change the estimate */
+  num_ctx: number | null;
+  num_gpu: number | null;
+  num_batch: number | null;
+  /** an Ollama cloud model: nothing runs on the host */
+  cloud: boolean;
+}
+
+/** What a fit estimate needs to know about a host; see fitHost() in lib/server.ts. */
+export interface FitHost {
+  id: string;
+  name: string;
+  /** bytes; other: VRAM held by processes other than Ollama. null: no agent stats, so the GPUs aren't known */
+  gpus: { index: number; name: string; total: number; other: number }[] | null;
+  /** bytes; available counts what Ollama's runners hold, since Ollama unloads models to make room */
+  ram: { total: number; available: number } | null;
+  /** Ollama's settings that change the estimate; null when the environment isn't known (no agent) */
+  env: {
+    kv_cache_type: string | null;
+    flash_attention: boolean | null;
+    num_parallel: number | null;
+    context_length: number | null;
+    gpu_overhead: number | null;
+  } | null;
+  /** other models loaded now */
+  loaded: { name: string; size: number; size_vram: number }[];
+}
+
+/** What /api/ps reported for the model once loaded at a context, under the settings settingsKey() names. */
+export interface FitMeasurement {
+  instance: string;
+  context: number;
+  settings: string;
+  size: number;
+  size_vram: number;
+  t: number;
+}
+
+export interface FitEstimate {
+  instance: string;
+  instance_name: string;
+  /** tokens per request; the KV cache holds this times the parallel requests */
+  context: number;
+  context_source: "requested" | "modelfile" | "env" | "default";
+  /** fits: likely fully in VRAM · offload: likely partly or fully on the CPU · insufficient: not enough VRAM and RAM ·
+   *  unknown: insufficient information · cloud: runs remotely, nothing to estimate */
+  verdict: "fits" | "offload" | "insufficient" | "unknown" | "cloud";
+  confidence: "high" | "medium" | "low" | null;
+  /** predicted bytes, as /api/ps would report the loaded model. total includes any calibration; the parts are the formula's */
+  total: number | null;
+  weights: number | null;
+  kv: number | null;
+  overhead: number | null;
+  /** the formula alone, before calibration */
+  formula_total: number | null;
+  /** expected share in VRAM, 0–100 */
+  gpu_pct: number | null;
+  placement: string | null;
+  /** VRAM the model could use on its GPU(s), bytes */
+  capacity: number | null;
+  /** the largest context likely to fit entirely in VRAM under the same assumptions; null when unknown */
+  max_gpu_context: number | null;
+  /** loaded models Ollama would unload to make room */
+  evicts: string[];
+  /** measured: /api/ps reported this context · fitted: a line through measurements at two or more contexts ·
+   *  offset: the formula shifted by one measurement */
+  calibration: { kind: "measured" | "fitted" | "offset"; points: { context: number; size: number }[] } | null;
+  summary: string;
+  assumptions: string[];
+}
+
+/** POST /api/instances/{id}/models/fit: the inputs, so the editor can estimate other contexts without asking again. */
+export interface FitResult {
+  model: FitModel;
+  /** host: installed there, read with /api/show · registry: not pulled, read from its registry's manifest and GGUF header ·
+   *  upload: a GGUF uploaded for a new model */
+  source: "host" | "registry" | "upload";
+  /** the requested host first */
+  hosts: FitHost[];
+  measurements: FitMeasurement[];
+  estimates: FitEstimate[];
+}
+
+// ============================================================================ security checks
+/** The instance id that security alerts and dismissals use for the dashboard itself. Host ids can't contain "@". */
+export const DASHBOARD_TARGET = "@dashboard";
+
+export type SecurityCheckId =
+  | "ollama_open" | "agent_http" | "agent_token"
+  | "default_password" | "dashboard_http" | "data_files" | "api_tokens";
+
+/** pass, fail, or unknown: this poll can't tell (host down, nothing seen yet). dismissed: failing, but someone said it's intended. */
+export type SecurityState = "pass" | "fail" | "unknown" | "dismissed";
+
+export interface SecurityDismissal {
+  /** a host id, or DASHBOARD_TARGET */
+  instance: string;
+  check: SecurityCheckId;
+  note: string;
+  user: string | null;
+  /** unix seconds */
+  t: number;
+}
+
+export interface SecurityCheck {
+  id: SecurityCheckId;
+  label: string;
+  state: SecurityState;
+  detail: string;
+  /**
+   * How to fix it: href, a dashboard page; doc, a page under docs/ with its anchor ("proxy.md#…"), which
+   * the browser links on GitHub for this release; action, a fix the dashboard applies itself (admins).
+   */
+  fix: { label: string; href?: string; doc?: string; action?: "switch_https" | "chmod_data" } | null;
+  dismissal: SecurityDismissal | null;
+}
+
+export interface SecurityTarget {
+  /** a host id, or DASHBOARD_TARGET */
+  instance: string;
+  name: string;
+  checks: SecurityCheck[];
+}
+
+export interface SecuritySummary {
+  /** failing checks that aren't dismissed, across the dashboard and every host */
+  failing: number;
+  dismissed: number;
+}
+
+// ============================================================================ model library (#30)
+/** A model in the Ollama library, from ollama.com's search page or the model's own page. */
+export interface LibraryModel {
+  /** what to pull: qwen3, or user/model for community models */
+  name: string;
+  /** its page on ollama.com: library/qwen3, user/model */
+  path: string;
+  description: string | null;
+  /** tools, vision, thinking, embedding, audio, cloud */
+  capabilities: string[];
+  /** parameter sizes it comes in: 8b, 0.6b, e4b, 8x7b */
+  sizes: string[];
+  pulls: number | null;
+  tag_count: number | null;
+  /** as the site words it: "October 30, 2026" */
+  updated: string | null;
+}
+
+export interface LibraryTag {
+  /** the full name to pull: qwen3:8b */
+  name: string;
+  tag: string;
+  /** the first 12 hex digits of the manifest digest: tags with the same one are aliases */
+  digest: string;
+  /** bytes, as rounded on the site; null for cloud tags */
+  size: number | null;
+  /** tokens */
+  context: number | null;
+  /** text, image, audio */
+  input: string[];
+  /** from the tag name, or a tag with the same digest */
+  quantization: string | null;
+  cloud: boolean;
+  updated: string | null;
+}
+
+export interface LibrarySearch {
+  models: LibraryModel[];
+  has_more: boolean;
 }

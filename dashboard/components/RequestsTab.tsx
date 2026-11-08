@@ -29,7 +29,7 @@ const errPct = (count: number, errors: number) => (count ? `${((errors / count) 
 
 /** Requests to Ollama on this host, read from its log by the agent: who called, what, how fast, and what failed. */
 export function RequestsTab({ st }: { st: InstanceSnapshot }) {
-  const { toast } = usePaddock();
+  const { toast, readOnly } = usePaddock();
   const [range, setRange] = useState<Range>("24h");
   const [data, setData] = useState<RequestSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -136,7 +136,7 @@ export function RequestsTab({ st }: { st: InstanceSnapshot }) {
                           <td className="num">{fmtMs(x.avg_ms)}</td>
                           <td className="num">{fmtMs(x.max_ms)}</td>
                           <td className="mono">{whenText(x.last)}</td>
-                          <td><div className="actions">{naming?.client !== x.client && (
+                          <td><div className="actions">{naming?.client !== x.client && !readOnly && (
                             <button className="btn sm" onClick={() => setNaming({ client: x.client, name: x.name ?? "" })}>{x.name ? "Rename" : "Name"}</button>
                           )}</div></td>
                         </tr>

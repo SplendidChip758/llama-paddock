@@ -14,7 +14,9 @@
 # env file). Updated installs keep it on until you switch the dashboard to https://.
 #
 # Options (environment variables):
-#   PADDOCK_VERSION      latest (default) | v1.2.3 | main  — which agent version to fetch
+#   PADDOCK_VERSION      latest (default; "stable" is the same) | dev | v1.2.3 | main  — which agent
+#                        version to fetch. "dev" is the newest release including prereleases, and
+#                        update-llama-paddock-agent then stays on prereleases
 #   PADDOCK_REPO         GitHub repo (default: SplendidChip758/llama-paddock)
 #   PADDOCK_BRANCH       branch used when there is no release yet (default: main)
 #   PADDOCK_AGENT_TOKEN  reuse an existing token instead of generating one
@@ -24,6 +26,8 @@
 #                        asked when interactive, unattended runs leave it alone unless set
 #   PADDOCK_CTID         Proxmox: container to install into (skips the prompt)
 #   PADDOCK_LOCAL=1      install here even on a Proxmox host
+#   PADDOCK_FORCE=1      reinstall even if the installed release is already the one asked for
+#                        (an update otherwise stops with "already on the latest version")
 #   PADDOCK_YES=1        non-interactive
 #   PADDOCK_UNINSTALL=1  remove the agent instead (Ollama and its settings are left alone)
 set -euo pipefail
@@ -31,6 +35,7 @@ set -euo pipefail
 REPO="${PADDOCK_REPO:-SplendidChip758/llama-paddock}"
 BRANCH="${PADDOCK_BRANCH:-main}"
 VERSION="${PADDOCK_VERSION:-latest}"
+[[ $VERSION == stable ]] && VERSION=latest
 AGENT_PORT="${PADDOCK_AGENT_PORT:-11435}"
 SELF_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/install/agent.sh"
 PREFIX=/opt/llama-paddock-agent
@@ -40,6 +45,12 @@ UNIT_FILE=/etc/systemd/system/llama-paddock-agent.service
 TLS_KEY=/etc/llama-paddock-agent.key
 TLS_CERT=/etc/llama-paddock-agent.crt
 NODE_MIN="18.15"
+
+# A prerelease channel or tag (dev, v1.2.0-dev.3)
+is_prerelease() { [[ $VERSION == dev || $VERSION == v*-* ]]; }
+# What update-llama-paddock-agent installs by default: stay on the channel this was installed from
+CHANNEL=latest
+is_prerelease && CHANNEL=dev
 
 init_colors() {
   if [[ -t 1 ]]; then
@@ -179,6 +190,57 @@ ensure_node() {
   msg_ok "Node.js $(node -p 'process.versions.node')"
 }
 
+# resolve_release_tag — print the tag $VERSION stands for (empty if GitHub has none):
+# latest = newest stable release, dev = newest release including prereleases
+resolve_release_tag() {
+  local api="https://api.github.com/repos/${REPO}/releases"
+  if [[ $VERSION == dev ]]; then api+="?per_page=30"; else api+="/latest"; fi
+  curl -fsSL -H "Accept: application/vnd.github+json" "$api" 2>/dev/null | node -e '
+    let s = "";
+    process.stdin.on("data", (d) => (s += d)).on("end", () => {
+      try {
+        let r = JSON.parse(s);
+        const ver = (t) => {
+          const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(t || "");
+          return m ? [+m[1], +m[2], +m[3], m[4] ? m[4].split(".") : null] : null;
+        };
+        const cmp = (a, b) => {
+          for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+          if (!a[3] || !b[3]) return (a[3] ? -1 : 0) - (b[3] ? -1 : 0);
+          for (let i = 0; i < Math.max(a[3].length, b[3].length); i++) {
+            const x = a[3][i], y = b[3][i];
+            if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+            if (x === y) continue;
+            return /^\d+$/.test(x) && /^\d+$/.test(y) ? x - y : x < y ? -1 : 1;
+          }
+          return 0;
+        };
+        // the list is not reliably newest first, so pick the highest version
+        if (Array.isArray(r)) {
+          r = r.filter((x) => !x.draft && ver(x.tag_name)).sort((x, y) => cmp(ver(y.tag_name), ver(x.tag_name)))[0] || {};
+        }
+        console.log(r.tag_name || "");
+      } catch { console.log(""); }
+    });'
+}
+
+# True when the agent on disk already is the release $VERSION stands for, so an update has
+# nothing to do. Never for a branch, a local checkout or a stopped service (re-running repairs
+# it), nor with PADDOCK_FORCE set
+agent_is_current() {
+  [[ -z ${PADDOCK_FORCE-} && -f $PREFIX/paddock-agent.mjs && -f $PREFIX/VERSION ]] || return 1
+  systemctl is-active --quiet llama-paddock-agent || return 1
+  # run from a clone: fetch_agent installs those files, not a release
+  if [[ -f ${BASH_SOURCE[0]-} && -f "$(dirname "${BASH_SOURCE[0]}")/../agent/linux/paddock-agent.mjs" ]]; then return 1; fi
+  local want="$VERSION"
+  case $VERSION in
+    latest|dev) want=$(resolve_release_tag) ;;
+    v*) ;;
+    *) return 1 ;;
+  esac
+  [[ -n $want && $want == "$(cat "$PREFIX/VERSION")" ]]
+}
+
 # Where to get the agent files: a local checkout next to this script, or the repo at a ref
 fetch_agent() {
   local tmp="$1"
@@ -191,10 +253,9 @@ fetch_agent() {
     return
   fi
   local ref="$VERSION"
-  if [[ $ref == latest ]]; then
-    ref=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
-      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).tag_name||"")}catch{console.log("")}})') || ref=""
-    [[ -n $ref ]] || { ref="$BRANCH"; msg_warn "No published release yet — using the ${BRANCH} branch"; }
+  if [[ $ref == latest || $ref == dev ]]; then
+    ref=$(resolve_release_tag)
+    [[ -n $ref ]] || { ref="$BRANCH"; msg_warn "No published release found — using the ${BRANCH} branch"; }
   fi
   local base="https://raw.githubusercontent.com/${REPO}/${ref}/agent/linux"
   curl -fsSL "$base/paddock-agent.mjs" -o "$tmp/paddock-agent.mjs" || die "could not download the agent from $base"
@@ -236,6 +297,18 @@ write_uninstaller() {
 
 # The agent's address on this machine: https:// unless it can't serve HTTPS (no key, or an old agent).
 # -k: it's the agent's own self-signed certificate, on the loopback interface.
+# Also run when an update finds nothing new, so a channel switch still takes effect
+write_updater() {
+  cat > /usr/local/bin/update-llama-paddock-agent <<EOF
+#!/usr/bin/env bash
+# Update the llama-paddock agent to the newest ${CHANNEL} release.
+# Pass "stable", "dev" (prereleases) or a tag like v1.2.0 to switch channel or pin one
+export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
+exec bash -c "\$(curl -fsSL ${SELF_URL})"
+EOF
+  chmod 755 /usr/local/bin/update-llama-paddock-agent
+}
+
 agent_local_url() {
   local port; port=$(sed -n 's/^PADDOCK_AGENT_PORT=//p' "$ENV_FILE")
   if curl -fsSk -o /dev/null "https://127.0.0.1:${port}/health" 2>/dev/null; then
@@ -285,6 +358,12 @@ local_install() {
   [[ -d /run/systemd/system ]] || die "systemd is required (this agent manages ollama.service)"
   command -v curl >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates >/dev/null; }
   ensure_node
+  if agent_is_current; then
+    write_updater
+    msg_ok "Agent is already on the latest version ($(cat "$PREFIX/VERSION")), nothing to update"
+    echo "   To reinstall it anyway:  PADDOCK_FORCE=1 update-llama-paddock-agent"
+    return
+  fi
 
   if ! systemctl list-unit-files ollama.service &>/dev/null || ! systemctl cat ollama.service &>/dev/null; then
     msg_warn "ollama.service not found — the agent will still report stats, but env editing/restart need Ollama installed as a systemd service"
@@ -296,6 +375,7 @@ local_install() {
   trap 'rm -rf "${TMP_DIR:-}"' EXIT
   local tmp="$TMP_DIR"
   fetch_agent "$tmp"
+  if is_prerelease; then msg_warn "Installing a prerelease agent (${AGENT_REF}): for testing, may be unstable. update-llama-paddock-agent stays on prereleases; 'update-llama-paddock-agent stable' goes back."; fi
 
   mkdir -p "$PREFIX"
   install -m 0755 "$tmp/paddock-agent.mjs" "$PREFIX/paddock-agent.mjs"
@@ -339,13 +419,7 @@ EOF
   sed "s#@NODE@#$(command -v node)#" "$tmp/llama-paddock-agent.service" > "$UNIT_FILE"
   chmod 0644 "$UNIT_FILE"
 
-  cat > /usr/local/bin/update-llama-paddock-agent <<EOF
-#!/usr/bin/env bash
-# Update the llama-paddock agent (pass a tag like v1.2.0 to pin one)
-export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-latest}"
-exec bash -c "\$(curl -fsSL ${SELF_URL})"
-EOF
-  chmod 755 /usr/local/bin/update-llama-paddock-agent
+  write_updater
   write_uninstaller
 
   systemctl daemon-reload

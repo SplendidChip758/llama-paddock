@@ -1,22 +1,22 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/logo/banner-dark.svg">
-    <img alt="llama-paddock" src="docs/logo/banner-light.svg" width="560">
+    <img alt="llama-paddock" src="docs/logo/banner-light.svg" width="418">
   </picture>
 </p>
 
 <p align="center">
-  <a href="https://github.com/SplendidChip758/llama-paddock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/SplendidChip758/llama-paddock?style=flat-square&color=c8a04a&label=release"></a>
-  <a href="https://github.com/SplendidChip758/llama-paddock/releases"><img alt="Latest prerelease" src="https://img.shields.io/github/v/release/SplendidChip758/llama-paddock?include_prereleases&sort=semver&filter=*-dev*&style=flat-square&color=8a6d2f&label=prerelease"></a>
-  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-c8a04a?style=flat-square"></a>
+  <a href="https://github.com/SplendidChip758/llama-paddock/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/SplendidChip758/llama-paddock?style=flat-square&color=0b7f62&label=release"></a>
+  <a href="https://github.com/SplendidChip758/llama-paddock/releases"><img alt="Latest prerelease" src="https://img.shields.io/github/v/release/SplendidChip758/llama-paddock?include_prereleases&sort=semver&filter=*-dev*&style=flat-square&color=2563eb&label=prerelease"></a>
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-0b7f62?style=flat-square"></a>
   <a href="https://github.com/SplendidChip758/llama-paddock/commits"><img alt="Last commit" src="https://img.shields.io/github/last-commit/SplendidChip758/llama-paddock?style=flat-square"></a>
   <a href="https://github.com/SplendidChip758/llama-paddock/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/SplendidChip758/llama-paddock?style=flat-square"></a>
   <br>
-  <a href="https://ollama.com"><img alt="Ollama" src="https://img.shields.io/badge/Ollama-compatible-1b1814?style=flat-square&logo=ollama&logoColor=white"></a>
-  <a href="https://nextjs.org"><img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-1b1814?style=flat-square&logo=nextdotjs&logoColor=white"></a>
-  <a href="docs/agent-linux.md"><img alt="Node.js" src="https://img.shields.io/badge/agent-Node.js%20%E2%89%A518.15-1b1814?style=flat-square&logo=nodedotjs&logoColor=white"></a>
-  <a href="docs/architecture.md"><img alt="Platforms" src="https://img.shields.io/badge/hosts-Linux%20%7C%20Windows-1b1814?style=flat-square"></a>
-  <a href="docs/installation.md#docker"><img alt="Docker" src="https://img.shields.io/badge/dashboard-Docker-1b1814?style=flat-square&logo=docker&logoColor=white"></a>
+  <a href="https://ollama.com"><img alt="Ollama" src="https://img.shields.io/badge/Ollama-compatible-151d29?style=flat-square&logo=ollama&logoColor=white"></a>
+  <a href="https://nextjs.org"><img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-151d29?style=flat-square&logo=nextdotjs&logoColor=white"></a>
+  <a href="docs/agent-linux.md"><img alt="Node.js" src="https://img.shields.io/badge/agent-Node.js%20%E2%89%A518.15-151d29?style=flat-square&logo=nodedotjs&logoColor=white"></a>
+  <a href="docs/architecture.md"><img alt="Platforms" src="https://img.shields.io/badge/hosts-Linux%20%7C%20Windows-151d29?style=flat-square"></a>
+  <a href="docs/installation.md#docker"><img alt="Docker" src="https://img.shields.io/badge/dashboard-Docker-151d29?style=flat-square&logo=docker&logoColor=white"></a>
 </p>
 
 <p align="center">
@@ -34,7 +34,10 @@ A self-hosted dashboard for monitoring and managing a fleet of Ollama hosts on L
 - **Manage models:** pull with live progress, load, unload, copy, delete, and edit parameters or system prompts.
 - **Manage hosts:** edit Ollama's environment, restart it, and tail logs through a lightweight agent.
 
-![Fleet overview](docs/images/overview.png)
+<picture>
+  <source media="(prefers-color-scheme: light)" srcset="docs/images/overview-light.png">
+  <img alt="Fleet overview with three hosts, their GPUs and loaded models" src="docs/images/overview.png">
+</picture>
 
 The dashboard connects directly to Ollama for model management. Add the optional agent on each host for GPU/host stats and service controls. See [how it works](docs/architecture.md).
 

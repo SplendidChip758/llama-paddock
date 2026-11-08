@@ -32,19 +32,78 @@ CPU placement and a smaller context can be intentional. These readings help inve
 
 Pull by name (`qwen3:8b`, `gemma3:12b`, …). Progress shows in the Jobs drawer, and the list refreshes when a pull finishes.
 
+*Browse library* searches the [Ollama library](https://ollama.com/library) without leaving the dashboard:
+
+- Search by name or description, and filter by capability (tools, vision, thinking, embedding, audio, cloud), parameter count and quantization. Sort by popularity or by newest.
+- Open a model to see every tag with its size, context window, input types and quantization. Aliases such as `latest` show the quantization of the tag they point to. Cloud tags are marked and have no size.
+- *Pull* fetches a tag to this host, or to every host ticked under *Pull to*.
+- *Fit on* estimates every tag of an opened model on a host at a context, with the same [fit estimate](fit-estimates.md) as the model editor: likely fits, likely CPU offload (with the share in VRAM) or insufficient capacity, and how confident it is. On a host with several GPUs, pick one to see what fits on it alone. *Hide what doesn't fit* hides the tags likely to offload or not fit; tags without enough information to estimate stay visible as *insufficient information*.
+- Where that host has [benchmarked](#benchmarks) the same model build (same digest), *Speed* shows the benchmark's median generation rate. Hover it for the conditions: date, case, runs, warm or cold, context, variation and GPU share.
+
+Estimating reads each tag's manifest from the registry, and the model header once per model size (its quantizations share one), so the first estimate of a large model takes a few seconds.
+
+Ollama has no search API, so the dashboard reads ollama.com's pages and caches them (searches for 10 minutes, tag lists for an hour). If ollama.com changes its pages and they can't be read, the browser says so; pulling by name keeps working. `model_library: false` in [`config.yaml`](configuration.md) turns the browser off.
+
 A loaded model shows a `loaded` chip with its [GPU/CPU split](#gpucpu-split), such as `loaded · 100% GPU`. Ollama cloud models (`gpt-oss:120b-cloud`, `gemma4:cloud`, …) get a dashed **cloud** badge, and no size, since they take no space on the host.
 
 ![Pulling a model](images/models-pull.png)
 
+*New model* opens the same editor empty. Start from:
+
+- **a model on this host**: the new model is layered on it, so no weights are copied,
+- **the library or Hugging Face**: a library tag such as `qwen3:8b`, or a GGUF on Hugging Face as `hf.co/<user>/<repo>:<quantization>`. It's pulled to the host first if it isn't there, in the same job,
+- **a GGUF file** from your computer. It uploads through the dashboard in 8 MB chunks; the dashboard keeps it in its data directory until Ollama has it, then deletes its copy, so it needs that much free space for a moment.
+
+Then name it and set its parameters, system prompt and template. *Presets* (Coding, Factual, Chat, Creative, Long context) fill in common sampling settings; each only changes the parameters it lists. The [fit estimate](fit-estimates.md) shows whether it fits before anything is pulled or created: for a library model it reads the registry, for an uploaded file its GGUF header.
+
 *Edit* opens the model editor:
 
 - Context presets from 4K up to the model's native maximum (read from GGUF metadata), or type any `num_ctx`
-- Add or remove any parameter (`temperature`, `top_p`, `num_gpu`, `stop`, …) and change the system prompt
+- A [fit estimate](fit-estimates.md) that follows the context: whether the model fits in VRAM on this host, and the largest context that does
+- Add or remove any parameter (`temperature`, `top_p`, `num_gpu`, `stop`, …), apply a preset, and change the system prompt and the template
 - **Save as** defaults to a new name such as `hermes3:8b-ctx32k`. Ollama layers it on the original model, so no weights are duplicated. Using the original name overwrites it in place; a later `ollama pull` of a registry model resets that.
 
-Under the hood this calls Ollama's `POST /api/create` with `from` and `parameters`, the API equivalent of a `FROM` + `PARAMETER` Modelfile.
+Under the hood this calls Ollama's `POST /api/create` with `from` (or `files`, for an uploaded GGUF), `parameters`, `system` and `template`, the API equivalent of a `FROM` + `PARAMETER` + `SYSTEM` + `TEMPLATE` Modelfile.
 
 ![Model editor](images/model-editor.png)
+
+## Test prompt
+
+**Prompt** in the header (or *Prompt* next to a model on the Models tab) opens a chat with a model on a host. The answer streams in as the host generates it, and each reply ends with how fast it came:
+
+| Figure | Meaning |
+|---|---|
+| Generation | Tokens per second while writing the answer, from Ollama's `eval_count` and `eval_duration` |
+| First token | From sending the prompt to the first word of the answer, timed by the dashboard. It includes loading the model and reading the prompt, so it is what a user of the host waits for |
+| Load | Time Ollama spent loading the model for this request. Near zero when the model was already loaded |
+| Prompt | Tokens per second while reading the prompt (`prompt_eval_count` and `prompt_eval_duration`). Ollama caches a conversation's earlier turns, so later turns read fewer tokens |
+
+*Compare* adds a second column with its own host and model, and each prompt goes to both. Columns on different hosts run at the same time. Two columns on the same host take turns, so neither answer is slowed by the other. *Stop* cancels the answer on the host as well. Changing a column's host or model starts a new conversation in it.
+
+A prompt loads the model like any other request, with the host's usual keep-alive, so it may unload another model that doesn't fit beside it. Running prompts needs an admin account.
+
+## Benchmarks
+
+**Benchmarks** in the header runs a fixed set of prompts against a model, several times, and keeps the results so you can compare hosts, models and quantizations, or one host over time. Pick a model, one or more hosts that have it (*All … with it* picks every host that has the model), the context, the number of repetitions and the model state, then *Run*. Each host's benchmark shows in the Jobs drawer while it runs, and hosts run at the same time.
+
+The prompt set has three prompts:
+
+| Prompt | Measures |
+|---|---|
+| Short prompt | A short question: time to first token and generation speed |
+| Long context | A generated inventory list of about 60% of the context (at most about 8,000 tokens) and a question about it: how fast the host reads a long prompt |
+| Long generation | A request to keep counting, cut off at 512 tokens: generation speed over a long answer |
+
+Every run sends the same options: the chosen context as `num_ctx`, temperature 0 and a fixed seed, so every host runs the model at the same size. Each prompt starts with a line unique to the run, because Ollama reuses the cached start of a prompt it has just read and would otherwise skip most of a repeated one.
+
+- **Warm** loads the model first (not timed), then times the answers: what a user of a busy host sees.
+- **Cold** unloads the model before every run, so each one includes loading it. The model file may still be in the host's disk cache, so this measures loading into memory, not reading from a cold disk.
+
+Each run records the figures of a [test prompt](#test-prompt), the model's VRAM and GPU/CPU split afterwards, and whether the model was loaded just before it. A run that found the model in the wrong state (for example, something else unloaded it during a warm benchmark) is shown but left out of the figures. The table shows the median of the runs; hover a figure for its range, and `±` is how much the runs varied.
+
+Click a result to open it, with its speeds, conditions and warnings. To compare results side by side, tick two or more and click *Compare*. Either opens in a window over the page; *Close*, Escape or a click outside it closes it. When comparing, the best figure in each row (the highest rate or the shortest time) is in bold green. Below the speeds are the conditions each ran under: model digest and quantization, prompt set, mode, context, Ollama, agent and dashboard versions, GPUs and driver, CPUs and RAM, the Ollama settings that change speed (flash attention, KV cache type, parallel requests and others) and any other models that were loaded. Rows that differ are highlighted, and a note warns when the model, quantization, prompt set, mode or context differ, since then the speeds don't measure the same thing. Each result also lists its warnings. *Show runs* lists every run.
+
+A benchmark keeps the host busy, and other requests to the host during it slow both down: run it when the host is otherwise idle. Results are saved in `paddock.db` until you delete them, also after the host is removed. To delete results, open one and choose **Delete result**, or tick several and choose **Delete** next to **Compare**. A benchmark running when the dashboard restarts is marked interrupted and keeps its finished runs. Running a benchmark needs an admin account; viewers can see and compare the results. Without an agent on a host, its GPUs, driver and Ollama settings aren't recorded.
 
 ## GPU/CPU split
 
@@ -104,6 +163,15 @@ Metric history and job state are stored in `paddock.db` in the [data directory](
 
 Alert rules are checked against every poll; see [Alerts](alerts.md).
 
-Pulls and model creation run in the background and stay visible in the Jobs drawer across page refreshes. After a dashboard restart, running pulls resume if their host still exists. Running creates are marked interrupted; check the model list before trying again.
+Pulls and model creation run in the background and stay visible in the Jobs drawer across page refreshes. After a dashboard restart, running pulls resume if their host still exists. Running creates and benchmarks are marked interrupted; check the model list before trying a create again. A benchmark keeps the runs it finished.
 
 Removing a parameter in the model editor may not remove a value inherited from the base model. Set it explicitly to the value you want.
+
+## Theme
+
+The **◐** button in the header picks the theme:
+
+- **Mode:** **System** follows your operating system's light or dark setting. **Light** and **Dark** fix it.
+- **Theme:** **Paddock** (the default, teal and blue), **Classic** (the warm brown and gold of earlier versions) or **Phosphor** (green and amber on near-black, like a terminal).
+
+The choice is remembered in your browser, not your account, so each browser and device keeps its own.

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api, fmtDur, fmtMiB, pct } from "@/lib/format";
@@ -20,7 +21,7 @@ interface UptimeBrief {
 const UPTIME_REFRESH_MS = 60_000;
 
 export function Overview() {
-  const { instances, loaded, pollInterval } = usePaddock();
+  const { instances, loaded, pollInterval, readOnly } = usePaddock();
   const [adding, setAdding] = useState(false);
   const [uptime, setUptime] = useState<Record<string, UptimeBrief>>({});
   useEffect(() => {
@@ -35,12 +36,13 @@ export function Overview() {
   if (!instances.length) {
     return (
       <div className="welcome card">
-        <h1>Add your first Ollama host</h1>
+        <h1>{readOnly ? "No hosts yet" : "Add your first Ollama host"}</h1>
         <p className="sub">
-          Point the dashboard at an Ollama server. Install the agent on that host as well for GPU and host stats, environment
-          editing, restart and logs.
+          {readOnly
+            ? "An admin can add Ollama hosts to the dashboard. They show up here once they have."
+            : "Point the dashboard at an Ollama server. Install the agent on that host as well for GPU and host stats, environment editing, restart and logs."}
         </p>
-        <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>
+        {!readOnly && <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>}
         {editor}
       </div>
     );
@@ -61,10 +63,11 @@ export function Overview() {
             {instances.length} instance{instances.length === 1 ? "" : "s"} · refreshing every {pollInterval}s
           </div>
         </div>
-        <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>
+        {!readOnly && <button className="btn primary" onClick={() => setAdding(true)}>Add host</button>}
       </div>
       {editor}
       <FleetHttpsOffer instances={instances} />
+      <SecurityBadge />
       <div className="stats" style={{ marginBottom: 18 }}>
         <Stat k="Online" v={instances.filter((s) => s.ollama_ok).length} unit={`/ ${instances.length}`} />
         <Stat k="GPUs" v={gpus.length} />
@@ -76,6 +79,19 @@ export function Overview() {
         {instances.map((st) => <InstCard key={st.id} st={st} uptime={uptime[st.id]} />)}
       </div>
     </>
+  );
+}
+
+/** The security checks in one line, linking to the Security page; quiet while everything passes. */
+function SecurityBadge() {
+  const { security } = usePaddock();
+  if (!security?.failing) return null;
+  const n = security.failing;
+  return (
+    <Link href="/security" className="notice warn row" style={{ display: "flex", gap: 10 }}>
+      <span className="chip bad">{n} security check{n === 1 ? "" : "s"} failing</span>
+      <span className="grow">Something leaves a host or the dashboard exposed. Open Security to see what and how to fix it.</span>
+    </Link>
   );
 }
 

@@ -1,20 +1,24 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { ago, api, fmtBytes, instPath } from "@/lib/format";
 import type { InstanceSnapshot, TagModel } from "@/lib/types";
 import { usePaddock } from "./PaddockProvider";
 import { JobLine } from "./JobsDrawer";
+import { LibraryBrowser } from "./LibraryBrowser";
 import { ModelEditor } from "./ModelEditor";
 import { CloudBadge, SplitChip, SplitHint } from "./ui";
 
 export function ModelsTab({ st }: { st: InstanceSnapshot }) {
-  const { toast, jobs, setJobsOpen, refreshJobs, jobsDoneTick } = usePaddock();
+  const { toast, jobs, setJobsOpen, refreshJobs, jobsDoneTick, readOnly } = usePaddock();
   const [models, setModels] = useState<TagModel[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pullName, setPullName] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  const [browsing, setBrowsing] = useState(false);
+  const [creating, setCreating] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -78,18 +82,20 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
 
   return (
     <>
-      <div className="card" style={{ marginBottom: 18 }}>
-        <div className="card-head">
-          <h3>Pull a model</h3>
-          <a className="sub" href="https://ollama.com/library" target="_blank" rel="noopener">browse library ↗</a>
+      {!readOnly && (
+        <div className="card" style={{ marginBottom: 18 }}>
+          <div className="card-head">
+            <h3>Pull a model</h3>
+            <button className="btn sm" onClick={() => setBrowsing(true)}>Browse library</button>
+          </div>
+          <form className="row" onSubmit={pull}>
+            <input className="grow" type="text" value={pullName} onChange={(e) => setPullName(e.target.value)}
+              placeholder="e.g. qwen3:8b, hermes3:8b, llama3.2:3b-instruct-q8_0" autoComplete="off" />
+            <button className="btn primary" type="submit">Pull</button>
+          </form>
+          {running.length > 0 && <div style={{ marginTop: 10 }}>{running.map((j) => <JobLine key={j.id} j={j} />)}</div>}
         </div>
-        <form className="row" onSubmit={pull}>
-          <input className="grow" type="text" value={pullName} onChange={(e) => setPullName(e.target.value)}
-            placeholder="e.g. qwen3:8b, hermes3:8b, llama3.2:3b-instruct-q8_0" autoComplete="off" />
-          <button className="btn primary" type="submit">Pull</button>
-        </form>
-        {running.length > 0 && <div style={{ marginTop: 10 }}>{running.map((j) => <JobLine key={j.id} j={j} />)}</div>}
-      </div>
+      )}
 
       {error && <div className="notice bad">{error}</div>}
 
@@ -98,7 +104,10 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
           <h3>
             {models?.length ?? "…"} models <span className="faint" style={{ fontWeight: 400 }}>· {fmtBytes(total)} on disk</span>
           </h3>
-          <button className="ghost sm" onClick={load}>Refresh</button>
+          <div className="row" style={{ gap: 6 }}>
+            {!readOnly && <button className="btn sm" onClick={() => setCreating(true)}>New model</button>}
+            <button className="ghost sm" onClick={load}>Refresh</button>
+          </div>
         </div>
         {models === null ? (
           <div className="empty">Loading models…</div>
@@ -127,7 +136,8 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
                       <td className="r num">{m.cloud ? "–" : fmtBytes(m.size)}</td>
                       <td className="faint">{ago(m.modified_at)}</td>
                       <td>
-                        <div className="actions">
+                        {!readOnly && <div className="actions">
+                          <Link className="btn sm" href={`/prompt?host=${encodeURIComponent(st.id)}&model=${encodeURIComponent(m.name)}`}>Prompt</Link>
                           <button className="btn sm" onClick={() => setEditing(m.name)}>Edit</button>
                           {loaded.has(m.name) ? (
                             <button className="btn sm" disabled={busy === m.name} onClick={() => act("unload", m.name)}>Unload</button>
@@ -138,7 +148,7 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
                           )}
                           <button className="ghost sm" onClick={() => act("copy", m.name)}>Copy</button>
                           <button className="danger sm" onClick={() => act("delete", m.name)}>Delete</button>
-                        </div>
+                        </div>}
                       </td>
                     </tr>
                   );
@@ -148,6 +158,8 @@ export function ModelsTab({ st }: { st: InstanceSnapshot }) {
           </div>
         )}
       </div>
+      {creating && <ModelEditor instanceId={st.id} model={null} onClose={() => setCreating(false)} />}
+      {browsing && <LibraryBrowser instanceId={st.id} onClose={() => setBrowsing(false)} />}
       {editing && <ModelEditor instanceId={st.id} model={editing} onClose={() => setEditing(null)} key={editing} />}
     </>
   );

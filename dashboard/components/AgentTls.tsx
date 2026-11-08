@@ -43,7 +43,7 @@ function useSwitch() {
 
 /** The agent presented a key other than the pinned one: explain, and let an admin accept it. */
 export function AgentKeyNotice({ st }: { st: InstanceSnapshot }) {
-  const { refreshInstances, toast } = usePaddock();
+  const { refreshInstances, toast, readOnly } = usePaddock();
   const [busy, setBusy] = useState(false);
   const presented = st.agent_key_changed;
   if (!presented) return null;
@@ -75,7 +75,7 @@ export function AgentKeyNotice({ st }: { st: InstanceSnapshot }) {
       ) : (
         <div className="row">
           <span className="grow">If you replaced the agent&apos;s key, compare the presented key with the installer&apos;s output.</span>
-          <button className="btn" onClick={accept} disabled={busy}>{busy ? "Accepting…" : "Accept new key"}</button>
+          {!readOnly && <button className="btn" onClick={accept} disabled={busy}>{busy ? "Accepting…" : "Accept new key"}</button>}
         </div>
       )}
     </div>
@@ -84,6 +84,7 @@ export function AgentKeyNotice({ st }: { st: InstanceSnapshot }) {
 
 /** One host's agent is on http:// but supports HTTPS. */
 export function HttpsOffer({ st }: { st: InstanceSnapshot }) {
+  const { readOnly } = usePaddock();
   const [busy, run] = useSwitch();
   if (!canSwitch(st)) return null;
   return (
@@ -93,7 +94,7 @@ export function HttpsOffer({ st }: { st: InstanceSnapshot }) {
           The connection to the agent isn&apos;t encrypted, so its token crosses the network in plain text. The agent supports
           HTTPS with the key <span className="mono">{st.agent_https_fingerprint}</span>.
         </span>
-        {st.source === "ui" && (
+        {st.source === "ui" && !readOnly && (
           <button className="btn" onClick={() => run([st])} disabled={busy}>{busy ? "Switching…" : "Switch to HTTPS"}</button>
         )}
       </div>
@@ -109,6 +110,7 @@ export function HttpsOffer({ st }: { st: InstanceSnapshot }) {
 
 /** The overview's offer to switch every agent that supports HTTPS at once. */
 export function FleetHttpsOffer({ instances }: { instances: InstanceSnapshot[] }) {
+  const { readOnly } = usePaddock();
   const [busy, run] = useSwitch();
   const hosts = instances.filter((s) => canSwitch(s) && s.source === "ui");
   if (!hosts.length) return null;
@@ -118,9 +120,11 @@ export function FleetHttpsOffer({ instances }: { instances: InstanceSnapshot[] }
         {hosts.length === 1 ? `${hosts[0].name}'s agent supports` : `${hosts.length} agents support`} HTTPS but{" "}
         {hosts.length === 1 ? "is" : "are"} connected over plain HTTP, so the agent token crosses the network unencrypted.
       </span>
-      <button className="btn" onClick={() => run(hosts)} disabled={busy}>
-        {busy ? "Switching…" : hosts.length === 1 ? "Switch to HTTPS" : "Switch all to HTTPS"}
-      </button>
+      {!readOnly && (
+        <button className="btn" onClick={() => run(hosts)} disabled={busy}>
+          {busy ? "Switching…" : hosts.length === 1 ? "Switch to HTTPS" : "Switch all to HTTPS"}
+        </button>
+      )}
     </div>
   );
 }

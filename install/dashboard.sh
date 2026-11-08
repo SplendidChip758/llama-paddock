@@ -10,8 +10,9 @@
 # PADDOCK_UNINSTALL=1 removes it again (on a Proxmox host: destroys the dashboard CT).
 #
 # Options (environment variables):
-#   PADDOCK_VERSION   latest (default) | dev | v1.2.3 | source  — "dev" is the newest release
-#                     including prereleases (see dashboard-dev.sh); "source" builds PADDOCK_BRANCH
+#   PADDOCK_VERSION   latest (default; "stable" is the same) | dev | v1.2.3 | source  — "dev" is the
+#                     newest release including prereleases (see dashboard-dev.sh); "source" builds
+#                     PADDOCK_BRANCH
 #   PADDOCK_BRANCH    git branch for source builds and helper files (default: main)
 #   PADDOCK_REPO      GitHub repo (default: SplendidChip758/llama-paddock)
 #   PADDOCK_PORT      port to listen on (default: 8080)
@@ -19,6 +20,8 @@
 #   PADDOCK_YES=1     non-interactive: accept all defaults
 #   PADDOCK_TARBALL   path to a prebuilt dashboard tarball (offline install)
 #   PADDOCK_SOURCE_DIR path to a local checkout to build from
+#   PADDOCK_FORCE=1   reinstall even if the installed release is already the one asked for
+#                     (an update otherwise stops with "already on the latest version")
 #   PADDOCK_TUI=0     plain text prompts instead of whiptail dialogs
 #   PADDOCK_UNINSTALL=1  remove the dashboard instead (same as uninstall-llama-paddock)
 #   PADDOCK_PURGE=1   with PADDOCK_UNINSTALL: also delete config, saved hosts and login
@@ -28,6 +31,7 @@ set -euo pipefail
 REPO="${PADDOCK_REPO:-SplendidChip758/llama-paddock}"
 BRANCH="${PADDOCK_BRANCH:-main}"
 VERSION="${PADDOCK_VERSION:-latest}"
+[[ $VERSION == stable ]] && VERSION=latest
 PORT="${PADDOCK_PORT:-8080}"
 SELF_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/install/dashboard.sh"
 APP_DIR=/opt/llama-paddock
@@ -170,8 +174,9 @@ guess_gateway() {
 # A prerelease channel or tag (dev, v1.2.0-dev.3)
 is_prerelease() { [[ $VERSION == dev || $VERSION == v*-* ]]; }
 # What update-llama-paddock installs by default: stay on the channel this was installed from
+# (a prerelease tag counts as the prerelease channel, a stable tag as stable)
 CHANNEL=latest
-[[ $VERSION == dev ]] && CHANNEL=dev
+is_prerelease && CHANNEL=dev
 
 prerelease_notice() {
   local text="You are installing a PRERELEASE of llama-paddock (${VERSION}, from the ${BRANCH} branch).
@@ -556,6 +561,17 @@ resolve_release() {
   ' <<<"$json") || true
 }
 
+# True when the install on disk already is the release $VERSION stands for, so an update has
+# nothing to do. Never for a source build, a tarball or a local checkout, and not when the
+# service is down (re-running repairs it) or PADDOCK_FORCE is set
+dashboard_is_current() {
+  [[ -z ${PADDOCK_FORCE-} && -z ${PADDOCK_TARBALL-} && -z ${PADDOCK_SOURCE_DIR-} && $VERSION != source ]] || return 1
+  if [[ -d /run/systemd/system ]]; then systemctl is-active --quiet llama-paddock || return 1; fi
+  resolve_release
+  RELEASE_CHECKED=1  # fetch_app reuses this answer instead of asking GitHub again
+  [[ -n $RELEASE_TAG && $RELEASE_TAG == "$(cat "$APP_DIR/VERSION" 2>/dev/null)" ]]
+}
+
 # Fetches/builds the app into $STAGE (server.js + .next/static + node_modules); sets INSTALLED_VERSION
 fetch_app() {
   STAGE=$(mktemp -d /tmp/llama-paddock.XXXXXX)
@@ -576,7 +592,7 @@ fetch_app() {
     INSTALLED_VERSION="local"
   else
     if [[ $VERSION != source ]]; then
-      resolve_release
+      [[ -n ${RELEASE_CHECKED-} ]] || resolve_release
       if [[ -n $ASSET_URL ]]; then
         msg_info "Downloading release $RELEASE_TAG"
         curl -fsSL "$ASSET_URL" -o "$work/app.tar.gz"
@@ -617,9 +633,14 @@ write_config() {
 poll_interval: 3        # seconds between polls of every host
 history_points: 400     # recent samples shown in sparklines
 history_retention_days: 30  # metric history kept in /var/lib/llama-paddock
+audit_retention_days: 365   # audit log of who changed what
 
 # Prometheus /metrics is off until a scrape token is set: put
 # PADDOCK_METRICS_TOKEN=<random> in llama-paddock.env, or see docs/prometheus.md.
+
+# The library browser reads ollama.com and fit estimates read the Ollama
+# registry; false keeps the dashboard from contacting them.
+# model_library: true
 
 # Add hosts in the dashboard (Add host). Hosts listed here also work, but are
 # read-only in the UI. Tokens can live in llama-paddock.env as \${VAR}.
@@ -644,9 +665,10 @@ PORT=${PORT}
 HOSTNAME=0.0.0.0
 PADDOCK_CONFIG=${CFG_DIR}/config.yaml
 NEXT_TELEMETRY_DISABLED=1
-# Initial login. You must change the password on first sign-in; after that it
-# lives (hashed) in ${DATA_DIR}/auth.json and these two lines are ignored.
-# Forgot it? rm ${DATA_DIR}/auth.json && systemctl restart llama-paddock
+# First admin account. You must change the password on first sign-in; after that
+# accounts live (hashed) in ${DATA_DIR}/auth.json and these two lines are ignored.
+# Forgot it? Another admin can reset it under Users. If none can sign in:
+# rm ${DATA_DIR}/auth.json && systemctl restart llama-paddock (removes every account and API token)
 PADDOCK_USERNAME=admin
 PADDOCK_PASSWORD=${ADMIN_PASSWORD}
 # PADDOCK_AUTH=off disables the login, e.g. behind an auth proxy.
@@ -690,14 +712,20 @@ Environment=PADDOCK_DATA_DIR=${DATA_DIR}
 WantedBy=multi-user.target
 EOF
 
+  write_updater
+  write_uninstaller
+}
+
+# Also run when an update finds nothing new, so a channel switch still takes effect
+write_updater() {
   cat > /usr/local/bin/update-llama-paddock <<EOF
 #!/usr/bin/env bash
-# Update llama-paddock to the newest ${CHANNEL} release (pass a tag like v1.2.0 to pin one)
+# Update llama-paddock to the newest ${CHANNEL} release.
+# Pass "stable", "dev" (prereleases) or a tag like v1.2.0 to switch channel or pin one
 export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
 exec bash -c "\$(curl -fsSL ${SELF_URL})"
 EOF
   chmod 755 /usr/local/bin/update-llama-paddock
-  write_uninstaller
 }
 
 # Remove the dashboard from this machine. Config, saved hosts and login stay unless you
@@ -772,9 +800,9 @@ ct_notes() {
   local ip=$1 open="" channel=""
   # a DHCP address can change, so only link a static one
   [[ $CT_IP != dhcp && -n $ip ]] && open="
-  <p><a href='http://${ip}:${PORT}'><img src='https://img.shields.io/badge/📈-Open%20the%20dashboard-c8a04a' alt='Open the dashboard'/></a></p>"
+  <p><a href='http://${ip}:${PORT}'><img src='https://img.shields.io/badge/📈-Open%20the%20dashboard-0b7f62' alt='Open the dashboard'/></a></p>"
   is_prerelease && channel="
-  <p><img src='https://img.shields.io/badge/⚠️-Prerelease%20channel-8a6d2f' alt='Prerelease channel'/></p>"
+  <p><img src='https://img.shields.io/badge/⚠️-Prerelease%20channel-9a6400' alt='Prerelease channel'/></p>"
   cat <<EOF
 <div align='center'>
   <a href='https://github.com/${REPO}'><img src='https://raw.githubusercontent.com/${REPO}/main/docs/logo/logo-mark.svg' alt='llama-paddock' width='80' height='80'/></a>
@@ -817,6 +845,12 @@ local_install() {
   [[ -n $updating ]] && msg_info "Existing install found ($(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)) — updating, config is kept"
 
   ensure_deps
+  if [[ -n $updating ]] && dashboard_is_current; then
+    write_updater
+    msg_ok "Already on the latest version ($(cat "$APP_DIR/VERSION")), nothing to update"
+    echo "   To reinstall it anyway:  PADDOCK_FORCE=1 update-llama-paddock"
+    return
+  fi
   id "$SVC_USER" &>/dev/null || useradd --system --home-dir "$APP_DIR" --no-create-home --shell /usr/sbin/nologin "$SVC_USER"
 
   fetch_app

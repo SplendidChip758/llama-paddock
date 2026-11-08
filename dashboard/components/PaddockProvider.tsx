@@ -2,7 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "@/lib/format";
-import type { ActiveAlert, InstanceSnapshot, JobInfo } from "@/lib/types";
+import type { ActiveAlert, InstanceSnapshot, JobInfo, SecuritySummary } from "@/lib/types";
 
 interface Toast {
   id: number;
@@ -13,6 +13,7 @@ interface Toast {
 export interface Me {
   auth: boolean;
   username?: string | null;
+  role?: "admin" | "viewer" | null;
 }
 
 interface Ctx {
@@ -20,6 +21,8 @@ interface Ctx {
   /** Re-fetch the fleet now, e.g. after adding or editing a host. */
   refreshInstances: () => Promise<void>;
   me: Me | null;
+  /** A viewer account: hide the controls that change something (the server refuses them anyway). */
+  readOnly: boolean;
   loaded: boolean;
   pollInterval: number;
   jobs: JobInfo[];
@@ -33,6 +36,8 @@ interface Ctx {
   alerts: ActiveAlert[];
   /** saving alert transitions failed: firing alerts may not survive a dashboard restart */
   alertsStoreError: string | null;
+  /** failing and dismissed security checks; null from a dashboard before they existed */
+  security: SecuritySummary | null;
 }
 
 const PaddockCtx = createContext<Ctx | null>(null);
@@ -54,6 +59,7 @@ export function PaddockProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<Me | null>(null);
   const [alerts, setAlerts] = useState<ActiveAlert[]>([]);
   const [alertsStoreError, setAlertsStoreError] = useState<string | null>(null);
+  const [security, setSecurity] = useState<SecuritySummary | null>(null);
   const seenDone = useRef<Set<string> | null>(null);
   const toastId = useRef(0);
   const pollRef = useRef(3);
@@ -67,11 +73,12 @@ export function PaddockProvider({ children }: { children: ReactNode }) {
 
   const refreshInstances = useCallback(async () => {
     const [d, a] = await Promise.all([
-      api<{ poll_interval: number; instances: InstanceSnapshot[] }>("/api/instances"),
+      api<{ poll_interval: number; instances: InstanceSnapshot[]; security?: SecuritySummary }>("/api/instances"),
       api<{ active: ActiveAlert[]; store_error: string | null }>("/api/alerts").catch(() => null),
     ]);
     setPollInterval(d.poll_interval);
     setInstances(d.instances);
+    setSecurity(d.security ?? null);
     if (a) {
       setAlerts(a.active);
       setAlertsStoreError(a.store_error);
@@ -126,7 +133,7 @@ export function PaddockProvider({ children }: { children: ReactNode }) {
   }, [refreshJobs]);
 
   return (
-    <PaddockCtx.Provider value={{ instances, refreshInstances, me, loaded, pollInterval, jobs, refreshJobs, toast, jobsOpen, setJobsOpen, jobsDoneTick, alerts, alertsStoreError }}>
+    <PaddockCtx.Provider value={{ instances, refreshInstances, me, readOnly: me?.role === "viewer", loaded, pollInterval, jobs, refreshJobs, toast, jobsOpen, setJobsOpen, jobsDoneTick, alerts, alertsStoreError, security }}>
       {children}
       <div className="toasts">
         {toasts.map((t) => (

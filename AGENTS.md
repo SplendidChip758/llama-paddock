@@ -11,7 +11,8 @@ llama-paddock is a self-hosted dashboard for monitoring and managing a fleet of 
 | `agent/windows/paddock-agent.mjs` | Agent on Windows PCs (Scheduled Task) | Same HTTP API as the Linux agent. Change both together |
 | `install/*.sh` | One-liner installers (Proxmox LXC or local) | Served raw from the `main` and `dev` branches, not from releases: a merged change is live immediately |
 | `docs/` | User documentation, also built into the website's Docs section | Plain GitHub Markdown: each page starts with one `# Title` and links to other pages with relative `.md` paths. `docs/README.md` is the index and sets the website's sidebar: its `##` groups (Install, Configure, Use, Reference) and the entries under them, with indented entries nested |
-| `test/` | `sim/paddock-sim.mjs` (simulated Ollama hosts and agents) and `scenarios/` (`node:test` behaviour tests run in CI) | Plain Node, no dependencies |
+| `brand/` | Logo files, the palette as CSS variables (`tokens.css`) and the component rules | The reference for UI work: use its variables and components rather than new colours |
+| `test/` | `sim/paddock-sim.mjs` (simulated Ollama hosts and agents), `scenarios/` (`node:test` behaviour tests run in CI) and `e2e/` (Playwright browser tests run in CI) | `sim/` and `scenarios/` are plain Node with no dependencies; `e2e/` has its own `package.json` |
 | `.github/workflows/` | `ci` (PR checks), `pr-title`, `release` (semantic-release) | |
 
 Runtime data (hosts added in the UI, login, `paddock.db`) lives in `PADDOCK_DATA_DIR`. Files there hold secrets: write them with mode 600.
@@ -22,11 +23,14 @@ Before pushing, run what CI runs:
 
 ```bash
 (cd dashboard && npm ci && npm run typecheck && npm run build && npm run test:scenarios)
+(cd test/e2e && npm ci && npx playwright install chromium && npm test)
 node --check agent/linux/paddock-agent.mjs && node --check agent/windows/paddock-agent.mjs
 for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
 ```
 
-`test:scenarios` runs `test/scenarios/` with `node:test`: the built dashboard against simulated Ollama hosts and agents (`test/sim/paddock-sim.mjs`, no dependencies). For behaviour changes, add or extend a scenario there, and say in the PR what you ran.
+`test:scenarios` runs `test/scenarios/` with `node:test`: the built dashboard against simulated Ollama hosts and agents (`test/sim/paddock-sim.mjs`, no dependencies). For behaviour changes, add or extend a scenario there, and say in the PR what you ran. `test/e2e/` runs the same stack in Chromium with Playwright: when a change is visible only in the UI (a page, a form, a navigation), add a browser test there (CONTRIBUTING.md, Browser tests).
+
+To check a UI change yourself, use the Playwright MCP server from `.mcp.json` against a dev server running on the simulator, never against real hosts.
 
 Dev server: `cd dashboard && PADDOCK_DATA_DIR=../data npm run dev`. Without a real Ollama host, run the simulator (CONTRIBUTING.md, Simulated hosts).
 
@@ -98,7 +102,7 @@ Small fixes and docs don't need an issue.
 
 ### Choosing what to work on
 
-Milestone numbers aren't a queue. Follow ROADMAP.md's **Delivery order**: finish M1, then M3 alerts and diagnostics, then the M4 core (users, scoped tokens, audit log, accessibility) before M5's update controls. [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) holds the 1.0 release checklist. Work that the checklist names comes before items marked as not blocking 1.0 (M2's advanced workbench, M4's wall display, PWA and themes, M5's Ollama updater, M6 to M8).
+Milestone numbers aren't a queue. Follow ROADMAP.md's **Delivery order**: finish M1, then M3 alerts and diagnostics, then the M4 core (users, scoped tokens, audit log, accessibility) before M5's update controls. The whole M2 workbench is also required for 1.0 and can be built alongside. [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) holds the 1.0 release checklist. Work that the checklist names comes before items marked as not blocking 1.0 (M4's wall display, PWA and themes, M5's Ollama updater, M6 to M8).
 
 ## Code conventions
 
