@@ -1,3 +1,9 @@
+## [0.10.0-dev.5](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.4...v0.10.0-dev.5) (2026-11-09)
+
+### Bug Fixes
+
+* **install:** take the agent from the repo at its release tag ([#192](https://github.com/SplendidChip758/llama-paddock/issues/192)) ([cd54748](https://github.com/SplendidChip758/llama-paddock/commit/cd547484df86d58c4fa235b753a7995ab7a3587d))
+
 ## [0.10.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.3...v0.10.0-dev.4) (2026-11-09)
 
 ### Features
