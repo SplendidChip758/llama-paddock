@@ -14,7 +14,11 @@ before(async () => {
   // dev: the channel doesn't then depend on whether this dashboard's own version is a prerelease
   holder.stack = await startStack({ sim: { hosts: 3 }, data: { extra: "agent_updates: dev" } });
   ({ client: c, sim } = holder.stack);
-  for (const id of ["sim-1", "sim-2", "sim-3"]) await c.waitInstance(id, (x) => x.ollama_ok && x.agent_ok, "online");
+  for (const id of ["sim-1", "sim-2", "sim-3"]) {
+    // whether or not the agent in test/agent-release can update itself, which sets the simulator's default
+    await sim.scenario(id, { agent_update: "normal" });
+    await c.waitInstance(id, (x) => x.ollama_ok && x.agent_ok && x.agent_update?.can_update, "online and able to update");
+  }
   current = (await c.instance("sim-1")).agent_version;
 });
 after(() => holder.stack?.stop());

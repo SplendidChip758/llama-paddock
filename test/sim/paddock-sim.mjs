@@ -69,7 +69,8 @@
  *        agent_update: what POST /update does: "normal" (the agent restarts as the newest simulated
  *                     release on the asked channel, or stays as it is when it already runs that),
  *                     "fail" (the updater fails and the agent keeps its version), "none" (an agent
- *                     without /update or self_update, like one from before 0.10.0)
+ *                     without /update or self_update, like one from before 0.10.0). Default: "normal"
+ *                     when the agent in test/agent-release has /update, else "none"
  *
  * Agent releases, on the control port, like GitHub's API (agent_releases_url: http://<bind>:<B>/_sim/github):
  *   GET  /_sim/github/repos/<owner>/<repo>/releases   the simulated releases; a repo ending in
@@ -167,6 +168,11 @@ function fail(msg) {
 /** The protocol of the agent the tests run against (test/agent.mjs), so the simulated agent matches it by default. */
 function repoAgentProtocol() {
   return Number(/const PROTOCOL = (\d+);/.exec(agentSource() ?? "")?.[1] ?? 1);
+}
+
+/** Whether the agent in test/agent-release can update itself, so the simulator's shapes match it by default. */
+function repoAgentUpdates() {
+  return /"POST \/update"/.test(agentSource() ?? "");
 }
 
 function repoAgentVersion() {
@@ -291,7 +297,7 @@ function makeHost(n, o) {
     pullSeconds: o.pullSeconds,
     /** milliseconds per streamed token, so hosts compare differently side by side */
     tokenMs: 20 + 10 * (n - 1),
-    scenario: { ollama: "up", agent: "up", pull: "normal", create: "normal", agent_update: "normal" },
+    scenario: { ollama: "up", agent: "up", pull: "normal", create: "normal", agent_update: repoAgentUpdates() ? "normal" : "none" },
     /** the updater's last run, as the agent's GET /update reports it */
     update: { state: "idle" },
     gpus: Array.from({ length: o.gpus[n - 1] }, (_, i) => ({
