@@ -9,7 +9,7 @@ group named after it. Keep that format. -->
 
 ## Install
 
-- [The dashboard](installation.md): Proxmox, Debian/Ubuntu, Docker, source builds and adding hosts
+- [The dashboard](installation.md): Proxmox, Debian/Ubuntu, Docker, source builds, adding hosts and moving the dashboard
 - [The agent on Linux](agent-linux.md): install, settings, firewall, updates and removal
 - [The agent on Windows](agent-windows.md): the logon task, firewall, settings and updates
 
@@ -28,7 +28,7 @@ group named after it. Keep that format. -->
 - [Fit estimates](fit-estimates.md): whether a model fits a host's GPUs at a context, the largest context that does, and how sure the estimate is
 - [Context and reloads](context-and-reloads.md): contexts cut short by clients, and models that load again and again
 - [Alerts](alerts.md): alert rules, durations, flapping and what happens when data is missing
-- [Operations](operations.md): updates, backups, prereleases, uninstalling and troubleshooting
+- [Operations](operations.md): updates, backups, moving the configuration, prereleases, uninstalling and troubleshooting
 
 ## Reference
 

@@ -142,6 +142,13 @@ export function saveRules(raw: unknown, hostIds: string[], channelIds: string[])
   return listRules();
 }
 
+/** Read alert-rules.json again after something else wrote it: a configuration import. */
+export function reloadRules() {
+  const a = alerts();
+  a.rules = readRules();
+  a.reconcile = true;
+}
+
 /** The dashboard's own security checks count as a host for "insecure" rules that cover every host. */
 const applies = (rule: AlertRule, instance: string) =>
   rule.enabled && (instance === DASHBOARD_TARGET ? rule.kind === "insecure" && !rule.hosts : !rule.hosts || rule.hosts.includes(instance));
