@@ -1,3 +1,9 @@
+## [0.10.0-dev.4](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.3...v0.10.0-dev.4) (2026-11-09)
+
+### Features
+
+* **dashboard:** flag outdated agents and update them from the dashboard ([#190](https://github.com/SplendidChip758/llama-paddock/issues/190)) ([de466c3](https://github.com/SplendidChip758/llama-paddock/commit/de466c3efd6fbf446711904bd67fae8e22a7d36a)), closes [#15](https://github.com/SplendidChip758/llama-paddock/issues/15)
+
 ## [0.10.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.2...v0.10.0-dev.3) (2026-11-09)
 
 ### Features
