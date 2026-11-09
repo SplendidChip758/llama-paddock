@@ -11,8 +11,14 @@ export const AGENT_REPOS: Record<Platform, string> = {
   linux: "SplendidChip758/llama-paddock-agent",
   windows: "SplendidChip758/llama-paddock-win-agent",
 };
-/** The release file each platform's updater installs; a release without it (or SHA256SUMS) can't be installed. */
-const ASSETS: Record<Platform, string> = { linux: "paddock-agent-linux.mjs", windows: "paddock-agent-windows.mjs" };
+/**
+ * A release file each platform's agent installs from, any of them; a release without one (or
+ * SHA256SUMS) can't be installed. Linux releases up to 0.10.0-dev.2 had the agent as a file of its own.
+ */
+const ASSETS: Record<Platform, string[]> = {
+  linux: ["llama-paddock-agent-linux.tar.gz", "paddock-agent-linux.mjs"],
+  windows: ["llama-paddock-agent-windows.zip"],
+};
 
 const FRESH_MS = 6 * 60 * 60_000;
 const RETRY_MS = 30 * 60_000;
@@ -77,7 +83,7 @@ async function load(platform: Platform, settings: Settings, e: Entry) {
       if (rel.draft || !parse(tag)) continue;
       if (channel === "stable" && (rel.prerelease || parse(tag)![3])) continue;
       const names = new Set((rel.assets ?? []).map((a) => a.name));
-      if (!names.has("SHA256SUMS") || !names.has(ASSETS[platform])) continue;
+      if (!names.has("SHA256SUMS") || !ASSETS[platform].some((n) => names.has(n))) continue;
       if (best === null || compareVersions(tag, best)! > 0) best = tag;
     }
     e.latest = best ? best.replace(/^v/, "") : null;

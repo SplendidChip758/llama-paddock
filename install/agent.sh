@@ -194,38 +194,93 @@ ensure_node() {
   msg_ok "Node.js $(node -p 'process.versions.node')"
 }
 
-# resolve_release_tag — print the tag $VERSION stands for (empty if GitHub has none):
-# latest = newest stable release, dev = newest release including prereleases
-resolve_release_tag() {
-  local api="https://api.github.com/repos/${AGENT_REPO}/releases"
-  if [[ $VERSION == dev ]]; then api+="?per_page=30"; else api+="/latest"; fi
-  curl -fsSL -H "Accept: application/vnd.github+json" "$api" 2>/dev/null | node -e '
+# ===== downloads
+# GitHub serves files in a repository (raw.githubusercontent.com) more reliably than release
+# downloads, which can answer 504 for a while after a release is published. Its API allows 60
+# calls an hour per address without a token, shared by every host behind the same NAT. So the
+# API is only asked which tag "latest" or "dev" is (the releases feed answers when it is out of
+# calls), the agent comes from the repository at that tag, checked against the release's
+# SHA256SUMS, and the release's own download is the fallback. A file that can't be checked is
+# never installed.
+RELEASE_TAG=""
+# "name id" per asset of RELEASE_TAG, when the API was asked
+RELEASE_ASSETS=""
+
+# get URL FILE — download, retrying GitHub's intermittent 5xx and timeouts. Returns 4 on a 404
+# (it isn't there, so no retry) and 1 when every try failed
+get() {
+  local url="$1" out="$2" code delay
+  for delay in 2 5 10 0; do
+    code=$(curl -sSL --connect-timeout 10 --max-time 120 -w '%{http_code}' -o "$out" "$url" 2>/dev/null) || code=000
+    [[ $code == 200 ]] && return 0
+    [[ $code == 404 ]] && return 4
+    (( delay )) && sleep "$delay"
+  done
+  return 1
+}
+
+# Reads the API's release JSON, or the releases feed, on stdin; prints the tag $1 (latest or dev)
+# stands for, then "asset <name> <id>" lines when it was the API. Prints nothing for no release
+pick_release() {
+  node -e '
+    const want = process.argv[1];
     let s = "";
     process.stdin.on("data", (d) => (s += d)).on("end", () => {
-      try {
-        let r = JSON.parse(s);
-        const ver = (t) => {
-          const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(t || "");
-          return m ? [+m[1], +m[2], +m[3], m[4] ? m[4].split(".") : null] : null;
-        };
-        const cmp = (a, b) => {
-          for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
-          if (!a[3] || !b[3]) return (a[3] ? -1 : 0) - (b[3] ? -1 : 0);
-          for (let i = 0; i < Math.max(a[3].length, b[3].length); i++) {
-            const x = a[3][i], y = b[3][i];
-            if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
-            if (x === y) continue;
-            return /^\d+$/.test(x) && /^\d+$/.test(y) ? x - y : x < y ? -1 : 1;
-          }
-          return 0;
-        };
-        // the list is not reliably newest first, so pick the highest version
-        if (Array.isArray(r)) {
-          r = r.filter((x) => !x.draft && ver(x.tag_name)).sort((x, y) => cmp(ver(y.tag_name), ver(x.tag_name)))[0] || {};
+      const ver = (t) => {
+        const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(t || "");
+        return m ? [+m[1], +m[2], +m[3], m[4] ? m[4].split(".") : null] : null;
+      };
+      const cmp = (a, b) => {
+        for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+        if (!a[3] || !b[3]) return (a[3] ? -1 : 0) - (b[3] ? -1 : 0);
+        for (let i = 0; i < Math.max(a[3].length, b[3].length); i++) {
+          const x = a[3][i], y = b[3][i];
+          if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+          if (x === y) continue;
+          return /^\d+$/.test(x) && /^\d+$/.test(y) ? x - y : x < y ? -1 : 1;
         }
-        console.log(r.tag_name || "");
-      } catch { console.log(""); }
-    });'
+        return 0;
+      };
+      let list;
+      if (s.trimStart().startsWith("<")) {
+        // the feed lists published releases only; prereleases are the tags with a "-"
+        list = [...s.matchAll(/href="https:\/\/github\.com\/[^"]+\/releases\/tag\/([^"]+)"/g)].map((m) => ({ tag_name: m[1] }));
+        if (want !== "dev") list = list.filter((r) => !r.tag_name.includes("-"));
+      } else {
+        const r = JSON.parse(s);
+        list = (Array.isArray(r) ? r : [r]).filter((x) => !x.draft);
+      }
+      // the list is not reliably newest first, so pick the highest version
+      const best = list.filter((x) => ver(x.tag_name)).sort((x, y) => cmp(ver(y.tag_name), ver(x.tag_name)))[0];
+      if (!best) return;
+      console.log(best.tag_name);
+      for (const a of best.assets ?? []) console.log(`asset ${a.name} ${a.id}`);
+    });' "$1"
+}
+
+# resolve_release — set RELEASE_TAG to the tag $VERSION stands for: latest = newest stable
+# release, dev = newest release including prereleases; empty when the repo has none. Returns 1
+# when neither the API nor the feed answered
+resolve_release() {
+  [[ -n $RELEASE_TAG ]] && return 0
+  local api="https://api.github.com/repos/${AGENT_REPO}/releases" out code
+  if [[ $VERSION == dev ]]; then api+="?per_page=30"; else api+="/latest"; fi
+  local f; f=$(mktemp)
+  code=$(curl -sSL --connect-timeout 10 --max-time 30 -H "Accept: application/vnd.github+json" -w '%{http_code}' -o "$f" "$api" 2>/dev/null) || code=000
+  if [[ $code == 200 ]]; then
+    out=$(pick_release "$VERSION" < "$f" 2>/dev/null) || out=""
+  elif [[ $code == 404 && $VERSION != dev ]]; then
+    out=""   # no stable release yet
+  elif get "https://github.com/${AGENT_REPO}/releases.atom" "$f"; then
+    # 403/429: this address has used up its API calls
+    out=$(pick_release "$VERSION" < "$f" 2>/dev/null) || out=""
+  else
+    rm -f "$f"
+    return 1
+  fi
+  rm -f "$f"
+  RELEASE_TAG=$(head -n1 <<<"$out")
+  RELEASE_ASSETS=$(sed -n 's/^asset //p' <<<"$out")
 }
 
 # True when the agent on disk already is the release $VERSION stands for, so an update has
@@ -238,33 +293,83 @@ agent_is_current() {
   [[ -z ${PADDOCK_AGENT_SRC-} ]] || return 1
   local want="$VERSION"
   case $VERSION in
-    latest|dev) want=$(resolve_release_tag) ;;
+    latest|dev) resolve_release || return 1; want=$RELEASE_TAG ;;
     v*) ;;
     *) return 1 ;;
   esac
   [[ -n $want && $want == "$(cat "$PREFIX/VERSION")" ]]
 }
 
-# Check a downloaded release file against the release's SHA256SUMS
+# sum_of SUMS NAME — the checksum SHA256SUMS lists for NAME, if any
+sum_of() { awk -v f="$2" '$2 == f || $2 == "*" f { print $1 }' "$1"; }
+
+# Check a file against the release's SHA256SUMS; stops the install when it doesn't match
 check_sum() {
   local sums="$1" name="$2" file="$3" want got
-  want=$(awk -v f="$name" '$2 == f || $2 == "*" f { print $1 }' "$sums")
+  want=$(sum_of "$sums" "$name")
   got=$(sha256sum "$file" | awk '{print $1}')
   [[ -n $want ]] || die "$name is missing from the release's SHA256SUMS"
   [[ $want == "$got" ]] || die "$name doesn't match the release's SHA256SUMS: the download is damaged or was changed. Nothing was installed"
 }
 
-# The agent and its unit from release $2's assets, checked against its SHA256SUMS. Fails
-# (without installing anything) when the release has no SHA256SUMS: tags from before the
-# agents had their own releases (0.9.0-dev.N and older) only have the files in the repo
+# api_asset TAG NAME FILE — a release file through the API, which GitHub serves even while the
+# release download answers 504. Costs API calls, so only a fallback
+api_asset() {
+  local tag="$1" name="$2" out="$3" id
+  if [[ -z $RELEASE_ASSETS || $tag != "$RELEASE_TAG" ]]; then
+    RELEASE_TAG="$tag"
+    RELEASE_ASSETS=$(curl -fsSL --max-time 30 -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${AGENT_REPO}/releases/tags/${tag}" 2>/dev/null \
+      | pick_release dev 2>/dev/null | sed -n 's/^asset //p') || RELEASE_ASSETS=""
+  fi
+  id=$(awk -v n="$name" '$1 == n { print $2 }' <<<"$RELEASE_ASSETS")
+  [[ -n $id ]] || return 1
+  curl -fsSL --max-time 120 -H "Accept: application/octet-stream" "https://api.github.com/repos/${AGENT_REPO}/releases/assets/${id}" -o "$out" 2>/dev/null
+}
+
+# release_file TAG NAME FILE — a release download, then the API; stops the install when neither works
+release_file() {
+  local tag="$1" name="$2" out="$3"
+  get "https://github.com/${AGENT_REPO}/releases/download/${tag}/${name}" "$out" && return 0
+  api_asset "$tag" "$name" "$out" && return 0
+  die "could not download $name of ${tag} from GitHub. Nothing was installed; try again in a few minutes"
+}
+
+# The agent and its unit for release $2, checked against its SHA256SUMS: from the repository at
+# that tag, else from the release itself. Returns 1 when the release has no SHA256SUMS: tags from
+# before the agents had their own releases (0.9.0-dev.N and older) only have the files in the repo
 fetch_release() {
-  local tmp="$1" tag="$2"
-  local base="https://github.com/${AGENT_REPO}/releases/download/${tag}"
-  curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null || return 1
-  curl -fsSL "$base/paddock-agent-linux.mjs" -o "$tmp/paddock-agent.mjs" || die "could not download the agent from $base"
-  curl -fsSL "$base/llama-paddock-agent.service" -o "$tmp/llama-paddock-agent.service" || die "could not download the service unit from $base"
-  check_sum "$tmp/SHA256SUMS" paddock-agent-linux.mjs "$tmp/paddock-agent.mjs"
-  check_sum "$tmp/SHA256SUMS" llama-paddock-agent.service "$tmp/llama-paddock-agent.service"
+  local tmp="$1" tag="$2" sums="$1/SHA256SUMS" rc=0
+  get "https://github.com/${AGENT_REPO}/releases/download/${tag}/SHA256SUMS" "$sums" || rc=$?
+  if (( rc == 4 )); then
+    return 1
+  elif (( rc )); then
+    api_asset "$tag" SHA256SUMS "$sums" \
+      || die "could not download ${tag}'s SHA256SUMS from GitHub, so there is nothing to check the agent against. Nothing was installed; try again in a few minutes"
+  fi
+  # what SHA256SUMS calls the two files: inside the tarball, or (up to 0.10.0-dev.2) release files of their own
+  local agent=llama-paddock-agent/paddock-agent.mjs unit=llama-paddock-agent/llama-paddock-agent.service
+  [[ -n $(sum_of "$sums" "$agent") ]] || { agent=paddock-agent-linux.mjs; unit=llama-paddock-agent.service; }
+
+  local raw="https://raw.githubusercontent.com/${AGENT_REPO}/${tag}/linux"
+  if get "$raw/paddock-agent.mjs" "$tmp/paddock-agent.mjs" && get "$raw/llama-paddock-agent.service" "$tmp/llama-paddock-agent.service" \
+    && [[ $(sha256sum "$tmp/paddock-agent.mjs" | awk '{print $1}') == "$(sum_of "$sums" "$agent")" ]] \
+    && [[ $(sha256sum "$tmp/llama-paddock-agent.service" | awk '{print $1}') == "$(sum_of "$sums" "$unit")" ]]; then
+    msg_ok "Checked the agent from ${tag} against the release's SHA256SUMS"
+    return 0
+  fi
+  msg_warn "The files at ${tag} didn't download or don't match its SHA256SUMS: downloading the release instead"
+  if [[ -n $(sum_of "$sums" llama-paddock-agent-linux.tar.gz) ]]; then
+    release_file "$tag" llama-paddock-agent-linux.tar.gz "$tmp/agent.tar.gz"
+    check_sum "$sums" llama-paddock-agent-linux.tar.gz "$tmp/agent.tar.gz"
+    tar -xzf "$tmp/agent.tar.gz" -C "$tmp" "$agent" "$unit" || die "could not unpack the agent from ${tag}'s tarball"
+    mv "$tmp/$agent" "$tmp/paddock-agent.mjs"
+    mv "$tmp/$unit" "$tmp/llama-paddock-agent.service"
+  else
+    release_file "$tag" paddock-agent-linux.mjs "$tmp/paddock-agent.mjs"
+    release_file "$tag" llama-paddock-agent.service "$tmp/llama-paddock-agent.service"
+  fi
+  check_sum "$sums" "$agent" "$tmp/paddock-agent.mjs"
+  check_sum "$sums" "$unit" "$tmp/llama-paddock-agent.service"
   msg_ok "Checked the download against the release's SHA256SUMS"
 }
 
@@ -279,15 +384,16 @@ fetch_agent() {
   fi
   local ref="$VERSION"
   if [[ $ref == latest || $ref == dev ]]; then
-    ref=$(resolve_release_tag)
+    resolve_release || die "could not find the newest agent release: GitHub's API and its releases feed didn't answer. Nothing was installed; try again, or set PADDOCK_VERSION to a tag like v1.2.3"
+    ref=$RELEASE_TAG
     [[ -n $ref ]] || { ref=main; msg_warn "No published agent release found — using the main branch of ${AGENT_REPO}"; }
   fi
   AGENT_REF="$ref"
   if [[ $ref == v* ]] && fetch_release "$tmp" "$ref"; then return; fi
   [[ $ref == v* ]] && msg_warn "${ref} has no SHA256SUMS to check against — using the files at that tag"
   local base="https://raw.githubusercontent.com/${AGENT_REPO}/${ref}/linux"
-  curl -fsSL "$base/paddock-agent.mjs" -o "$tmp/paddock-agent.mjs" || die "could not download the agent from $base"
-  curl -fsSL "$base/llama-paddock-agent.service" -o "$tmp/llama-paddock-agent.service" || die "could not download the service unit"
+  get "$base/paddock-agent.mjs" "$tmp/paddock-agent.mjs" || die "could not download the agent from $base"
+  get "$base/llama-paddock-agent.service" "$tmp/llama-paddock-agent.service" || die "could not download the service unit from $base"
 }
 
 # Remove what local_install put down. Ollama's own settings (override.conf and the

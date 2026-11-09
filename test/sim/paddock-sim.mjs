@@ -1529,7 +1529,7 @@ async function handleGithub(req, res, url) {
   const platform = m[1].endsWith("-win-agent") ? "windows" : "linux";
   sendJson(res, 200, releasesOf(platform).map((tag) => ({
     tag_name: tag, draft: false, prerelease: isPre(tag),
-    assets: [{ name: "SHA256SUMS" }, { name: `paddock-agent-${platform}.mjs` }],
+    assets: [{ name: "SHA256SUMS" }, { name: `llama-paddock-agent-${platform}.${platform === "linux" ? "tar.gz" : "zip"}` }],
   })));
 }
 
