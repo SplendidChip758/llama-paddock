@@ -11,7 +11,7 @@ Back up your data before upgrading, especially when changing release channels.
 | Dashboard installer | Run `update-llama-paddock` inside its container/VM, or `pct exec <ctid> -- update-llama-paddock` from Proxmox. It stays on the channel you installed from; see [Update channels](#update-channels) |
 | Docker Compose | Run `docker compose pull` then `docker compose up -d` from the Compose directory |
 | Linux agent | Run `update-llama-paddock-agent` on the Ollama host, or `pct exec <ctid> -- update-llama-paddock-agent` from Proxmox. It follows the same [update channels](#update-channels) as the dashboard updater |
-| Windows agent | Extract `llama-paddock-agent-windows.zip` from the new release and re-run `install.ps1` from the same account; see [Windows updates](agent-windows.md#settings-and-updates) |
+| Windows agent | Extract `llama-paddock-agent-windows.zip` from the new [agent release](https://github.com/SplendidChip758/llama-paddock-agent/releases) and re-run `install.ps1` from the same account; see [Windows updates](agent-windows.md#settings-and-updates) |
 | Source | Update your checkout and repeat the [build steps](installation.md#from-source) |
 
 Installer updates keep configuration and existing agent tokens. Docker updates retain the data volume.
@@ -29,7 +29,7 @@ Installer updates keep configuration and existing agent tokens. Docker updates r
 
 If the install is already on the release the command would fetch, the updater says so and stops: nothing is downloaded, and the dashboard or agent isn't restarted. It still goes ahead when the service isn't running, to bring it back. To reinstall the same release anyway (to repair an install, say), set `PADDOCK_FORCE=1`: `PADDOCK_FORCE=1 update-llama-paddock`.
 
-An install follows the channel it was installed or last switched to, so a prerelease install keeps getting prereleases and a stable one keeps getting stable releases. The channel is not shared between the dashboard and its agents: update each with the argument you want, and keep the agents on a version the dashboard supports. Switching a prerelease install back to stable can leave a newer data format behind; read the [prerelease notes](#prereleases) first.
+An install follows the channel it was installed or last switched to, so a prerelease install keeps getting prereleases and a stable one keeps getting stable releases. The channel is not shared between the dashboard and its agents: update each with the argument you want. Agents are released on their own, so their versions differ from the dashboard's. A dashboard works with every agent whose [protocol](api.md#agent-protocol) it supports, and shows **agent incompatible** for the others. When a release changes the protocol, update the dashboard first. Switching a prerelease install back to stable can leave a newer data format behind; read the [prerelease notes](#prereleases) first.
 
 ## Backups
 

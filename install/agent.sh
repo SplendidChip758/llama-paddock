@@ -15,10 +15,13 @@
 #
 # Options (environment variables):
 #   PADDOCK_VERSION      latest (default; "stable" is the same) | dev | v1.2.3 | main  — which agent
-#                        version to fetch. "dev" is the newest release including prereleases, and
-#                        update-llama-paddock-agent then stays on prereleases
-#   PADDOCK_REPO         GitHub repo (default: SplendidChip758/llama-paddock)
-#   PADDOCK_BRANCH       branch used when there is no release yet (default: main)
+#                        release to fetch from PADDOCK_AGENT_REPO. "dev" is the newest release including
+#                        prereleases, and update-llama-paddock-agent then stays on prereleases
+#   PADDOCK_AGENT_REPO   GitHub repo the agent is released from (default: SplendidChip758/llama-paddock-agent).
+#                        A release's files are checked against its SHA256SUMS
+#   PADDOCK_AGENT_SRC    install the agent from this local clone of that repo instead (development)
+#   PADDOCK_REPO         GitHub repo of this installer (default: SplendidChip758/llama-paddock)
+#   PADDOCK_BRANCH       its branch, which update-llama-paddock-agent fetches this script from (default: main)
 #   PADDOCK_AGENT_TOKEN  reuse an existing token instead of generating one
 #   PADDOCK_AGENT_PORT   default 11435
 #   PADDOCK_AGENT_NEW_KEY=1  replace the agent's HTTPS key; accept the new one in the dashboard afterwards
@@ -33,6 +36,7 @@
 set -euo pipefail
 
 REPO="${PADDOCK_REPO:-SplendidChip758/llama-paddock}"
+AGENT_REPO="${PADDOCK_AGENT_REPO:-SplendidChip758/llama-paddock-agent}"
 BRANCH="${PADDOCK_BRANCH:-main}"
 VERSION="${PADDOCK_VERSION:-latest}"
 [[ $VERSION == stable ]] && VERSION=latest
@@ -139,7 +143,7 @@ proxmox_install() {
 
   pct exec "$CT_ID" -- env \
     PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_NESTED=1 PADDOCK_REPO="$REPO" PADDOCK_BRANCH="$BRANCH" PADDOCK_VERSION="$VERSION" \
-    PADDOCK_AGENT_PORT="$AGENT_PORT" PADDOCK_AGENT_TOKEN="${PADDOCK_AGENT_TOKEN-}" PADDOCK_OLLAMA_REMOTE="$remote" \
+    PADDOCK_AGENT_REPO="$AGENT_REPO" PADDOCK_AGENT_PORT="$AGENT_PORT" PADDOCK_AGENT_TOKEN="${PADDOCK_AGENT_TOKEN-}" PADDOCK_OLLAMA_REMOTE="$remote" \
     PADDOCK_AGENT_NEW_KEY="${PADDOCK_AGENT_NEW_KEY-}" \
     bash -c "curl -fsSL '$SELF_URL' | bash"
 
@@ -193,7 +197,7 @@ ensure_node() {
 # resolve_release_tag — print the tag $VERSION stands for (empty if GitHub has none):
 # latest = newest stable release, dev = newest release including prereleases
 resolve_release_tag() {
-  local api="https://api.github.com/repos/${REPO}/releases"
+  local api="https://api.github.com/repos/${AGENT_REPO}/releases"
   if [[ $VERSION == dev ]]; then api+="?per_page=30"; else api+="/latest"; fi
   curl -fsSL -H "Accept: application/vnd.github+json" "$api" 2>/dev/null | node -e '
     let s = "";
@@ -230,8 +234,8 @@ resolve_release_tag() {
 agent_is_current() {
   [[ -z ${PADDOCK_FORCE-} && -f $PREFIX/paddock-agent.mjs && -f $PREFIX/VERSION ]] || return 1
   systemctl is-active --quiet llama-paddock-agent || return 1
-  # run from a clone: fetch_agent installs those files, not a release
-  if [[ -f ${BASH_SOURCE[0]-} && -f "$(dirname "${BASH_SOURCE[0]}")/../agent/linux/paddock-agent.mjs" ]]; then return 1; fi
+  # a local clone: fetch_agent installs those files, not a release
+  [[ -z ${PADDOCK_AGENT_SRC-} ]] || return 1
   local want="$VERSION"
   case $VERSION in
     latest|dev) want=$(resolve_release_tag) ;;
@@ -241,26 +245,49 @@ agent_is_current() {
   [[ -n $want && $want == "$(cat "$PREFIX/VERSION")" ]]
 }
 
-# Where to get the agent files: a local checkout next to this script, or the repo at a ref
+# Check a downloaded release file against the release's SHA256SUMS
+check_sum() {
+  local sums="$1" name="$2" file="$3" want got
+  want=$(awk -v f="$name" '$2 == f || $2 == "*" f { print $1 }' "$sums")
+  got=$(sha256sum "$file" | awk '{print $1}')
+  [[ -n $want ]] || die "$name is missing from the release's SHA256SUMS"
+  [[ $want == "$got" ]] || die "$name doesn't match the release's SHA256SUMS: the download is damaged or was changed. Nothing was installed"
+}
+
+# The agent and its unit from release $2's assets, checked against its SHA256SUMS. Fails
+# (without installing anything) when the release has no SHA256SUMS: tags from before the
+# agents had their own releases (0.9.0-dev.N and older) only have the files in the repo
+fetch_release() {
+  local tmp="$1" tag="$2"
+  local base="https://github.com/${AGENT_REPO}/releases/download/${tag}"
+  curl -fsSL "$base/SHA256SUMS" -o "$tmp/SHA256SUMS" 2>/dev/null || return 1
+  curl -fsSL "$base/paddock-agent-linux.mjs" -o "$tmp/paddock-agent.mjs" || die "could not download the agent from $base"
+  curl -fsSL "$base/llama-paddock-agent.service" -o "$tmp/llama-paddock-agent.service" || die "could not download the service unit from $base"
+  check_sum "$tmp/SHA256SUMS" paddock-agent-linux.mjs "$tmp/paddock-agent.mjs"
+  check_sum "$tmp/SHA256SUMS" llama-paddock-agent.service "$tmp/llama-paddock-agent.service"
+  msg_ok "Checked the download against the release's SHA256SUMS"
+}
+
+# Where to get the agent files: a local clone (PADDOCK_AGENT_SRC), a release, or the repo at a ref
 fetch_agent() {
   local tmp="$1"
-  local here=""
-  # only when run as a file from a clone (not via bash -c "$(curl ...)")
-  [[ -f ${BASH_SOURCE[0]-} ]] && here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  if [[ -n $here && -f $here/../agent/linux/paddock-agent.mjs ]]; then
-    cp "$here/../agent/linux/paddock-agent.mjs" "$here/../agent/linux/llama-paddock-agent.service" "$tmp"/
+  if [[ -n ${PADDOCK_AGENT_SRC-} ]]; then
+    [[ -f $PADDOCK_AGENT_SRC/linux/paddock-agent.mjs ]] || die "PADDOCK_AGENT_SRC ($PADDOCK_AGENT_SRC) has no linux/paddock-agent.mjs"
+    cp "$PADDOCK_AGENT_SRC/linux/paddock-agent.mjs" "$PADDOCK_AGENT_SRC/linux/llama-paddock-agent.service" "$tmp"/
     AGENT_REF="local checkout"
     return
   fi
   local ref="$VERSION"
   if [[ $ref == latest || $ref == dev ]]; then
     ref=$(resolve_release_tag)
-    [[ -n $ref ]] || { ref="$BRANCH"; msg_warn "No published release found — using the ${BRANCH} branch"; }
+    [[ -n $ref ]] || { ref=main; msg_warn "No published agent release found — using the main branch of ${AGENT_REPO}"; }
   fi
-  local base="https://raw.githubusercontent.com/${REPO}/${ref}/agent/linux"
+  AGENT_REF="$ref"
+  if [[ $ref == v* ]] && fetch_release "$tmp" "$ref"; then return; fi
+  [[ $ref == v* ]] && msg_warn "${ref} has no SHA256SUMS to check against — using the files at that tag"
+  local base="https://raw.githubusercontent.com/${AGENT_REPO}/${ref}/linux"
   curl -fsSL "$base/paddock-agent.mjs" -o "$tmp/paddock-agent.mjs" || die "could not download the agent from $base"
   curl -fsSL "$base/llama-paddock-agent.service" -o "$tmp/llama-paddock-agent.service" || die "could not download the service unit"
-  AGENT_REF="$ref"
 }
 
 # Remove what local_install put down. Ollama's own settings (override.conf and the
@@ -303,7 +330,7 @@ write_updater() {
 #!/usr/bin/env bash
 # Update the llama-paddock agent to the newest ${CHANNEL} release.
 # Pass "stable", "dev" (prereleases) or a tag like v1.2.0 to switch channel or pin one
-export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
+export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_AGENT_REPO="${AGENT_REPO}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
 exec bash -c "\$(curl -fsSL ${SELF_URL})"
 EOF
   chmod 755 /usr/local/bin/update-llama-paddock-agent

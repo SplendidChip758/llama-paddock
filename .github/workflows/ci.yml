@@ -91,6 +91,8 @@ jobs:
             test/e2e/test-results/
           retention-days: 14
 
+  # The rulesets require a check named "agents". The agents themselves are checked in
+  # SplendidChip758/llama-paddock-agent; the scenario tests run the dashboard against one.
   agents:
     runs-on: ubuntu-latest
     steps:
@@ -99,11 +101,6 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-
-      - name: Agents parse
-        run: |
-          node --check agent/linux/paddock-agent.mjs
-          node --check agent/windows/paddock-agent.mjs
 
       - name: Shell scripts parse
         run: for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
