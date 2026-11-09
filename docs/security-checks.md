@@ -10,7 +10,7 @@ A failing check fires the **Security check failing** [alert rule](alerts.md#rule
 
 ## Dismissing a check
 
-When a failing check is intended, for example plain HTTP on an isolated lab network, an admin can **Dismiss** it with a note saying why. A dismissed check shows the note, who dismissed it and when, doesn't count as failing, and its alert resolves. **Restore** counts it again. Dismissals are per check and host, stored in `security-dismissals.json` in the [data directory](configuration.md#data-directory), recorded in the [audit log](security.md#audit-log), and removed with their host.
+When a failing check is intended, for example plain HTTP on an isolated lab network, an admin can **Dismiss** it with one click. A dismissed check shows who dismissed it and when, doesn't count as failing, and its alert resolves. **Restore** counts it again. Dismissals are per check and host, stored in `security-dismissals.json` in the [data directory](configuration.md#data-directory), recorded in the [audit log](security.md#audit-log), and removed with their host.
 
 ## Host checks
 

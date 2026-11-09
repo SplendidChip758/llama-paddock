@@ -1,6 +1,6 @@
 // Security checks (#83): settings that leave the fleet or the dashboard exposed and are easy to miss.
-// Each check says pass, fail or unknown, and how to fix a failure; a failing check can be dismissed with
-// a note when it's intended. The poller hands the results to the "insecure" alert kind, so a host that
+// Each check says pass, fail or unknown, and how to fix a failure; a failing check can be dismissed
+// when it's intended. The poller hands the results to the "insecure" alert kind, so a host that
 // slips back sends a notification. Dismissals live in security-dismissals.json in the data directory.
 import "server-only";
 import fs from "node:fs";
@@ -64,7 +64,7 @@ function saveDismissals(list: SecurityDismissal[]) {
 
 export const listDismissals = () => dismissals().map((d) => ({ ...d }));
 
-/** {instance, check, note}: keep a check that fails on purpose from counting and alerting. Replaces an earlier dismissal's note. */
+/** {instance, check}: keep a check that fails on purpose from counting and alerting. */
 export function dismissCheck(raw: unknown, hostIds: string[], user: string | null): SecurityDismissal {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new HttpError(400, "body must be an object");
   const r = raw as Record<string, unknown>;
@@ -74,10 +74,7 @@ export function dismissCheck(raw: unknown, hostIds: string[], user: string | nul
   if (forDashboard ? instance !== DASHBOARD_TARGET : !hostIds.includes(instance)) {
     throw new HttpError(400, forDashboard ? `${r.check} is a check of the dashboard: instance must be ${DASHBOARD_TARGET}` : `unknown host ${instance}`);
   }
-  const note = String(r.note ?? "").trim();
-  if (!note) throw new HttpError(400, "note: say why this is intended, for whoever looks next");
-  if (note.length > 200) throw new HttpError(400, "note: at most 200 characters");
-  const d: SecurityDismissal = { instance, check: r.check, note, user, t: Date.now() / 1000 };
+  const d: SecurityDismissal = { instance, check: r.check, user, t: Date.now() / 1000 };
   saveDismissals([...dismissals().filter((x) => x.instance !== instance || x.check !== d.check), d]);
   return d;
 }

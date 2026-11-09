@@ -822,14 +822,13 @@ export type SecurityCheckId =
   | "ollama_open" | "agent_http" | "agent_token"
   | "default_password" | "dashboard_http" | "data_files" | "api_tokens";
 
-/** pass, fail, or unknown: this poll can't tell (host down, nothing seen yet). dismissed: failing, but someone said it's intended. */
+/** pass, fail, or unknown: this poll can't tell (host down, nothing seen yet). dismissed: failing, but someone marked it intended. */
 export type SecurityState = "pass" | "fail" | "unknown" | "dismissed";
 
 export interface SecurityDismissal {
   /** a host id, or DASHBOARD_TARGET */
   instance: string;
   check: SecurityCheckId;
-  note: string;
   user: string | null;
   /** unix seconds */
   t: number;

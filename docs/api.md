@@ -240,11 +240,11 @@ A transition is `{id, t, rule, name, kind, instance, subject, state, value, deta
 |---|---|---|
 | GET | `/api/security` | `{targets, failing, dismissed}`: the [security checks](security-checks.md) of the dashboard and each host, and how many fail or are dismissed |
 | GET | `/api/security/dismissals` | `{dismissals}` |
-| POST | `/api/security/dismissals` | `{instance, check, note}` → `{dismissal}` (201): the check fails on purpose. `note` is required (at most 200 characters); dismissing again replaces it |
+| POST | `/api/security/dismissals` | `{instance, check}` → `{dismissal}` (201): the check fails on purpose |
 | DELETE | `/api/security/dismissals/{instance}/{check}` | Counts a dismissed check again (404 if it isn't dismissed) |
 | POST | `/api/security/fix` | `{check: "data_files"}` → `{changed, failed}`: sets the data directory to 700 and its files to 600 |
 
-A target is `{instance, name, checks}`, with `instance` a host ID or `@dashboard` for the dashboard itself. A check is `{id, label, state, detail, fix, dismissal}`. `id` is `ollama_open`, `agent_http` or `agent_token` for hosts (the agent ones only for hosts with an agent), and `default_password`, `dashboard_http`, `data_files` or `api_tokens` for the dashboard (the password and token ones only with the login on). `state` is `pass`, `fail`, `unknown` or `dismissed`. `fix` is `null` or `{label}` with one of `href` (a dashboard page), `doc` (a page under `docs/` with its anchor) or `action` (`switch_https` or `chmod_data`, which the dashboard can apply). `dismissal` is `{instance, check, note, user, t}` or `null`. `GET /api/instances` also returns `security: {failing, dismissed}`.
+A target is `{instance, name, checks}`, with `instance` a host ID or `@dashboard` for the dashboard itself. A check is `{id, label, state, detail, fix, dismissal}`. `id` is `ollama_open`, `agent_http` or `agent_token` for hosts (the agent ones only for hosts with an agent), and `default_password`, `dashboard_http`, `data_files` or `api_tokens` for the dashboard (the password and token ones only with the login on). `state` is `pass`, `fail`, `unknown` or `dismissed`. `fix` is `null` or `{label}` with one of `href` (a dashboard page), `doc` (a page under `docs/` with its anchor) or `action` (`switch_https` or `chmod_data`, which the dashboard can apply). `dismissal` is `{instance, check, user, t}` or `null`. `GET /api/instances` also returns `security: {failing, dismissed}`.
 
 ## Models and jobs
 
