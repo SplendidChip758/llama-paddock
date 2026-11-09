@@ -19,12 +19,10 @@ Before pushing, run the same checks as CI from the repository root:
 ```bash
 (cd dashboard && npm ci && npm run typecheck && npm run build && npm run test:scenarios)
 (cd test/e2e && npm ci && npx playwright install chromium && npm test)
-node --check agent/linux/paddock-agent.mjs
-node --check agent/windows/paddock-agent.mjs
 for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
 ```
 
-For behavior changes, also exercise the built dashboard against a real or simulated Ollama/agent, add a [scenario test](#scenario-tests) when the simulator can show the behavior (or a [browser test](#browser-tests) when only the UI does), and describe what you ran in the PR. Keep the Linux and Windows agent APIs aligned. Update the relevant documentation and README entry points when adding settings, endpoints or behavior.
+For behavior changes, also exercise the built dashboard against a real or simulated Ollama/agent, add a [scenario test](#scenario-tests) when the simulator can show the behavior (or a [browser test](#browser-tests) when only the UI does), and describe what you ran in the PR. Update the relevant documentation and README entry points when adding settings, endpoints or behavior.
 
 Read [AGENTS.md](AGENTS.md) and the area-specific rules it links before changing code. Never commit runtime data, tokens, passwords or private host details.
 
@@ -100,6 +98,8 @@ npm run test:scenarios
 They use `node:test` and need no dependencies. Ports come from 18100–18119 (dashboard) and 11700–11799 (simulator and agent); set `PADDOCK_TEST_DASHBOARD_PORTS` or `PADDOCK_TEST_SIM_PORTS` (for example `19000-19019`) if those are taken. `PADDOCK_TEST_VERBOSE=1` streams the processes' output and `PADDOCK_TEST_KEEP=1` keeps the temporary data directories. When a test fails, the dashboard's and simulator's recent output is printed after it.
 
 When you change how the dashboard reacts to a host, add or extend a scenario. If the agent API changes, update the simulator with it: the `real-agent` test compares their shapes.
+
+The `real-agent` test runs the agent release named in `test/agent-release`. `npm run test:scenarios` downloads it into `test/.agent/` first (`node test/agent.mjs`) and checks it against the release's `SHA256SUMS`. To test an agent change from a clone of [llama-paddock-agent](https://github.com/SplendidChip758/llama-paddock-agent), point `PADDOCK_AGENT_SRC` at it: `PADDOCK_AGENT_SRC=../../llama-paddock-agent npm run test:scenarios`. Bump `test/agent-release` when the dashboard needs a newer agent.
 
 ### Browser tests
 
@@ -264,11 +264,11 @@ Dependabot opens its PRs against `dev`, like everyone else.
 
 ## How a release happens
 
-Pushes to `main` or `dev` that change dashboard/agent code or release configuration run `.github/workflows/release.yml`; it can also be started manually. Docs-only changes do not trigger it. Installer scripts are served directly from their branch, so merging an installer change makes it live immediately without a release. If any commit since the last tag is a `feat`, `fix`, `perf`, `revert` or breaking change, semantic-release:
+Pushes to `main` or `dev` that change dashboard code or release configuration run `.github/workflows/release.yml`; it can also be started manually. Docs-only changes do not trigger it. Installer scripts are served directly from their branch, so merging an installer change makes it live immediately without a release. If any commit since the last tag is a `feat`, `fix`, `perf`, `revert` or breaking change, semantic-release:
 
 1. works out the next version from those commits,
-2. stamps it into `dashboard/package.json`, `dashboard/package-lock.json` and both agents, and updates `CHANGELOG.md`,
-3. builds the dashboard tarball and agents into `dist/`,
+2. stamps it into `dashboard/package.json` and `dashboard/package-lock.json`, and updates `CHANGELOG.md`,
+3. builds the dashboard tarball into `dist/`,
 4. commits the bumped files as `chore(release): x.y.z [skip ci]` and tags `vX.Y.Z`,
 5. creates the GitHub release with the generated notes and the `dist/` assets.
 
@@ -278,4 +278,4 @@ On `dev` the same steps produce a prerelease instead: version `X.Y.Z-dev.N`, a G
 
 If nothing releasable landed (only `docs`, `chore`, `ci` and so on), the workflow exits without releasing.
 
-Release assets include `llama-paddock-dashboard-vX.Y.Z.tar.gz`, both agent scripts, `llama-paddock-agent-windows.zip` (the Windows agent with its installer) and `SHA256SUMS`. Runtime dependency and base-image updates from Dependabot use `fix(deps): …` so they ship in patch releases.
+Release assets are `llama-paddock-dashboard-vX.Y.Z.tar.gz` and `SHA256SUMS`. The agents are released the same way from their own repositories, [llama-paddock-agent](https://github.com/SplendidChip758/llama-paddock-agent) (Linux) and [llama-paddock-win-agent](https://github.com/SplendidChip758/llama-paddock-win-agent) (Windows), each with its own versions. Runtime dependency and base-image updates from Dependabot use `fix(deps): …` so they ship in patch releases.

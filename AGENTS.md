@@ -7,12 +7,10 @@ llama-paddock is a self-hosted dashboard for monitoring and managing a fleet of 
 | Path | What | Notes |
 |---|---|---|
 | `dashboard/` | Next.js 16 + React 19 + TypeScript app: UI, JSON API under `app/api/`, background poller (`lib/server.ts`, started from `instrumentation.ts`) | Runs in Docker (`node:22-alpine`) or via `install/dashboard.sh`. Needs Node 22.13+ |
-| `agent/linux/paddock-agent.mjs` | Agent on each Linux Ollama host (systemd) | Plain Node, no dependencies, Node 18.15+ |
-| `agent/windows/paddock-agent.mjs` | Agent on Windows PCs (Scheduled Task) | Same HTTP API as the Linux agent. Change both together |
-| `install/*.sh` | One-liner installers (Proxmox LXC or local) | Served raw from the `main` and `dev` branches, not from releases: a merged change is live immediately |
+| `install/*.sh` | One-liner installers (Proxmox LXC or local) | Served raw from the `main` and `dev` branches, not from releases: a merged change is live immediately. `agent.sh` installs Linux agent releases from [llama-paddock-agent](https://github.com/SplendidChip758/llama-paddock-agent); the Windows agent is in [llama-paddock-win-agent](https://github.com/SplendidChip758/llama-paddock-win-agent) |
 | `docs/` | User documentation, also built into the website's Docs section | Plain GitHub Markdown: each page starts with one `# Title` and links to other pages with relative `.md` paths. `docs/README.md` is the index and sets the website's sidebar: its `##` groups (Install, Configure, Use, Reference) and the entries under them, with indented entries nested |
 | `brand/` | Logo files, the palette as CSS variables (`tokens.css`) and the component rules | The reference for UI work: use its variables and components rather than new colours |
-| `test/` | `sim/paddock-sim.mjs` (simulated Ollama hosts and agents), `scenarios/` (`node:test` behaviour tests run in CI) and `e2e/` (Playwright browser tests run in CI) | `sim/` and `scenarios/` are plain Node with no dependencies; `e2e/` has its own `package.json` |
+| `test/` | `agent-release` and `agent.mjs` (the agent release the tests run), `sim/paddock-sim.mjs` (simulated Ollama hosts and agents), `scenarios/` (`node:test` behaviour tests run in CI) and `e2e/` (Playwright browser tests run in CI) | `sim/` and `scenarios/` are plain Node with no dependencies; `e2e/` has its own `package.json` |
 | `.github/workflows/` | `ci` (PR checks), `pr-title`, `release` (semantic-release) | |
 
 Runtime data (hosts added in the UI, login, `paddock.db`) lives in `PADDOCK_DATA_DIR`. Files there hold secrets: write them with mode 600.
@@ -24,7 +22,6 @@ Before pushing, run what CI runs:
 ```bash
 (cd dashboard && npm ci && npm run typecheck && npm run build && npm run test:scenarios)
 (cd test/e2e && npm ci && npx playwright install chromium && npm test)
-node --check agent/linux/paddock-agent.mjs && node --check agent/windows/paddock-agent.mjs
 for f in install/*.sh .github/scripts/*.sh; do bash -n "$f"; done
 ```
 
@@ -116,7 +113,7 @@ Each area has its own rules. **Read the file for the area you're changing:**
 | Area | Rules |
 |---|---|
 | `dashboard/` | [.github/instructions/dashboard.instructions.md](.github/instructions/dashboard.instructions.md) |
-| `agent/` | [.github/instructions/agents.instructions.md](.github/instructions/agents.instructions.md) |
+| `test/sim/`, `test/agent*` (the agents themselves are in llama-paddock-agent and llama-paddock-win-agent) | [.github/instructions/agents.instructions.md](.github/instructions/agents.instructions.md) |
 | `install/` | [.github/instructions/install.instructions.md](.github/instructions/install.instructions.md) |
 
 GitHub Copilot applies these automatically by path (`applyTo`). `.vscode/settings.json` points Copilot's commit message and PR description generators at the matching files.

@@ -24,9 +24,7 @@
         "assets": [
           "CHANGELOG.md",
           "dashboard/package.json",
-          "dashboard/package-lock.json",
-          "agent/linux/paddock-agent.mjs",
-          "agent/windows/paddock-agent.mjs"
+          "dashboard/package-lock.json"
         ],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }
@@ -36,9 +34,6 @@
       {
         "assets": [
           { "path": "dist/llama-paddock-dashboard-*.tar.gz" },
-          { "path": "dist/paddock-agent-linux.mjs" },
-          { "path": "dist/paddock-agent-windows.mjs" },
-          { "path": "dist/llama-paddock-agent-windows.zip" },
           { "path": "dist/SHA256SUMS" }
         ]
       }

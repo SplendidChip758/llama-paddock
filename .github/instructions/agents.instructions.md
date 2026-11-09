@@ -1,28 +1,21 @@
 ---
-applyTo: "agent/**"
+applyTo: "test/sim/**,test/agent.mjs,test/agent-release"
 ---
 
-# Agents (`agent/linux/`, `agent/windows/`)
+# Agents
 
-Each agent is one file, `paddock-agent.mjs`: plain Node ESM with **zero npm dependencies**, running on Node 18.15+. The Linux agent runs as a root systemd service. The Windows agent runs as a Scheduled Task at logon in the user's session.
+The agents live in their own repositories, each with its own releases and rules (its AGENTS.md): the Linux agent in [llama-paddock-agent](https://github.com/SplendidChip758/llama-paddock-agent), the Windows agent in [llama-paddock-win-agent](https://github.com/SplendidChip758/llama-paddock-win-agent). Change them there; an API change needs a PR in both. This repository talks to them, simulates them, and tests against a released one.
 
 ## Rules
 
-- **Keep both agents' HTTP API in step.** Same routes, same request and response shapes. The dashboard's `dashboard/lib/types.ts` (`AgentStats`, `EnvState`, …) describes them. Change all three together. Fields that only make sense on one platform are optional.
-- Routes live in the `routes` table as `"METHOD /path"` handlers. Every route except `GET /health` needs `Authorization: Bearer <PADDOCK_AGENT_TOKEN>`. Keep that.
-- Run external commands with an argument array, never through a shell. Use the `run()` helper (`execFile` with a timeout) for commands whose output you wait on, and `spawn(…, { detached: true })` only for starting long-running processes such as Ollama.
-- Validate everything from the request before it reaches a file or a command, e.g. env var names against `KEY_RE`.
-- Configuration comes from `PADDOCK_*` env vars, documented in the header comment. Add new ones there and in `docs/agent-linux.md` or `docs/agent-windows.md`.
-- `PADDOCK_DRY_RUN=1` must never call `systemctl`/`journalctl` (Linux) or restart Ollama (Windows). Keep that working for new actions.
-- Don't edit `VERSION`: the release workflow stamps it.
-- When the API changes, change the simulated agent in `test/sim/paddock-sim.mjs` too. The `real-agent` scenario test compares its shapes and env rules with the Linux agent's.
-- The dashboard has to keep working with older agents. Add fields and routes instead of changing existing ones, and have the dashboard handle a missing field.
-- `PROTOCOL` only goes up for a change older dashboards can't follow, which also needs the maintainer's agreement. Bump it in both agents, teach the dashboard the new protocol and raise `AGENT_PROTOCOL.max` in `dashboard/lib/protocol.ts` in the same change. Never bump it for fixes or new optional fields. See docs/api.md, Agent protocol.
+- **The dashboard has to keep working with older agents.** Handle a missing field, and fall back when a route answers 404. `dashboard/lib/types.ts` (`AgentStats`, `EnvState`, …) describes the agent API.
+- **The agent protocol** (`dashboard/lib/protocol.ts`, docs/api.md, Agent protocol) decides which agents the dashboard uses. Raise `AGENT_PROTOCOL.max` once the dashboard has learned a new protocol, and release that before agents that speak it. Raise `min` only for a breaking change, with the maintainer's agreement.
+- **Keep the simulated agent in step** (`test/sim/paddock-sim.mjs`). When an agent's API changes, change the simulator in a PR here, and say in both PRs which one to merge first. The `real-agent` scenario test compares the simulator's shapes and env rules with the real Linux agent's.
+- **`test/agent-release`** names the agent release the tests run (`test/agent.mjs` downloads it and checks it against `SHA256SUMS`). Bump it when the dashboard needs a newer agent. `PADDOCK_AGENT_SRC=<clone of llama-paddock-agent>` runs the tests against an unreleased agent.
 
 ## Checks
 
 ```bash
-node --check agent/linux/paddock-agent.mjs && node --check agent/windows/paddock-agent.mjs
+node --check test/sim/paddock-sim.mjs && node --check test/agent.mjs
+(cd dashboard && npm run build && npm run test:scenarios)
 ```
-
-Run an agent locally with `PADDOCK_AGENT_TOKEN=test PADDOCK_DRY_RUN=1 node agent/linux/paddock-agent.mjs`, then call it with `curl -H "Authorization: Bearer test" localhost:11435/stats`.

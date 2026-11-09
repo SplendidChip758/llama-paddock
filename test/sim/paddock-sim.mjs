@@ -8,7 +8,7 @@
  *
  * Each simulated host gets two ports, because the dashboard addresses hosts by
  * URL: one serves Ollama's HTTP API (the parts the dashboard uses), the other the
- * agent API of agent/linux/paddock-agent.mjs (/health, /stats, /env, /logs,
+ * agent API of the Linux agent (SplendidChip758/llama-paddock-agent; /health, /stats, /env, /logs,
  * /service/restart, /gpu-check, /gpu/reload-uvm, /runner-starts, with the same bearer-token rule). Like the agents, the agent
  * port serves HTTPS with a self-signed certificate (a new key per host and run)
  * and plain HTTP. A third port serves the control API, which switches failure
@@ -48,8 +48,8 @@
  *        pull_seconds, ollama_key (string or null), agent_token,
  *        ollama_version, agent_version (null: /stats leaves the version out, like agents before 0.6.0;
  *                     below 0.8.0 there is no /gpu-check, /gpu/reload-uvm or /runner-starts either, as in those agents)
- *        agent_protocol: the agent protocol /health and /stats report (default: the one the agents in this
- *                     checkout speak; null: left out, like agents before 0.10.0)
+ *        agent_protocol: the agent protocol /health and /stats report (default: the one the agent in
+ *                     test/agent-release speaks; null: left out, like agents before 0.10.0)
  *        agent_http:  false = HTTPS only (PADDOCK_AGENT_HTTP=off), true = both (default)
  *        agent_tls:   false = no HTTPS and no fingerprint, like agents before 0.7.0
  *        agent_key:   "new" = replace the agent's key, as the installer's PADDOCK_AGENT_NEW_KEY does
@@ -98,6 +98,7 @@ import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { agentSource } from "../agent.mjs";
 
 // ------------------------------------------------------------------ options
 const HELP = fs.readFileSync(fileURLToPath(import.meta.url), "utf8").match(/\/\*\*([\s\S]*?)\*\//)[1].replace(/^ \* ?/gm, "");
@@ -152,21 +153,13 @@ function fail(msg) {
 
 // The agent version the sim reports by default: the one in the repository's agent, so the
 // dashboard shows the same version as a freshly installed agent of this checkout.
-function repoAgentSource() {
-  try {
-    return fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../agent/linux/paddock-agent.mjs"), "utf8");
-  } catch {
-    return "";
-  }
-}
-
-/** The protocol the agents in this checkout speak, so the simulated agent matches them by default. */
+/** The protocol of the agent the tests run against (test/agent.mjs), so the simulated agent matches it by default. */
 function repoAgentProtocol() {
-  return Number(/const PROTOCOL = (\d+);/.exec(repoAgentSource())?.[1] ?? 1);
+  return Number(/const PROTOCOL = (\d+);/.exec(agentSource() ?? "")?.[1] ?? 1);
 }
 
 function repoAgentVersion() {
-  return /const VERSION = "([^"]+)"/.exec(repoAgentSource())?.[1] ?? "0.0.0-sim";
+  return /const VERSION = "([^"]+)"/.exec(agentSource() ?? "")?.[1] ?? "0.0.0-sim";
 }
 
 // ------------------------------------------------------------------ helpers

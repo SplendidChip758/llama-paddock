@@ -1,4 +1,4 @@
-// The real Linux agent in PADDOCK_DRY_RUN mode, next to the simulator's Ollama: checks that the
+// The real Linux agent (test/agent.mjs) in PADDOCK_DRY_RUN mode, next to the simulator's Ollama: checks that the
 // dashboard works with it, and that the simulated agent answers with the same shapes and the same
 // env-name rules, so the other scenarios aren't testing against a simulator that has drifted.
 import { after, before, test as nodeTest } from "node:test";
@@ -7,13 +7,16 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  Client, REPO, freeSimPort, makeDataDir, scenarioTest, startDashboard, startProcess, startSim, waitFor,
+  Client, freeSimPort, makeDataDir, scenarioTest, startDashboard, startProcess, startSim, waitFor,
 } from "./harness.mjs";
+import { fetchAgent } from "../agent.mjs";
 
 const holder = {};
 const test = scenarioTest(nodeTest, holder);
 const TOKEN = "real-agent-token";
 let c, sim, agentUrl, simAgentUrl, agentProc, data;
+/** the agent release in test/agent-release, or PADDOCK_AGENT_SRC's */
+const AGENT = await fetchAgent();
 
 before(async () => {
   const stack = { failed: false };
@@ -28,7 +31,7 @@ before(async () => {
   simAgentUrl = sim.host("sim-1").agent_url;
   const port = await freeSimPort();
   data = makeDataDir(sim, { instances: { "sim-1": { agent_url: `http://127.0.0.1:${port}`, agent_token: TOKEN } } });
-  agentProc = startProcess("agent", [path.join(REPO, "agent/linux/paddock-agent.mjs")], {
+  agentProc = startProcess("agent", [AGENT], {
     cwd: data.dir,
     env: {
       ...process.env, PADDOCK_AGENT_TOKEN: TOKEN, PADDOCK_AGENT_BIND: "127.0.0.1", PADDOCK_AGENT_PORT: String(port),
@@ -82,7 +85,7 @@ const keys = (o) => Object.keys(o).sort();
 
 test("the dashboard polls the real agent", async () => {
   const i = await c.waitInstance("sim-1", (x) => x.ollama_ok && x.agent_ok, "online");
-  const src = fs.readFileSync(path.join(REPO, "agent/linux/paddock-agent.mjs"), "utf8");
+  const src = fs.readFileSync(AGENT, "utf8");
   assert.equal(i.agent_version, /const VERSION = "([^"]+)"/.exec(src)[1]);
   assert.equal(i.stats.platform, "linux");
   assert.equal(i.stats.service.active, "dry-run");
@@ -190,7 +193,7 @@ test("a request logged later in the second a read ended comes with the next read
 });
 
 test("simulated GPUs have the fields the agents read from nvidia-smi", async () => {
-  const src = fs.readFileSync(path.join(REPO, "agent/linux/paddock-agent.mjs"), "utf8");
+  const src = fs.readFileSync(AGENT, "utf8");
   const gpuKeys = JSON.parse(`[${/const GPU_KEYS = \[([\s\S]*?)\];/.exec(src)[1].trim().replace(/,$/, "")}]`);
   // a loaded model gives the GPU a process too
   const load = await fetch(`${sim.host("sim-2").ollama_url}/api/generate`, { method: "POST", body: JSON.stringify({ model: "llama3.2:3b", stream: false }) });
