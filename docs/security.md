@@ -17,6 +17,7 @@ Admins can see who changed what under **Audit log** in the account menu, filtere
 - Ollama restarts, GPU fixes and environment changes
 - model pulls, creates, copies, deletes, loads and unloads, and cancelled jobs
 - alert rule, channel and silence changes, benchmarks started, cancelled or deleted, and request client names
+- dashboard updates, rollbacks, release channel switches and automatic updates turned on or off
 
 Each record has the time, the user, the API token if the change came with one, the client address, the host, what was acted on and a short detail. The detail says **which** environment variables changed, never their values, and that a token, key or password changed, never what to. Prompts are never recorded, so the test prompt isn't logged. A failed sign-in names the account only when it exists: the text typed as a username might be a password. Saving a list of rules, channels or client names that didn't change records nothing.
 

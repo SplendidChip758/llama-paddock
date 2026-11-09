@@ -113,7 +113,7 @@ Admins only, with a session or a token whose user is an admin; 403 for viewers. 
 | POST | `/api/agent-updates` | Starts updating every outdated agent the dashboard can update → `{started, skipped, failed}`: host ids, and `{id, detail}` for the agents skipped (they need updating on the host) or that refused |
 | GET | `/api/agent-releases` | `{channel, platforms}`: the release channel agents are compared with (`stable`, `dev` or `off`), and per platform (`linux`, `windows`) the `latest` version, when it was `checked`, the last `error` and the releases page `url`. `?refresh=1` asks GitHub again first, at most once a minute |
 | GET | `/api/dashboard-update` | Whether a newer dashboard is out and how this install updates; see [Dashboard updates](#dashboard-updates). `?refresh=1` asks GitHub again first, at most once a minute |
-| POST | `/api/dashboard-update` | `{version}`, which must be the newest release (`latest`) → the same as GET, with `run` in state `requested`. Admins only. 409 for Docker and other installs, when the installer's updater isn't set up, when `update_check` is off, or when an update is already under way |
+| POST | `/api/dashboard-update` | Asks the installer's updater for something → the same as GET. `{version}` (or `{action: "update", version}`): update to the newest release (`latest`). `{action: "rollback", backup}`: roll back the update in `history` with that backup. `{action: "channel", channel}`: `stable` or `dev`. `{action: "auto", enabled}`: automatic updates, stable channel only. Admins only. 409 for Docker and other installs, when the installer's updater isn't set up, when an update is already under way, or when the action doesn't apply (`update_check` off, a backup that is gone) |
 | POST | `/api/instances/{id}/agent-https` | Switches a UI host's `http://` agent URL to `https://`, pinning the key the agent reports → `{id, agent_url, agent_fingerprint}`; 409 for `config.yaml` hosts or agents that don't report a key |
 
 Host fields are `name`, `ollama_url`, `ollama_proxy_key`, `agent_url`, `agent_token`, `agent_fingerprint` and `tags`. `agent_fingerprint` applies to `https://` agent URLs: `SHA256:<base64>` as the agent installer prints it (bare base64 and hex are accepted too). Blank pins the key the agent presents on the first connection; omitted keeps the stored pin. `ollama_url` is required. `tags` accepts an array or comma-separated string. Use the ID returned by creation or listed in `/api/instances` in later requests.
@@ -380,7 +380,7 @@ The dashboard asks GitHub for the agent releases every 6 hours (every 30 minutes
 | Field | Meaning |
 |---|---|
 | `current` | The running version |
-| `channel` | `stable`, or `dev` for a prerelease dashboard, which is offered prereleases and stable releases |
+| `channel` | `stable` or `dev` (prereleases and stable releases): the installer's channel, or for other installs `dev` for a prerelease build |
 | `check` | `false` when [`update_check`](configuration.md#dashboard-settings) is off: GitHub isn't asked, and `latest` is `null` |
 | `latest`, `available` | The newest release on the channel when it is newer than `current`, else `null` and `false`. Only releases with `SHA256SUMS` and a dashboard tarball count |
 | `releases` | Releases newer than `current`, newest first, at most 10: `{version, notes, url, published}`, with `notes` in Markdown as GitHub has them |
@@ -388,9 +388,11 @@ The dashboard asks GitHub for the agent releases every 6 hours (every 30 minutes
 | `url` | The releases page |
 | `method` | `installer`, `docker` or `other` |
 | `can_update` | `POST` can start an update: an installer install with the updater set up |
-| `run` | The last update started from the dashboard, from the updater's status: `{state, version, from, started, finished, message, backup, log}`. `state` is `requested` (waiting for the updater), `running`, `done`, `failed` or `rolled_back`; `backup` names the pre-update backup; `log` is the end of the updater's output |
+| `auto_update` | Automatic updates are on (installer installs; `null` elsewhere) |
+| `run` | The last run, from the updater's status: `{state, action, version, from, started, finished, message, backup, by, log, phase}`. `state` is `requested` (waiting for the updater), `running`, `done`, `failed` or `rolled_back`; `action` is `update`, `rollback`, `channel` or `automatic`; `backup` names the pre-update backup; `by` is a username, `automatic` or `terminal`; `log` is the end of the updater's output; `phase` says where a running update is: `verify`, `backup`, `install` or `health` |
+| `history` | Finished runs, newest first, at most 50: the same fields as `run` without `log` and `phase`, plus `can_roll_back`: its pre-update backup is still kept and its `from` is older than `current` |
 
-See [Updating the dashboard](operations.md#updating-the-dashboard) for what the updater does. Starting an update is logged in the [audit log](#audit-log) as `dashboard.update`.
+See [Updating the dashboard](operations.md#updating-the-dashboard) for what the updater does. The audit log records `dashboard.update`, `dashboard.rollback`, `dashboard.channel` and `dashboard.auto_update`.
 
 ## Agent API
 

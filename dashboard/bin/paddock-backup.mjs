@@ -148,9 +148,24 @@ function dataFiles(backups) {
   return out.sort();
 }
 
-/** Copy via a temp file and rename, so a crash never leaves a half-written file in place. */
-function placeFile(src, dest, mode, keepOwner) {
+/**
+ * Throws unless `dir`, or the part of it that exists, really is inside `root`. Run as root by the
+ * installer's updater, a restore writes into a data directory the dashboard's user can change: a
+ * directory there replaced by a link must not send a root write somewhere else.
+ */
+function assertInside(root, dir) {
+  const realRoot = fs.realpathSync(root);
+  let p = dir;
+  while (!fs.existsSync(p)) p = path.dirname(p);
+  const real = fs.realpathSync(p);
+  if (real !== realRoot && !real.startsWith(realRoot + path.sep)) throw new Error(`${dir} leads outside ${root} (a link?); not writing there`);
+}
+
+/** Copy via a temp file and rename, so a crash never leaves a half-written file in place. `within`: keep it inside that directory. */
+function placeFile(src, dest, mode, keepOwner, within) {
+  if (within) assertInside(within, path.dirname(dest));
   fs.mkdirSync(path.dirname(dest), { recursive: true, mode: 0o700 });
+  if (within) assertInside(within, path.dirname(dest));
   let prev = null;
   try {
     prev = fs.statSync(dest);
@@ -158,7 +173,9 @@ function placeFile(src, dest, mode, keepOwner) {
     // new file
   }
   const tmp = `${dest}.${process.pid}.tmp`;
-  fs.copyFileSync(src, tmp);
+  // never write through something already at the temp name: a link there would be followed
+  fs.rmSync(tmp, { force: true });
+  fs.copyFileSync(src, tmp, fs.constants.COPYFILE_EXCL);
   fs.chmodSync(tmp, keepOwner && prev ? prev.mode & 0o777 : mode);
   if (keepOwner && prev) {
     if (process.getuid?.() === 0) fs.chownSync(tmp, prev.uid, prev.gid);
@@ -456,6 +473,7 @@ export function restore(arg, opts = {}) {
   targets.push(...changed);
   for (const t of targets) {
     if (path.relative(data, t.dest).startsWith("..") && t.f.role === "data") throw new Error(`${t.f.path}: outside the data directory`);
+    if (t.f.role === "data" && fs.existsSync(data)) assertInside(data, path.dirname(t.dest));
     if (!writable(t.dest)) {
       throw new Error(`can't write ${t.dest}${t.f.role === "data" ? "" : " (use --data-only to restore only the data directory)"}; nothing was changed`);
     }
@@ -471,7 +489,7 @@ export function restore(arg, opts = {}) {
   // a WAL left next to the old database would be replayed into the restored one
   for (const f of fs.readdirSync(data)) if (isDbFile(f)) fs.rmSync(path.join(data, f), { force: true });
 
-  for (const t of targets) placeFile(path.join(src, t.f.path), t.dest, t.mode, t.keepOwner);
+  for (const t of targets) placeFile(path.join(src, t.f.path), t.dest, t.mode, t.keepOwner, t.f.role === "data" ? data : null);
   return { restored: src, manifest: m, before: before && { name: before.name, warning: before.warning }, files: targets.map((t) => t.dest) };
 }
 

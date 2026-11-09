@@ -18,11 +18,11 @@ Installer updates keep configuration and existing agent tokens, and take a full 
 
 ### Updating the dashboard
 
-The dashboard looks for a newer release of itself every 6 hours, on its own channel: stable releases, or prereleases too when it runs a prerelease. When one is out, the version in the header shows **update**. Click it for the release notes of every release since yours and the way to update this install. **Check now** asks GitHub straight away. To stop the dashboard asking GitHub at all, set [`update_check: false`](configuration.md#dashboard-settings).
+The dashboard looks for a newer release of itself every 6 hours, on its channel: stable releases, or prereleases too on the prerelease channel. When one is out, the version in the header shows **update**. Click it to open **Updates**, with the release notes of every release since yours and the way to update this install. **Check now** asks GitHub straight away. To stop the dashboard asking GitHub at all, set [`update_check: false`](configuration.md#dashboard-settings).
 
 | Installation | From the dashboard |
 |---|---|
-| Dashboard installer | Admins click **Update to …**. See [below](#installer-updates-from-the-dashboard) |
+| Dashboard installer | Admins click **Update to …**, switch the [channel](#channel-and-automatic-updates), turn on [automatic updates](#channel-and-automatic-updates) and [roll back](#rolling-back-an-update) an update. See [below](#installer-updates-from-the-dashboard) |
 | Docker Compose | Shows the commands to run: a backup, then the image update. See [Docker updates](#docker-updates) |
 | Source or anything else | Not supported: the page says so. Update it the way you installed it |
 
@@ -38,6 +38,21 @@ The dashboard runs as an unprivileged user and can't update itself. Instead it w
 While it runs, the dashboard restarts and the update page reconnects on its own. An update that was interrupted (a crash, a reboot, a killed updater) is rolled back the same way: by `llama-paddock-recover.service` before the dashboard starts at boot, or the next time the updater or the installer runs.
 
 The updater writes its status and output to `/var/lib/llama-paddock-update/` (`status.json`, `update.log`); `journalctl -u llama-paddock-update` has the rest. Installs from before 0.10.0 get the updater the next time `update-llama-paddock` runs. Starting an update is logged in the [audit log](security.md#audit-log) as `dashboard.update`.
+
+**Update history** lists every update, rollback and channel switch: from the dashboard, from `update-llama-paddock` in a terminal, and automatic ones. The updater keeps it in `history.jsonl` in the same directory.
+
+#### Channel and automatic updates
+
+The top of **Updates** has the install's channel and the automatic updates switch:
+
+- **Channel:** **Stable** or **Prerelease**, the same as `update-llama-paddock stable` or `dev`. Switching to prereleases installs the newest prerelease straight away, with the same backup and rollback. Switching back to stable never installs an older release: a newer prerelease stays until a stable release newer than it is out, because the data format can't go backwards. Both ask first.
+- **Automatic updates:** off by default, and for the stable channel only (the switch is greyed out on prereleases). When it is on, `llama-paddock-auto-update.timer` looks for a newer stable release every 6 hours and installs it the same way as **Update to …**, with the backup, the health check and the rollback. Runs that find nothing new aren't recorded. Logged as `dashboard.auto_update`.
+
+#### Rolling back an update
+
+**Roll back to …** in the history puts an update back: the version from before it, and its data as it was then, from the update's pre-update backup. It's offered while that backup is kept (the newest 5 pre-update backups are) and only for versions older than the running one. Everything since the update is lost: metric history, alerts and benchmarks recorded since, and users, tokens or hosts added since. The dashboard asks first, and the state it replaces is backed up too (a `pre-update` backup), so a rollback can be rolled back.
+
+The updater checks that the backup is a real pre-update backup from that version before it does anything. It installs that release with `PADDOCK_RESTORE_BACKUP`, restores the backup and starts the dashboard, with the same health check: if the older version doesn't start, the newer one and its data come back. Logged as `dashboard.rollback`.
 
 #### Docker updates
 

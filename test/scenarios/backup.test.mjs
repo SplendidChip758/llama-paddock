@@ -5,6 +5,7 @@ import { after, before, test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { Client, REPO, scenarioTest, startDashboard, startStack, waitFor } from "./harness.mjs";
 
@@ -127,6 +128,29 @@ test("restore --data-only leaves config.yaml alone", async () => {
   const r = cli("restore", first.name, "--data-only");
   assert.equal(r.code, 0, r.err);
   assert.match(fs.readFileSync(stack.data.config, "utf8"), /# kept\n$/);
+});
+
+test("restore never writes through a link in the data directory, and changes nothing", () => {
+  // run as root by the installer's updater, it writes into a directory the dashboard's user can change
+  const sub = path.join(stack.data.data, "linked");
+  fs.mkdirSync(sub, { mode: 0o700 });
+  fs.writeFileSync(path.join(sub, "x.json"), "{}", { mode: 0o600 });
+  const b = JSON.parse(cli("backup", "--json").out);
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "paddock-outside-"));
+  fs.rmSync(sub, { recursive: true });
+  fs.symlinkSync(outside, sub);
+  const db = fs.readFileSync(path.join(stack.data.data, "paddock.db"));
+  try {
+    const r = cli("restore", b.name);
+    assert.notEqual(r.code, 0);
+    assert.match(r.err, /leads outside/);
+    assert.deepEqual(fs.readdirSync(outside), []);
+    assert.ok(db.equals(fs.readFileSync(path.join(stack.data.data, "paddock.db"))), "the database was left alone");
+  } finally {
+    fs.rmSync(sub);
+    fs.rmSync(outside, { recursive: true, force: true });
+    fs.rmSync(path.join(backups, b.name), { recursive: true, force: true });
+  }
 });
 
 test("restore replaces a damaged database, and keeps its files as they were", async () => {

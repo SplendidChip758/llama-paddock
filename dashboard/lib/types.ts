@@ -113,7 +113,9 @@ export interface DashboardRelease {
 export interface DashboardUpdateRun {
   /** requested: waiting for the updater to pick it up; rolled_back: it failed and the previous version is back */
   state: "requested" | "running" | "done" | "failed" | "rolled_back";
-  /** the version asked for */
+  /** update, rollback (to an earlier version with its backup), channel (a switch) or automatic (an automatic update) */
+  action: "update" | "rollback" | "channel" | "automatic";
+  /** the version asked for, or installed */
   version: string | null;
   /** the version before it */
   from: string | null;
@@ -124,14 +126,24 @@ export interface DashboardUpdateRun {
   message: string | null;
   /** the pre-update backup, by name (paddock-backup list) */
   backup: string | null;
+  /** who asked: a username, "automatic" or "terminal" */
+  by: string | null;
   /** the end of the updater's output */
   log: string[];
+  /** while running: verify, backup, install or health (checking the new version answers) */
+  phase: "verify" | "backup" | "install" | "health" | null;
+}
+
+/** A finished run in the update history. */
+export interface DashboardUpdateEntry extends Omit<DashboardUpdateRun, "log" | "phase"> {
+  /** its pre-update backup is still kept and it is older than this version: POST {action: "rollback", backup} */
+  can_roll_back: boolean;
 }
 
 /** GET /api/dashboard-update: whether a newer dashboard is out, and how this install updates. */
 export interface DashboardUpdate {
   current: string;
-  /** the releases compared with: prereleases for a prerelease dashboard */
+  /** the releases this install follows: the installer's channel, else prereleases for a prerelease build */
   channel: "stable" | "dev";
   /** false when update_check is off: GitHub isn't asked */
   check: boolean;
@@ -148,8 +160,12 @@ export interface DashboardUpdate {
   method: "installer" | "docker" | "other";
   /** an admin can update from the dashboard (POST /api/dashboard-update) */
   can_update: boolean;
-  /** the last update started from the dashboard, if the updater has a record of one */
+  /** stable releases install by themselves (installer installs; null elsewhere) */
+  auto_update: boolean | null;
+  /** the last run, if the updater has a record of one */
   run: DashboardUpdateRun | null;
+  /** finished runs, newest first (at most 50) */
+  history: DashboardUpdateEntry[];
 }
 
 export interface AgentStats {
@@ -782,6 +798,9 @@ export const AUDIT_ACTIONS = {
   "security.undismiss": "Restored a security check",
   "security.fix": "Fixed data file permissions",
   "dashboard.update": "Updated the dashboard",
+  "dashboard.rollback": "Rolled the dashboard back",
+  "dashboard.channel": "Switched release channel",
+  "dashboard.auto_update": "Changed automatic updates",
 } as const;
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
 
