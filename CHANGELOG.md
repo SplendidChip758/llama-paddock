@@ -1,3 +1,9 @@
+## [0.10.0-dev.3](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.2...v0.10.0-dev.3) (2026-11-09)
+
+### Features
+
+* **dashboard:** dismiss a security check without a note ([#189](https://github.com/SplendidChip758/llama-paddock/issues/189)) ([6e01b09](https://github.com/SplendidChip758/llama-paddock/commit/6e01b09e2b89f5871432ac3f297b364b4fe2cc13))
+
 ## [0.10.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.1...v0.10.0-dev.2) (2026-11-09)
 
 ### Features
