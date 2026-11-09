@@ -53,6 +53,53 @@ export interface ServiceStatus {
 
 export type Platform = "linux" | "windows";
 
+/** The agent's GET /update: its updater's last run. A successful run leaves nothing behind, so it reads "idle". */
+export interface AgentUpdateStatus {
+  state: "idle" | "running" | "failed";
+  /** systemd's result for a failed run, e.g. "exit-code" */
+  result?: string | null;
+  /** the updater's output, for a failed run */
+  log?: string[];
+}
+
+/** An agent update the dashboard started, until the agent reports the new version or gives up. */
+export interface AgentUpdateRun {
+  state: "running" | "done" | "failed";
+  /** unix seconds */
+  started: number;
+  /** unix seconds, once it settled */
+  ended: number | null;
+  /** the version before the update */
+  from: string | null;
+  /** the version after it, once done */
+  to: string | null;
+  /** why it failed, or that the agent was already up to date */
+  detail: string | null;
+  /** the end of the updater's output when it failed */
+  log: string[];
+}
+
+export interface AgentUpdateInfo {
+  platform: Platform | null;
+  /** the newest agent release for its platform on the channel the dashboard follows; null when unknown */
+  latest: string | null;
+  /** it runs an older version than latest */
+  outdated: boolean;
+  /** the dashboard can update it (POST /api/instances/{id}/agent-update); otherwise it is updated on the host */
+  can_update: boolean;
+  /** why it can't, when it is outdated */
+  manual_reason: string | null;
+  /** the update started from here, if any */
+  run: AgentUpdateRun | null;
+}
+
+/** What the dashboard knows about agent releases (GET /api/agent-releases). */
+export interface AgentReleases {
+  /** "stable" or "dev": the releases the dashboard compares agents with; "off" when it doesn't check */
+  channel: "stable" | "dev" | "off";
+  platforms: Record<Platform, { latest: string | null; checked: number | null; error: string | null; url: string }>;
+}
+
 export interface AgentStats {
   ts: number;
   /** missing before 0.6.0; the dashboard then asks /health instead */
@@ -62,6 +109,8 @@ export interface AgentStats {
   platform?: Platform;
   /** SHA-256 of the agent's TLS key (agents from 0.7.0 on), missing when it can't serve HTTPS */
   fingerprint?: string | null;
+  /** it can update itself (POST /update): Linux agents from 0.10.0 that the installer set up */
+  self_update?: boolean;
   system: SystemStats;
   nvidia: { available: boolean; error?: string; gpus: GpuStats[]; processes: GpuProcess[] };
   service: ServiceStatus;
@@ -176,6 +225,8 @@ export interface InstanceSnapshot {
   agent_protocol: number | null;
   /** The agent speaks a protocol this dashboard doesn't support, and what to update. Agent calls stop meanwhile. */
   agent_incompatible: AgentIncompatible | null;
+  /** whether a newer agent release exists, and whether the dashboard can install it; null without an agent */
+  agent_update: AgentUpdateInfo | null;
   ps: LoadedModel[];
   stats: AgentStats | null;
   /** whether Ollama uses the GPU nvidia-smi sees; null without an agent, an NVIDIA GPU or Ollama answering */
@@ -655,6 +706,7 @@ export const AUDIT_ACTIONS = {
   "host.remove": "Removed host",
   "host.agent_https": "Switched agent to HTTPS",
   "host.agent_key": "Accepted agent key",
+  "host.agent_update": "Updated agent",
   "ollama.restart": "Restarted Ollama",
   "ollama.gpu_fix": "Ran a GPU fix",
   "env.change": "Changed environment",

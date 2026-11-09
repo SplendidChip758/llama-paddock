@@ -92,7 +92,7 @@ Admins only, with a session or a token whose user is an admin; 403 for viewers. 
 
 | Method | Path | Body / result |
 |---|---|---|
-| GET | `/api/instances` | `{poll_interval, instances}` with latest status, stats, loaded models, the Ollama `version`, the `agent_version` and `agent_protocol` (`null` if unknown), and `agent_incompatible` (`update-agent`, `update-dashboard` or `null`; see [Agent protocol](#agent-protocol)). Each loaded model has `split` and, once its `/api/show` has been read, `context`; each host has `gpu_check` and `reload_churn`. See [Context and reloads](context-and-reloads.md) |
+| GET | `/api/instances` | `{poll_interval, instances}` with latest status, stats, loaded models, the Ollama `version`, the `agent_version` and `agent_protocol` (`null` if unknown), `agent_incompatible` (`update-agent`, `update-dashboard` or `null`; see [Agent protocol](#agent-protocol)), and `agent_update` (see [Agent updates](#agent-updates)). Each loaded model has `split` and, once its `/api/show` has been read, `context`; each host has `gpu_check` and `reload_churn`. See [Context and reloads](context-and-reloads.md) |
 | GET | `/api/instances/{id}/history` | Recent samples or a requested range; see [History](#history) |
 | GET | `/api/instances/{id}/events` | Availability and model load events over a range; see [Events](#events) |
 | GET | `/api/instances/{id}/requests?range=…` | The host's requests from Ollama's log; see [Requests](#requests) |
@@ -109,6 +109,9 @@ Admins only, with a session or a token whose user is an admin; 403 for viewers. 
 | GET | `/api/instances/{id}/gpu-check` | `{check}`: the [GPU check](gpu-check.md) as of the last poll, the same as `gpu_check` in `/api/instances`; `null` without an agent, an NVIDIA GPU or Ollama answering |
 | POST | `/api/instances/{id}/gpu-check` | Reads Ollama's log and settings again → `{check}` |
 | POST | `/api/instances/{id}/gpu-check/fix` | `{action}`: `restart` or `reload_uvm` (Linux agents from 0.8.0, as root, outside a container) → the agent's `{ok, stderr}` |
+| POST | `/api/instances/{id}/agent-update` | Starts updating the host's agent to the newest release → the update `run` (below); 409 when it's already running or the dashboard can't update this agent |
+| POST | `/api/agent-updates` | Starts updating every outdated agent the dashboard can update → `{started, skipped, failed}`: host ids, and `{id, detail}` for the agents skipped (they need updating on the host) or that refused |
+| GET | `/api/agent-releases` | `{channel, platforms}`: the release channel agents are compared with (`stable`, `dev` or `off`), and per platform (`linux`, `windows`) the `latest` version, when it was `checked`, the last `error` and the releases page `url`. `?refresh=1` asks GitHub again first, at most once a minute |
 | POST | `/api/instances/{id}/agent-https` | Switches a UI host's `http://` agent URL to `https://`, pinning the key the agent reports → `{id, agent_url, agent_fingerprint}`; 409 for `config.yaml` hosts or agents that don't report a key |
 
 Host fields are `name`, `ollama_url`, `ollama_proxy_key`, `agent_url`, `agent_token`, `agent_fingerprint` and `tags`. `agent_fingerprint` applies to `https://` agent URLs: `SHA256:<base64>` as the agent installer prints it (bare base64 and hex are accepted too). Blank pins the key the agent presents on the first connection; omitted keeps the stored pin. `ollama_url` is required. `tags` accepts an array or comma-separated string. Use the ID returned by creation or listed in `/api/instances` in later requests.
@@ -353,6 +356,21 @@ Read the current `managed` map, modify that map, and send the complete result ba
 
 This saves the settings without restarting Ollama. Verify them in the Environment tab, then use **Restart Ollama** when ready to apply them. Avoid concurrent environment edits while reading and writing: this sequence does not detect another user's changes. To intentionally remove a managed variable on the allowlist, omit it from the full map.
 
+### Agent updates
+
+Each host in `/api/instances` has `agent_update` (`null` without an agent):
+
+| Field | Meaning |
+|---|---|
+| `platform` | `linux` or `windows`, as the agent reports it; `null` until it answers |
+| `latest` | The newest agent release for that platform on the dashboard's channel ([`agent_updates`](configuration.md)); `null` when unknown or when the check is off |
+| `outdated` | The agent runs an older version than `latest` |
+| `can_update` | The dashboard can update it. Linux agents from 0.10.0 that the installer set up can; older agents and Windows agents are updated on the host |
+| `manual_reason` | Why the dashboard can't, when it can't |
+| `run` | The update started from the dashboard: `{state, started, ended, from, to, detail, log}`. `state` is `running`, `done` or `failed`; `detail` says why it failed, or that the agent already was on the newest release; `log` is the end of the updater's output after a failure. A finished update is shown for 10 minutes, a failed one until the next attempt |
+
+The dashboard asks GitHub for the agent releases every 6 hours (every 30 minutes after a failure) and keeps the last answer. An update runs on the host: the agent starts its installer's `update-llama-paddock-agent` with the dashboard's channel, which checks the release against its `SHA256SUMS`, keeps the token and key, and restarts the agent. Ollama keeps running. Starting updates is logged in the [audit log](#audit-log) as `host.agent_update`.
+
 ## Agent API
 
 The agent listens separately, normally on port 11435, for HTTPS and (unless `PADDOCK_AGENT_HTTP=off`) plain HTTP. All endpoints except `/health` require `Authorization: Bearer <agent-token>`. The dashboard sends this header using the token stored for the host, after checking the agent's key on `https://`. Agents from 0.7.0 on add `fingerprint`, the SHA-256 of their key, to `/health` and `/stats`. With plain HTTP off, an HTTP request gets 426 with `{detail, fingerprint}`.
@@ -368,6 +386,8 @@ The agent listens separately, normally on port 11435, for HTTPS and (unless `PAD
 | GET | `/gpu-check` | `{ts, platform, log, nvidia_uvm?}`: the GPU-related lines of Ollama's log since it last started (`log.lines`, and `log.error` when it can't be read), and on Linux the `nvidia_uvm` state (agents from 0.8.0) |
 | GET | `/runner-starts?since=…` | `{ts, starts}`: the times (unix seconds, the agent's clock) Ollama logged a model runner starting since `since` (at most a day back; default an hour), and `error` when the log can't be read (agents from 0.8.0) |
 | POST | `/gpu/reload-uvm` | Linux, as root, outside a container: stops Ollama, reloads `nvidia_uvm` and starts Ollama → `{ok, steps, stderr}`; 409 where it can't. The Windows agent answers 400 (agents from 0.8.0) |
+| GET | `/update` | `{state, result?, log?}`: the agent updater's last run, `idle`, `running` or `failed`; a failed run has systemd's `result` and the end of the updater's output in `log` (Linux agents from 0.10.0) |
+| POST | `/update` | `{channel}`: `stable` (default) or `dev`. Starts `update-llama-paddock-agent` for the newest release on that channel as the transient unit `llama-paddock-agent-update`, which restarts the agent → `{ok, channel}`; 409 while one is running or when the installer's updater is missing. Agents that can do this report `self_update: true` in `/health` and `/stats` (Linux agents from 0.10.0) |
 | GET | `/requests?since=…` | `{requests, until, more, skipped}`: the request lines in Ollama's log after `since` (unix seconds), at most 5000. A log file has whole-second times, so agents reading one (Windows, `PADDOCK_OLLAMA_LOG`) also return the lines from the second `since` falls in; drop the ones you already have. Ask again from `until` while `more` is true; `skipped` counts lines in an unknown format (agents from 0.8.0) |
 
 ### Agent protocol

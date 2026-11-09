@@ -17,6 +17,8 @@ Copy [`config.example.yaml`](../config.example.yaml) to `config.yaml`. With Dock
 | `model_library` | `true` | `false` stops the dashboard contacting ollama.com and the model registries (Hugging Face too, for `hf.co/` models): the [library browser](usage.md#models) is off and [fit estimates](fit-estimates.md) need the model pulled on the host. Falls back to `PADDOCK_MODEL_LIBRARY` |
 | `model_library_url` | `https://ollama.com` | Where the library browser reads search results and tag lists. Falls back to `PADDOCK_MODEL_LIBRARY_URL` |
 | `model_registry_url` | `https://registry.ollama.ai` | The registry that model names without a host resolve to, such as `qwen3:8b`. Falls back to `PADDOCK_MODEL_REGISTRY_URL` |
+| `agent_updates` | `auto` | Which agent releases the dashboard compares agents with, to flag older ones and [update them](agent-linux.md#updates-from-the-dashboard): `stable`, `dev` (prereleases too) or `auto`, which follows this dashboard's own channel. `off` stops the dashboard asking GitHub. Falls back to `PADDOCK_AGENT_UPDATES` |
+| `agent_releases_url` | `https://api.github.com` | The GitHub API the agent releases are read from. Falls back to `PADDOCK_AGENT_RELEASES_URL` |
 | `instances` | `[]` | Declarative hosts; read-only in the UI |
 
 Raw polls are kept for up to 24 hours, one-minute averages for up to 7 days, and 15-minute averages up to the retention limit. Reducing retention also shortens the finer tiers. See the [history API](api.md#history) for the resolution returned by each range.

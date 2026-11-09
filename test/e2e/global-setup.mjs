@@ -11,6 +11,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export default async function globalSetup() {
   // two hosts, one with two GPUs and one with none, so the cards show both cases
   const sim = await startSim({ hosts: 2, gpus: "2,0", pullSeconds: 2 });
+  // agents that can update themselves, whether or not the one in test/agent-release can
+  for (const h of sim.hosts) await sim.scenario(h.id, { agent_update: "normal" });
   const data = makeDataDir(sim);
   let dashboard;
   try {

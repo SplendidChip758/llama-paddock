@@ -14,6 +14,7 @@ import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
 import { diagnoseGpu, isGpuLogLine, modelKey, ollamaRun, onCpu, readLog, type GpuEvidence } from "./gpucheck";
 import { HttpError } from "./http-error";
 import { agentProtocol, incompatibleText, protocolCompat, type AgentIncompatible } from "./protocol";
+import { agentChannel, compareVersions, latestAgent } from "./agentReleases";
 import {
   RELOAD_WINDOW_S, contextCheck, loadStats, reloadChurn, unseenLoads, type LoadStats, type ModelInfo,
 } from "./modelcheck";
@@ -25,7 +26,7 @@ import { forgetRequests, syncRequests } from "./requests";
 import { isCloudModel, withSplit } from "./split";
 import {
   DASHBOARD_TARGET,
-  type AgentGpuCheck, type AgentStats, type EnvState, type FitHost, type FitMeasurement, type GpuCheck, type GpuFixAction, type HistoryPoint, type HostEvent,
+  type AgentGpuCheck, type AgentStats, type AgentUpdateInfo, type AgentUpdateRun, type AgentUpdateStatus, type Platform, type EnvState, type FitHost, type FitMeasurement, type GpuCheck, type GpuFixAction, type HistoryPoint, type HostEvent,
   type InstanceSnapshot, type JobInfo, type LoadedModel, type PsModel, type ReloadChurn, type SecurityCheck, type SecurityTarget,
 } from "./types";
 
@@ -72,6 +73,11 @@ class InstanceState {
   agent_protocol: number | null = null;
   /** set while it speaks a protocol this dashboard doesn't support: the only call made to it is the poll */
   agent_incompatible: AgentIncompatible | null = null;
+  agent_platform: Platform | null = null;
+  /** it reports that it can update itself (POST /update) */
+  agent_self_update = false;
+  /** the agent update started from the dashboard; see followAgentUpdate() */
+  agent_update_run: AgentUpdateRun | null = null;
   /** the key the agent presented instead of the pinned one; agent calls stop until it is accepted */
   agent_key_changed: string | null = null;
   /** the key an http:// agent reports having, i.e. it can serve HTTPS */
@@ -143,6 +149,27 @@ class InstanceState {
     return reloadChurn(this.loadStats(), this.unseenLoads(), this.env());
   }
 
+  /** Whether a newer agent is out, and whether the dashboard can install it or the host has to. */
+  agentUpdate(): AgentUpdateInfo | null {
+    if (!this.inst.agent_url) return null;
+    const platform = this.agent_platform;
+    const latest = platform ? latestAgent(platform, paddock().settings) : null;
+    const outdated = !!latest && (compareVersions(this.agent_version, latest) ?? 0) < 0;
+    let manual: string | null = null;
+    if (this.agent_key_changed) manual = "the agent presented a different key: accept it first";
+    else if (!platform || !this.agent_version) manual = "the agent hasn't reported its version yet";
+    else if (this.agent_incompatible === "update-dashboard") manual = "the agent is newer than this dashboard supports";
+    else if (!this.agent_ok && !this.agent_incompatible) manual = "the agent isn't answering";
+    else if (!this.agent_self_update) {
+      manual = platform === "windows" ? "Windows agents are updated on the PC: run the installer from the latest release"
+        : "this agent is too old to update itself: run update-llama-paddock-agent on the host once";
+    }
+    let run = this.agent_update_run;
+    // a finished update stays on screen for a while; a failed one until the next attempt
+    if (run?.state === "done" && run.ended && Date.now() / 1000 - run.ended > AGENT_UPDATE_SHOWN_S) run = null;
+    return { platform, latest, outdated, can_update: manual === null, manual_reason: manual, run };
+  }
+
   snapshot(): InstanceSnapshot {
     const i = this.inst;
     return {
@@ -152,7 +179,7 @@ class InstanceState {
       has_ollama_proxy_key: !!i.ollama_proxy_key, source: i.source,
       ollama_ok: this.ollama_ok, ollama_error: this.ollama_error, agent_ok: this.agent_ok,
       agent_error: this.agent_error, version: this.version, agent_version: this.agent_version,
-      agent_protocol: this.agent_protocol, agent_incompatible: this.agent_incompatible, ps: this.loadedModels(), stats: this.stats, gpu_check: this.gpuCheck(),
+      agent_protocol: this.agent_protocol, agent_incompatible: this.agent_incompatible, agent_update: this.agentUpdate(), ps: this.loadedModels(), stats: this.stats, gpu_check: this.gpuCheck(),
       reload_churn: this.reloadChurn(), updated: this.updated,
     };
   }
@@ -607,7 +634,9 @@ export async function agentCall<T = any>(inst: Instance, method: string, path: s
   if (!inst.agent_url) throw new HttpError(400, `${inst.id} has no agent configured`);
   // an agent on a protocol this dashboard doesn't know may have changed what any other call means
   const live = paddock().instances.get(inst.id);
-  if (live?.inst === inst && live.agent_incompatible && path !== "/stats" && path !== "/health") {
+  // except for updating an agent too old for it, whose /update predates the change
+  const allowed = path === "/stats" || path === "/health" || (path === "/update" && live?.agent_incompatible === "update-agent");
+  if (live?.inst === inst && live.agent_incompatible && !allowed) {
     throw new HttpError(409, live.agent_error ?? "incompatible agent");
   }
   let r: AgentResponse;
@@ -654,12 +683,92 @@ export async function expectedRestart<T>(id: string, fn: () => Promise<T>): Prom
   }
 }
 
+// ============================================================================ agent updates (#15)
+/** how long an agent may take to come back with a new version */
+const AGENT_UPDATE_TIMEOUT_S = 10 * 60;
+const AGENT_UPDATE_SHOWN_S = 10 * 60;
+
+/**
+ * Ask an agent to update itself to the newest release on the dashboard's channel. It runs the
+ * installer's updater, which restarts it; the poller follows it from there (followAgentUpdate).
+ */
+export async function startAgentUpdate(id: string): Promise<AgentUpdateRun> {
+  const st = getState(id);
+  const info = st.agentUpdate();
+  if (!info) throw new HttpError(400, `${id} has no agent configured`);
+  if (st.agent_update_run?.state === "running") throw new HttpError(409, "this agent is already being updated");
+  if (!info.can_update) throw new HttpError(409, info.manual_reason ?? "this agent can't be updated from the dashboard");
+  const run: AgentUpdateRun = {
+    state: "running", started: Date.now() / 1000, ended: null, from: st.agent_version, to: null, detail: null, log: [],
+  };
+  // set before the call, so a second request meanwhile is refused
+  st.agent_update_run = run;
+  try {
+    await agent(st.inst, "POST", "/update", { channel: agentChannel(paddock().settings) === "dev" ? "dev" : "stable" }, 30_000);
+  } catch (e) {
+    if (st.agent_update_run === run) st.agent_update_run = null;
+    throw e;
+  }
+  console.log(`[llama-paddock] ${id}: agent update started from ${run.from ?? "an unknown version"}`);
+  return run;
+}
+
+/** Start updating every outdated agent the dashboard can update; the others are listed with the reason. */
+export async function startAgentUpdates() {
+  const started: string[] = [];
+  const skipped: { id: string; detail: string }[] = [];
+  const failed: { id: string; detail: string }[] = [];
+  const todo: string[] = [];
+  for (const [id, st] of paddock().instances) {
+    const info = st.agentUpdate();
+    if (!info?.outdated || info.run?.state === "running") continue;
+    if (info.can_update) todo.push(id);
+    else skipped.push({ id, detail: info.manual_reason ?? "can't be updated from the dashboard" });
+  }
+  const results = await Promise.allSettled(todo.map((id) => startAgentUpdate(id)));
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") started.push(todo[i]);
+    else failed.push({ id: todo[i], detail: r.reason instanceof Error ? r.reason.message : String(r.reason) });
+  });
+  return { started, skipped, failed };
+}
+
+function settle(run: AgentUpdateRun, state: "done" | "failed", detail: string | null, extra: Partial<AgentUpdateRun> = {}) {
+  Object.assign(run, { state, detail, ended: Date.now() / 1000, ...extra });
+}
+
+/** One poll's look at an update in progress: the agent restarts with a new version, or its updater says why not. */
+async function followAgentUpdate(st: InstanceState) {
+  const run = st.agent_update_run!;
+  if (st.agent_version && st.agent_version !== run.from && (st.agent_ok || st.agent_incompatible)) {
+    settle(run, "done", null, { to: st.agent_version });
+    console.log(`[llama-paddock] ${st.inst.id}: agent updated to ${st.agent_version}`);
+    return;
+  }
+  if (Date.now() / 1000 - run.started > AGENT_UPDATE_TIMEOUT_S) {
+    settle(run, "failed", "the agent didn't come back with a new version within 10 minutes: see journalctl -u llama-paddock-agent-update on the host");
+    return;
+  }
+  // restarting, most likely
+  if (!st.agent_ok && !st.agent_incompatible) return;
+  const s = await agent<AgentUpdateStatus>(st.inst, "GET", "/update", undefined, 5000).catch(() => null);
+  if (s?.state === "failed") {
+    settle(run, "failed", `the updater failed${s.result ? ` (${s.result})` : ""}; the agent kept its version`, { log: (s.log ?? []).slice(-20) });
+  } else if (s?.state === "idle") {
+    // the updater finished without restarting the agent: it found nothing newer to install
+    settle(run, "done", "already on the newest release", { to: st.agent_version });
+  }
+}
+
 // ============================================================================ poller
 const AGENT_VERSION_RECHECK_MS = 10 * 60_000;
 
 /** Record the protocol an agent reports in /stats; true when this dashboard doesn't support it. */
 function agentSpeaks(st: InstanceState, stats: AgentStats | null): boolean {
   if (!stats) return false;
+  // also from an incompatible agent: it is what decides whether the dashboard can update it
+  if (stats.platform === "linux" || stats.platform === "windows") st.agent_platform = stats.platform;
+  st.agent_self_update = stats.self_update === true;
   st.agent_protocol = agentProtocol(stats.protocol);
   st.agent_incompatible = protocolCompat(st.agent_protocol);
   return st.agent_incompatible !== null;
@@ -714,6 +823,8 @@ async function pollOne(st: InstanceState): Promise<HistoryPoint> {
       }
     }
   }
+
+  if (st.agent_update_run?.state === "running") await followAgentUpdate(st);
 
   st.updated = Date.now() / 1000;
   const point: HistoryPoint = { t: st.updated, vram: st.ps.reduce((s, m) => s + (m.size_vram || 0), 0), loaded: st.ps.length };

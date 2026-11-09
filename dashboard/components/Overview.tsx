@@ -10,6 +10,7 @@ import { isOffloaded } from "@/lib/split";
 import { Meter, SplitChip, Stat, statusOf } from "./ui";
 import { HostEditor } from "./HostEditor";
 import { AgentPlainChip, FleetHttpsOffer } from "./AgentTls";
+import { AgentUpdateChip, FleetAgentUpdateOffer, agentVersionText } from "./AgentUpdate";
 import { loudAlerts } from "./AlertBits";
 
 interface UptimeBrief {
@@ -67,6 +68,7 @@ export function Overview() {
       </div>
       {editor}
       <FleetHttpsOffer instances={instances} />
+      <FleetAgentUpdateOffer instances={instances} />
       <SecurityBadge />
       <div className="stats" style={{ marginBottom: 18 }}>
         <Stat k="Online" v={instances.filter((s) => s.ollama_ok).length} unit={`/ ${instances.length}`} />
@@ -122,6 +124,7 @@ function InstCard({ st, uptime }: { st: InstanceSnapshot; uptime?: UptimeBrief }
             </button>
           )}
           <AgentPlainChip st={st} />
+          <AgentUpdateChip st={st} />
           {st.gpu_check?.state === "lost" && <span className="chip bad" title={st.gpu_check.summary}>GPU lost</span>}
           {st.reload_churn.length > 0 && <span className="chip warn" title={st.reload_churn.map((x) => x.summary).join(" ")}>reloading</span>}
           <span className={`chip ${c === "ok" ? "ok" : c === "bad" ? "bad" : ""}`}>{label}</span>
@@ -130,7 +133,7 @@ function InstCard({ st, uptime }: { st: InstanceSnapshot; uptime?: UptimeBrief }
       <dl className="kv">
         <dt>Ollama</dt>
         <dd>{st.version ?? "–"}</dd>
-        {st.has_agent && (<><dt>Agent</dt><dd>{st.agent_version ?? "unknown"}</dd></>)}
+        {st.has_agent && (<><dt>Agent</dt><dd>{agentVersionText(st)}</dd></>)}
         <dt>Endpoint</dt>
         <dd>{st.ollama_url.replace(/^https?:\/\//, "")}</dd>
         {platform && (<><dt>Platform</dt><dd>{platform}</dd></>)}
