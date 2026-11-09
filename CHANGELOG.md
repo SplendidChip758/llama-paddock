@@ -1,3 +1,9 @@
+## [0.10.0-dev.6](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.5...v0.10.0-dev.6) (2026-11-09)
+
+### Features
+
+* add paddock-backup for full backups and restore ([#191](https://github.com/SplendidChip758/llama-paddock/issues/191)) ([a4eb6fc](https://github.com/SplendidChip758/llama-paddock/commit/a4eb6fc7122b88b277e3cd5c08737cbe916f6a91)), closes [#48](https://github.com/SplendidChip758/llama-paddock/issues/48) [#87](https://github.com/SplendidChip758/llama-paddock/issues/87) [#87](https://github.com/SplendidChip758/llama-paddock/issues/87)
+
 ## [0.10.0-dev.5](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.4...v0.10.0-dev.5) (2026-11-09)
 
 ### Bug Fixes
