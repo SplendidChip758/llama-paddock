@@ -13,6 +13,7 @@ import {
 import { evaluateAlerts, forgetAlerts, type PolledHost } from "./alerts";
 import { diagnoseGpu, isGpuLogLine, modelKey, ollamaRun, onCpu, readLog, type GpuEvidence } from "./gpucheck";
 import { HttpError } from "./http-error";
+import { agentProtocol, incompatibleText, protocolCompat, type AgentIncompatible } from "./protocol";
 import {
   RELOAD_WINDOW_S, contextCheck, loadStats, reloadChurn, unseenLoads, type LoadStats, type ModelInfo,
 } from "./modelcheck";
@@ -67,6 +68,10 @@ class InstanceState {
   version: string | null = null;
   agent_version: string | null = null;
   agent_version_checked = 0;
+  /** the agent protocol it speaks; null until it answers */
+  agent_protocol: number | null = null;
+  /** set while it speaks a protocol this dashboard doesn't support: the only call made to it is the poll */
+  agent_incompatible: AgentIncompatible | null = null;
   /** the key the agent presented instead of the pinned one; agent calls stop until it is accepted */
   agent_key_changed: string | null = null;
   /** the key an http:// agent reports having, i.e. it can serve HTTPS */
@@ -146,7 +151,8 @@ class InstanceState {
       agent_key_changed: this.agent_key_changed, agent_https_fingerprint: this.agent_https_fingerprint,
       has_ollama_proxy_key: !!i.ollama_proxy_key, source: i.source,
       ollama_ok: this.ollama_ok, ollama_error: this.ollama_error, agent_ok: this.agent_ok,
-      agent_error: this.agent_error, version: this.version, agent_version: this.agent_version, ps: this.loadedModels(), stats: this.stats, gpu_check: this.gpuCheck(),
+      agent_error: this.agent_error, version: this.version, agent_version: this.agent_version,
+      agent_protocol: this.agent_protocol, agent_incompatible: this.agent_incompatible, ps: this.loadedModels(), stats: this.stats, gpu_check: this.gpuCheck(),
       reload_churn: this.reloadChurn(), updated: this.updated,
     };
   }
@@ -389,7 +395,12 @@ export async function testConnection(body: InstanceInput & { id?: unknown }) {
     o.status === "fulfilled" ? { ok: true, detail: `Ollama ${o.value.version}` } : { ok: false, detail: errText(o.reason) };
   let agentResult: CheckResult | null = null;
   if (probe.agent_url) {
-    if (a.status === "fulfilled" && a.value) {
+    const answer = a.status === "fulfilled" ? a.value : null;
+    const protocol = answer ? agentProtocol(answer.data.protocol) : null;
+    const incompatible = protocol === null ? null : protocolCompat(protocol);
+    if (answer && protocol !== null && incompatible) {
+      agentResult = { ok: false, detail: incompatibleText(protocol, incompatible), fingerprint: answer.fingerprint ?? answer.data.fingerprint ?? null };
+    } else if (a.status === "fulfilled" && a.value) {
       const stats = a.value.data;
       const gpus = stats.nvidia?.gpus?.length ?? 0;
       agentResult = {
@@ -594,6 +605,11 @@ function pinFirstKey(inst: Instance, fingerprint: string) {
 /** Call an agent, and also return the key it presented (https://). */
 export async function agentCall<T = any>(inst: Instance, method: string, path: string, body?: unknown, timeoutMs = 30_000) {
   if (!inst.agent_url) throw new HttpError(400, `${inst.id} has no agent configured`);
+  // an agent on a protocol this dashboard doesn't know may have changed what any other call means
+  const live = paddock().instances.get(inst.id);
+  if (live?.inst === inst && live.agent_incompatible && path !== "/stats" && path !== "/health") {
+    throw new HttpError(409, live.agent_error ?? "incompatible agent");
+  }
   let r: AgentResponse;
   try {
     r = await agentRequest(inst, method, path, body, timeoutMs);
@@ -641,6 +657,14 @@ export async function expectedRestart<T>(id: string, fn: () => Promise<T>): Prom
 // ============================================================================ poller
 const AGENT_VERSION_RECHECK_MS = 10 * 60_000;
 
+/** Record the protocol an agent reports in /stats; true when this dashboard doesn't support it. */
+function agentSpeaks(st: InstanceState, stats: AgentStats | null): boolean {
+  if (!stats) return false;
+  st.agent_protocol = agentProtocol(stats.protocol);
+  st.agent_incompatible = protocolCompat(st.agent_protocol);
+  return st.agent_incompatible !== null;
+}
+
 async function pollOne(st: InstanceState): Promise<HistoryPoint> {
   const inst = st.inst;
   // a changed key stops the agent calls until someone accepts it: they would send the token
@@ -671,6 +695,12 @@ async function pollOne(st: InstanceState): Promise<HistoryPoint> {
       // unless the pin was changed during this poll
       if (a.reason instanceof AgentKeyMismatch && st.inst === inst) st.agent_key_changed = a.reason.presented;
       if (a.reason instanceof AgentWantsHttps) st.agent_https_fingerprint = a.reason.fingerprint;
+    } else if (agentSpeaks(st, a.value)) {
+      // reachable, but the rest of what it says can't be trusted to mean what this dashboard expects
+      st.agent_ok = false;
+      st.agent_error = incompatibleText(st.agent_protocol!, st.agent_incompatible!);
+      st.stats = null;
+      if (typeof a.value?.version === "string") st.agent_version = a.value.version;
     } else {
       st.agent_ok = true;
       st.agent_error = null;

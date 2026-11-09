@@ -19,7 +19,7 @@ The browser uses a session cookie. Scripts, Home Assistant and cron jobs use an 
 | GET | `/api/auth/me` | `{auth, username, role, must_change, min_password}` when auth is enabled; `{auth: false, role: "admin"}` otherwise. With a token, `{auth, username, role, must_change, token: {id, kind, name, scopes}}`, where `scopes` is what the token may do now |
 | POST | `/api/auth/password` | `{current, password}`; `current` is optional during the forced first-login change |
 | POST | `/api/auth/logout` | Clears the session cookie |
-| GET | `/api/healthz` | `{ok, version}`; no login required |
+| GET | `/api/healthz` | `{ok, version, agent_protocol: {min, max}}`: the dashboard's version and the [agent protocols](#agent-protocol) it supports; no login required |
 | GET | `/metrics` | Prometheus metrics; needs the scrape token instead of a login, and is off unless configured. See [Prometheus](prometheus.md) |
 
 `PADDOCK_AUTH=off` disables dashboard authentication, and every request has admin rights. Only use it when another layer protects access. See [Login](configuration.md#login). Unauthenticated API requests normally return 401, and failed requests use a JSON `detail` field.
@@ -92,7 +92,7 @@ Admins only, with a session or a token whose user is an admin; 403 for viewers. 
 
 | Method | Path | Body / result |
 |---|---|---|
-| GET | `/api/instances` | `{poll_interval, instances}` with latest status, stats, loaded models, the Ollama `version` and the `agent_version` (`null` if unknown). Each loaded model has `split` and, once its `/api/show` has been read, `context`; each host has `gpu_check` and `reload_churn`. See [Context and reloads](context-and-reloads.md) |
+| GET | `/api/instances` | `{poll_interval, instances}` with latest status, stats, loaded models, the Ollama `version`, the `agent_version` and `agent_protocol` (`null` if unknown), and `agent_incompatible` (`update-agent`, `update-dashboard` or `null`; see [Agent protocol](#agent-protocol)). Each loaded model has `split` and, once its `/api/show` has been read, `context`; each host has `gpu_check` and `reload_churn`. See [Context and reloads](context-and-reloads.md) |
 | GET | `/api/instances/{id}/history` | Recent samples or a requested range; see [History](#history) |
 | GET | `/api/instances/{id}/events` | Availability and model load events over a range; see [Events](#events) |
 | GET | `/api/instances/{id}/requests?range=…` | The host's requests from Ollama's log; see [Requests](#requests) |
@@ -359,8 +359,8 @@ The agent listens separately, normally on port 11435, for HTTPS and (unless `PAD
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/health` | Agent version, platform and hostname; unauthenticated |
-| GET | `/stats` | Agent version, platform, host, NVIDIA GPU and Ollama process stats |
+| GET | `/health` | Agent version, [protocol](#agent-protocol), platform and hostname; unauthenticated |
+| GET | `/stats` | Agent version, [protocol](#agent-protocol), platform, host, NVIDIA GPU and Ollama process stats |
 | GET | `/env` | Environment state, including the `allowed` names (agents from 0.6.0) |
 | PUT | `/env` | `{vars, restart?}`; replace managed variables on the allowlist, removing omitted ones; preserve variables outside the list. Restarts unless `restart` is `false`. See [preserving settings](#preserve-existing-environment-settings) |
 | POST | `/service/restart` | Restart Ollama |
@@ -369,5 +369,15 @@ The agent listens separately, normally on port 11435, for HTTPS and (unless `PAD
 | GET | `/runner-starts?since=…` | `{ts, starts}`: the times (unix seconds, the agent's clock) Ollama logged a model runner starting since `since` (at most a day back; default an hour), and `error` when the log can't be read (agents from 0.8.0) |
 | POST | `/gpu/reload-uvm` | Linux, as root, outside a container: stops Ollama, reloads `nvidia_uvm` and starts Ollama → `{ok, steps, stderr}`; 409 where it can't. The Windows agent answers 400 (agents from 0.8.0) |
 | GET | `/requests?since=…` | `{requests, until, more, skipped}`: the request lines in Ollama's log after `since` (unix seconds), at most 5000. A log file has whole-second times, so agents reading one (Windows, `PADDOCK_OLLAMA_LOG`) also return the lines from the second `since` falls in; drop the ones you already have. Ask again from `until` while `more` is true; `skipped` counts lines in an unknown format (agents from 0.8.0) |
+
+### Agent protocol
+
+Agents report `protocol`, a whole number, in `/health` and `/stats` (agents from 0.10.0; older ones speak protocol 1 and leave it out). It is separate from the agent's version. It only goes up when the agent API changes in a way an older dashboard can't follow, such as a route or field removed or changing meaning. Fixes and new optional fields don't change it, and a dashboard keeps working with agents that lack them.
+
+Each dashboard supports a range of protocols, shown in `/api/healthz` as `agent_protocol`. This dashboard supports protocol 1, which every agent released so far speaks.
+
+An agent outside that range is still polled, but the dashboard uses nothing else it reports and makes no other calls to it, which return 409. The host shows **agent incompatible**, `agent_incompatible` in `/api/instances` says what to update (`update-agent` or `update-dashboard`), and the agent counts as down for alerts and metrics until it's back in range. In any protocol, `/health` and `/stats` keep `version` and `protocol`, so a dashboard can always tell what it is talking to.
+
+Upgrade the dashboard first when a new release changes the protocol. A newer dashboard supports the older protocols too, while an agent on a newer protocol stops being used by an older dashboard.
 
 Both agents implement these routes. Installation and configuration: [Linux](agent-linux.md) · [Windows](agent-windows.md).

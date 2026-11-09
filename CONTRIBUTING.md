@@ -58,7 +58,7 @@ The control API changes a host's behavior while everything runs:
 | `pull` | `normal`, `stall` (stops making progress), `fail` (error line mid-stream), `drop` (connection cut mid-stream) |
 | `create` | `normal`, `stall`, `fail` |
 | `ollama_key`, `agent_token` | require a different key (or `null` for none) or token, like a rotated credential |
-| `pull_seconds`, `ollama_version`, `agent_version` | download speed; versions to report (`agent_version: null` leaves it out of `/stats`, like agents before 0.6.0) |
+| `pull_seconds`, `ollama_version`, `agent_version`, `agent_protocol` | download speed; versions to report (`agent_version: null` leaves it out of `/stats`, like agents before 0.6.0; `agent_protocol: null` leaves the protocol out, like agents before 0.10.0) |
 | `ps_size_vram` | `false` leaves `size_vram` out of `/api/ps`, so the GPU/CPU split is unknown |
 | `gpu_temp`, `vram_pct`, `disk_pct`, `models_disk_pct` | readings for the alert rules: every GPU's °C, each GPU's memory in use (%), the root filesystem (%), and a separate filesystem for `OLLAMA_MODELS` (%). `null` goes back to the simulated values |
 | `crash` | `ollama`: the Ollama process dies and a new one starts (new pid, models unloaded); `runner`: the first loaded model's runner exits while `/api/ps` still lists the model |

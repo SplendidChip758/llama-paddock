@@ -48,6 +48,8 @@
  *        pull_seconds, ollama_key (string or null), agent_token,
  *        ollama_version, agent_version (null: /stats leaves the version out, like agents before 0.6.0;
  *                     below 0.8.0 there is no /gpu-check, /gpu/reload-uvm or /runner-starts either, as in those agents)
+ *        agent_protocol: the agent protocol /health and /stats report (default: the one the agents in this
+ *                     checkout speak; null: left out, like agents before 0.10.0)
  *        agent_http:  false = HTTPS only (PADDOCK_AGENT_HTTP=off), true = both (default)
  *        agent_tls:   false = no HTTPS and no fingerprint, like agents before 0.7.0
  *        agent_key:   "new" = replace the agent's key, as the installer's PADDOCK_AGENT_NEW_KEY does
@@ -150,13 +152,21 @@ function fail(msg) {
 
 // The agent version the sim reports by default: the one in the repository's agent, so the
 // dashboard shows the same version as a freshly installed agent of this checkout.
-function repoAgentVersion() {
+function repoAgentSource() {
   try {
-    const src = fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../agent/linux/paddock-agent.mjs"), "utf8");
-    return /const VERSION = "([^"]+)"/.exec(src)?.[1] ?? "0.0.0-sim";
+    return fs.readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../agent/linux/paddock-agent.mjs"), "utf8");
   } catch {
-    return "0.0.0-sim";
+    return "";
   }
+}
+
+/** The protocol the agents in this checkout speak, so the simulated agent matches them by default. */
+function repoAgentProtocol() {
+  return Number(/const PROTOCOL = (\d+);/.exec(repoAgentSource())?.[1] ?? 1);
+}
+
+function repoAgentVersion() {
+  return /const VERSION = "([^"]+)"/.exec(repoAgentSource())?.[1] ?? "0.0.0-sim";
 }
 
 // ------------------------------------------------------------------ helpers
@@ -272,6 +282,7 @@ function makeHost(n, o) {
     ollamaKey: o.ollamaKeys[n - 1],
     ollamaVersion: "0.12.6",
     agentVersion: repoAgentVersion(),
+    agentProtocol: repoAgentProtocol(),
     pullSeconds: o.pullSeconds,
     /** milliseconds per streamed token, so hosts compare differently side by side */
     tokenMs: 20 + 10 * (n - 1),
@@ -819,6 +830,7 @@ function agentStats(h) {
   return {
     ts: t,
     ...(h.agentVersion ? { version: h.agentVersion } : {}),
+    ...(h.agentProtocol != null ? { protocol: h.agentProtocol } : {}),
     platform: "linux",
     fingerprint: agentFingerprint(h),
     system: {
@@ -880,7 +892,7 @@ async function newOllamaProcess(h) {
 }
 
 const agentRoutes = {
-  "GET /health": (h) => ({ ok: true, version: h.agentVersion ?? undefined, platform: "linux", hostname: h.hostname, fingerprint: agentFingerprint(h) }),
+  "GET /health": (h) => ({ ok: true, version: h.agentVersion ?? undefined, protocol: h.agentProtocol ?? undefined, platform: "linux", hostname: h.hostname, fingerprint: agentFingerprint(h) }),
   "GET /stats": (h) => agentStats(h),
   "GET /env": (h) => ({
     managed: { ...h.env }, override_path: OVERRIDE_PATH, raw: renderOverride(h.env), allowed: AGENT_ENV_ALLOW,
@@ -1013,7 +1025,7 @@ async function setAgent(h, state) {
 async function applyScenario(h, patch) {
   if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new HttpErr(400, "body must be a JSON object");
   const known = [
-    ...Object.keys(SCENARIO_VALUES), "pull_seconds", "ollama_key", "agent_token", "ollama_version", "agent_version",
+    ...Object.keys(SCENARIO_VALUES), "pull_seconds", "ollama_key", "agent_token", "ollama_version", "agent_version", "agent_protocol",
     "agent_http", "agent_tls", "agent_key", "ps_size_vram", "gpu_temp", "vram_pct", "disk_pct", "models_disk_pct", "crash", "gpu_lost",
   ];
   for (const [k, v] of Object.entries(patch)) {
@@ -1031,6 +1043,12 @@ async function applyScenario(h, patch) {
   }
   if (patch.ollama_version !== undefined) h.ollamaVersion = String(patch.ollama_version);
   if (patch.agent_version !== undefined) h.agentVersion = patch.agent_version ? String(patch.agent_version) : null;
+  if (patch.agent_protocol !== undefined) {
+    if (patch.agent_protocol !== null && !(Number.isInteger(patch.agent_protocol) && patch.agent_protocol >= 0)) {
+      throw new HttpErr(400, "agent_protocol must be a whole number, or null");
+    }
+    h.agentProtocol = patch.agent_protocol;
+  }
   if (patch.agent_tls !== undefined) h.agentTls = !!patch.agent_tls;
   if (patch.ps_size_vram !== undefined) h.psSizeVram = !!patch.ps_size_vram;
   if (patch.agent_http !== undefined) {
@@ -1097,6 +1115,7 @@ function hostView(h, full = false) {
     pull_seconds: h.pullSeconds,
     ollama_version: h.ollamaVersion,
     agent_version: h.agentVersion,
+    agent_protocol: h.agentProtocol,
     scenario: { ...h.scenario },
     ps_size_vram: h.psSizeVram,
     readings: { gpu_temp: h.gpuTemp, vram_pct: h.vramPct, disk_pct: h.diskPct, models_disk_pct: h.modelsDiskPct },
