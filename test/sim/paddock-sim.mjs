@@ -72,11 +72,13 @@
  *                     without /update or self_update, like one from before 0.10.0). Default: "normal"
  *                     when the agent in test/agent-release has /update, else "none"
  *
- * Agent releases, on the control port, like GitHub's API (agent_releases_url: http://<bind>:<B>/_sim/github):
- *   GET  /_sim/github/repos/<owner>/<repo>/releases   the simulated releases; a repo ending in
- *                                       -win-agent is the Windows agent's, any other the Linux agent's
- *   POST /_sim/github/releases          {linux?: [tags], windows?: [tags]}: replace them. Tags with a
- *                                       "-" are prereleases. Default: the version the hosts' agents run
+ * Agent and dashboard releases, on the control port, like GitHub's API (agent_releases_url: http://<bind>:<B>/_sim/github):
+ *   GET  /_sim/github/repos/<owner>/<repo>/releases   the simulated releases; repo llama-paddock is the
+ *                                       dashboard's, a repo ending in -win-agent the Windows agent's,
+ *                                       any other the Linux agent's
+ *   POST /_sim/github/releases          {linux?: [tags], windows?: [tags], dashboard?: [tags]}: replace
+ *                                       them. Tags with a "-" are prereleases. Default: the version the
+ *                                       hosts' agents run, and no dashboard releases
  *   GET  /_sim/github/requests          how many times the releases were read
  *
  * Models: loading with a num_ctx whose KV cache doesn't fit in the GPUs puts the rest in system RAM
@@ -970,6 +972,8 @@ const agentFingerprint = (h) => (h.agentTls ? h.tls.fingerprint : null);
 // ------------------------------------------------------------------ agent updates
 /** Simulated agent releases per platform, newest anywhere in the list, as GitHub lists them. */
 const agentReleases = { linux: null, windows: null };
+/** Simulated dashboard releases (repo llama-paddock): none by default, so no update is offered. */
+let dashboardReleases = [];
 let releaseReads = 0;
 const releasesOf = (platform) => agentReleases[platform] ?? [`v${repoAgentVersion()}`];
 const isPre = (tag) => tag.includes("-");
@@ -1516,16 +1520,27 @@ async function handleGithub(req, res, url) {
   if (req.method === "GET" && url.pathname === "/_sim/github/requests") return sendJson(res, 200, { reads: releaseReads });
   if (req.method === "POST" && url.pathname === "/_sim/github/releases") {
     const body = await readBody(req);
+    if (body?.dashboard !== undefined) {
+      if (!Array.isArray(body.dashboard) || !body.dashboard.every((t) => /^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(t))) throw new HttpErr(400, "dashboard must be a list of tags like v1.2.3");
+      dashboardReleases = body.dashboard;
+    }
     for (const p of ["linux", "windows"]) {
       if (body?.[p] === undefined) continue;
       if (!Array.isArray(body[p]) || !body[p].every((t) => /^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(t))) throw new HttpErr(400, `${p} must be a list of tags like v1.2.3`);
       agentReleases[p] = body[p];
     }
-    return sendJson(res, 200, { linux: releasesOf("linux"), windows: releasesOf("windows") });
+    return sendJson(res, 200, { linux: releasesOf("linux"), windows: releasesOf("windows"), dashboard: dashboardReleases });
   }
   const m = /^\/_sim\/github\/repos\/[^/]+\/([^/]+)\/releases$/.exec(url.pathname);
   if (req.method !== "GET" || !m) throw new HttpErr(404, "not found");
   releaseReads++;
+  if (m[1] === "llama-paddock") {
+    return sendJson(res, 200, dashboardReleases.map((tag) => ({
+      tag_name: tag, draft: false, prerelease: isPre(tag), body: `## ${tag}\n\n### Features\n\n* notes for ${tag}`,
+      html_url: `https://github.com/SplendidChip758/llama-paddock/releases/tag/${tag}`, published_at: "2026-11-01T00:00:00Z",
+      assets: [{ name: "SHA256SUMS" }, { name: `llama-paddock-dashboard-${tag}.tar.gz` }],
+    })));
+  }
   const platform = m[1].endsWith("-win-agent") ? "windows" : "linux";
   sendJson(res, 200, releasesOf(platform).map((tag) => ({
     tag_name: tag, draft: false, prerelease: isPre(tag),

@@ -20,7 +20,8 @@ ENV NODE_ENV=production \
     PORT=8080 \
     HOSTNAME=0.0.0.0 \
     PADDOCK_CONFIG=/config/config.yaml \
-    PADDOCK_DATA_DIR=/data
+    PADDOCK_DATA_DIR=/data \
+    PADDOCK_INSTALL_METHOD=docker
 
 # standalone output = server.js + only the node_modules it needs
 COPY --from=build --chown=node:node /app/.next/standalone ./

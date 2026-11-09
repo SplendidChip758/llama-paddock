@@ -26,6 +26,11 @@ audit_retention_days: 365   # audit log of who changed what (admins: menu → Au
 # a prerelease dashboard; off stops the dashboard asking GitHub (offline installs).
 # agent_updates: auto
 
+# The dashboard looks for a newer release of itself on its own channel (stable,
+# or prereleases on a prerelease dashboard) and shows Update available.
+# false stops it asking GitHub.
+# update_check: true
+
 instances:
   - id: ollama-01
     name: ollama-01 · Node-01 P100

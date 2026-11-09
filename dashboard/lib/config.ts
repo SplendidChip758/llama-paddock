@@ -40,8 +40,10 @@ export interface Settings {
   model_library_url: string;
   /** Which agent releases count as current: auto follows this dashboard's own channel; off never asks GitHub. */
   agent_updates: "auto" | "stable" | "dev" | "off";
-  /** The GitHub API the agent releases are read from. */
+  /** The GitHub API the agent and dashboard releases are read from. */
   agent_releases_url: string;
+  /** Look for newer dashboard releases on this install's channel; off never asks GitHub. */
+  update_check: boolean;
   instances: Instance[];
 }
 
@@ -142,6 +144,7 @@ export function loadSettings(): Settings {
     model_library_url: trimSlash(String(raw.model_library_url || process.env.PADDOCK_MODEL_LIBRARY_URL || "https://ollama.com")),
     agent_updates: agentUpdates(raw.agent_updates ?? process.env.PADDOCK_AGENT_UPDATES),
     agent_releases_url: trimSlash(String(raw.agent_releases_url || process.env.PADDOCK_AGENT_RELEASES_URL || "https://api.github.com")),
+    update_check: !/^(false|off|no|0)$/i.test(String(raw.update_check ?? process.env.PADDOCK_UPDATE_CHECK ?? "true").trim()),
     instances: [...fromConfig, ...fromUi],
   };
 }

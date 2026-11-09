@@ -14,9 +14,12 @@ export default async function globalSetup() {
   // agents that can update themselves, whether or not the one in test/agent-release can
   for (const h of sim.hosts) await sim.scenario(h.id, { agent_update: "normal" });
   const data = makeDataDir(sim);
+  // an installer install, so the dashboard update page offers its button; the tests play the updater
+  const updater = path.join(data.dir, "updater");
+  fs.mkdirSync(updater);
   let dashboard;
   try {
-    dashboard = await startDashboard(data);
+    dashboard = await startDashboard(data, { env: { PADDOCK_INSTALL_METHOD: "installer", PADDOCK_UPDATER_DIR: updater } });
   } catch (e) {
     await sim.stop();
     data.remove();
@@ -26,6 +29,8 @@ export default async function globalSetup() {
 
   process.env.PADDOCK_E2E_URL = dashboard.url;
   process.env.PADDOCK_E2E_SIM = sim.control;
+  process.env.PADDOCK_E2E_DATA = data.data;
+  process.env.PADDOCK_E2E_UPDATER = updater;
 
   return async () => {
     await Promise.allSettled([dashboard.stop(), sim.stop()]);
