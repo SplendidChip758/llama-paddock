@@ -2,6 +2,7 @@
 // No "server-only" here: proxy.ts imports this via lib/auth.ts and isn't bundled
 // with the react-server condition that package relies on.
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 /** PADDOCK_DATA_DIR, or a "data" directory next to the config file. */
@@ -36,5 +37,17 @@ export function mtimeOf(name: string): number | null {
     return fs.statSync(/*turbopackIgnore: true*/ dataFile(name)).mtimeMs;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Note that a dashboard runs on this data directory, so `paddock-backup restore` can refuse to
+ * replace files under it. A stale lock is harmless: restore checks whether the pid still runs.
+ */
+export function writeLock() {
+  try {
+    writeJson("paddock.lock", { pid: process.pid, host: os.hostname(), started: Date.now() / 1000 });
+  } catch (e) {
+    console.warn(`[llama-paddock] can't write ${dataFile("paddock.lock")}: ${e instanceof Error ? e.message : e}`);
   }
 }

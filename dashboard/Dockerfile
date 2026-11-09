@@ -25,9 +25,12 @@ ENV NODE_ENV=production \
 # standalone output = server.js + only the node_modules it needs
 COPY --from=build --chown=node:node /app/.next/standalone ./
 COPY --from=build --chown=node:node /app/.next/static ./.next/static
+# paddock-backup: full backups and restore, also when the dashboard won't start
+COPY --from=build --chown=node:node /app/bin ./bin
 
 # hosts added in the UI and the login; mount a volume here
-RUN mkdir -p /data && chown node:node /data
+RUN mkdir -p /data && chown node:node /data \
+ && ln -s /app/bin/paddock-backup.mjs /usr/local/bin/paddock-backup
 VOLUME /data
 
 USER node

@@ -4,7 +4,7 @@ Keep llama-paddock up to date, back it up, try prereleases, remove it, and fix c
 
 ## Updates
 
-Back up your data before upgrading, especially when changing release channels.
+Take a [backup](#backups) before upgrading, especially when changing release channels.
 
 | Installation | Update |
 |---|---|
@@ -33,13 +33,39 @@ An install follows the channel it was installed or last switched to, so a prerel
 
 ## Backups
 
-Stop the dashboard before copying its entire data directory so the SQLite database and any WAL files are consistent. Preserve file ownership and permissions. Also back up your YAML configuration and environment file; these may contain secrets.
+`paddock-backup` takes a **full backup**: everything needed to put an install back exactly as it was. It holds a consistent snapshot of `paddock.db` (history, alerts, benchmarks, the audit log, jobs), the other files in the [data directory](configuration.md#data-directory) (hosts, users, API tokens, pinned agent keys, alert rules and channels), `config.yaml` and, for installer installs, the service's env file. Each backup records the application and database schema versions and a SHA-256 checksum for every file. Backups hold secrets: they're written with mode 600, in a directory only the dashboard's user can read.
 
-- **Installer:** stop `llama-paddock` with `systemctl stop llama-paddock`, copy `/var/lib/llama-paddock` and `/etc/llama-paddock`, then run `systemctl start llama-paddock`.
-- **Docker:** run `docker compose stop`, back up the `paddock-data` volume and your Compose/config/environment files, then run `docker compose start`. Compose normally prefixes the volume name with the project name; `docker volume ls` shows its actual name.
-- **Source:** stop the Node.js process, copy `PADDOCK_DATA_DIR` and any configuration, then restart it.
+A full backup is for putting the same install back, for example after an update that went wrong. It isn't a way to move the dashboard to another machine.
 
-To restore, stop the dashboard, restore the saved data and config with their original ownership and private permissions, then start the matching application version. Agent tokens/config live separately on each host; back up those files too if you need to rebuild a host.
+The dashboard can keep running while you take a backup: the database is read in a single transaction, so the copy is consistent. Uploads in progress (`uploads/`) aren't included.
+
+| Installation | Back up | Restore |
+|---|---|---|
+| Dashboard installer | `paddock-backup backup` as root, in the container/VM (`pct exec <ctid> -- paddock-backup backup` from Proxmox) | `paddock-backup restore <name>`: it stops `llama-paddock`, puts the files back and starts it again |
+| Docker Compose | `docker compose exec llama-paddock paddock-backup backup` | `docker compose stop`, then `docker compose run --rm llama-paddock paddock-backup restore <name>`, then `docker compose start` |
+| Source | `node dashboard/bin/paddock-backup.mjs backup`, with the same `PADDOCK_DATA_DIR` and `PADDOCK_CONFIG` as the dashboard | Stop the dashboard, run `… restore <name>`, start it again |
+
+Backups go to `backups/` in the data directory. For Docker, that's inside the `paddock-data` volume. To keep them off the machine, copy them elsewhere, or pass `--dir` to write them somewhere else. The commands:
+
+| Command | Does |
+|---|---|
+| `paddock-backup backup` | Takes a full backup and prints its directory. `--reason pre-update` marks it as taken before an update: only the newest 5 of those are kept. Manual backups are kept until you delete them |
+| `paddock-backup list` | Lists the backups, oldest first, with their date, reason and size |
+| `paddock-backup verify <name>` | Checks every file against its checksum, and the database's integrity |
+| `paddock-backup restore <name>` | Puts the install back as the backup has it. `--data-only` leaves `config.yaml` and the env file alone |
+
+Every command takes `--dir DIR` (where backups live), `--env-file FILE` (back up and restore the service's env file; the installer's command sets it) and `--json` (output for scripts).
+
+A restore:
+
+- refuses while the dashboard is running on that data directory. Stop it first; the installer's command does this for you.
+- refuses a damaged backup (a checksum doesn't match) before changing anything.
+- refuses a backup from a newer version than the one installed, and says which version to install first. A backup from an older version restores, and its data is upgraded when the dashboard starts, as it would be by an update.
+- first backs up the state it replaces (reason `pre-restore`, newest 3 kept), so a restore can be undone with another restore.
+- removes data files that were added after the backup was taken, such as API tokens created since, so they don't survive the restore.
+- leaves `config.yaml` alone when it's unchanged, so a read-only Docker mount isn't a problem. When it has changed and can't be written, the restore stops before changing anything: use `--data-only`.
+
+`paddock-backup` comes with releases from 0.10.0. With older releases, stop the dashboard and copy the data directory, `config.yaml` and the env file by hand, keeping ownership and permissions. Agent tokens and settings live on each Ollama host: back those up there if you need to rebuild a host.
 
 ## Prereleases
 
