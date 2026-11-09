@@ -2,7 +2,8 @@
 /**
  * The real Linux agent the tests run against. The agents are released from
  * SplendidChip758/llama-paddock-agent, so the tests use the release named in test/agent-release,
- * downloaded once into test/.agent/<tag>/ and checked against that release's SHA256SUMS.
+ * downloaded once into test/.agent/<tag>/ (from the repository at that tag, like install/agent.sh)
+ * and checked against that release's SHA256SUMS.
  * PADDOCK_AGENT_SRC=<a clone of llama-paddock-agent> uses its linux/paddock-agent.mjs instead,
  * to test an agent change against this dashboard.
  *
@@ -39,13 +40,38 @@ export function agentSource() {
   }
 }
 
-async function download(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`);
-  return Buffer.from(await r.arrayBuffer());
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** GET with retries for GitHub's intermittent 5xx; null on a 404. */
+async function download(url, headers = {}) {
+  let last;
+  for (const delay of [2000, 5000, 0]) {
+    const r = await fetch(url, { headers, signal: AbortSignal.timeout(60_000) }).catch((e) => ({ ok: false, status: e.message }));
+    if (r.ok) return Buffer.from(await r.arrayBuffer());
+    if (r.status === 404) return null;
+    last = r.status;
+    await sleep(delay);
+  }
+  throw new Error(`${url}: ${last}`);
 }
 
-/** Download the pinned release's Linux agent unless it's there already; return its path. */
+/** A release file through the API, for when release downloads answer 504; uses GITHUB_TOKEN when set (CI). */
+async function apiAsset(tag, name) {
+  const auth = process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {};
+  const rel = await download(`https://api.github.com/repos/${REPO}/releases/tags/${tag}`, { ...auth, Accept: "application/vnd.github+json" });
+  const id = rel && JSON.parse(rel.toString()).assets?.find((a) => a.name === name)?.id;
+  if (!id) throw new Error(`${tag} has no ${name}`);
+  return download(`https://api.github.com/repos/${REPO}/releases/assets/${id}`, { ...auth, Accept: "application/octet-stream" });
+}
+
+const sha256 = (b) => crypto.createHash("sha256").update(b).digest("hex");
+
+/**
+ * Download the pinned release's Linux agent unless it's there already; return its path. Like
+ * install/agent.sh: the agent from the repository at the release's tag, checked against the
+ * release's SHA256SUMS, else the release's own file. (Releases from 0.10.0 on ship it in a
+ * tarball, which SHA256SUMS lists the files of; up to 0.10.0-dev.2 as paddock-agent-linux.mjs.)
+ */
 export async function fetchAgent() {
   const file = agentPath();
   if (process.env.PADDOCK_AGENT_SRC) {
@@ -55,11 +81,17 @@ export async function fetchAgent() {
   if (fs.existsSync(file)) return file;
   const tag = agentRelease();
   const base = `https://github.com/${REPO}/releases/download/${tag}`;
-  const [sums, agent] = await Promise.all([download(`${base}/SHA256SUMS`), download(`${base}/paddock-agent-linux.mjs`)]);
-  const want = /^([0-9a-f]{64}) +\*?paddock-agent-linux\.mjs$/m.exec(sums.toString())?.[1];
-  const got = crypto.createHash("sha256").update(agent).digest("hex");
-  if (!want) throw new Error(`${tag}'s SHA256SUMS doesn't list paddock-agent-linux.mjs`);
-  if (want !== got) throw new Error(`paddock-agent-linux.mjs from ${tag} doesn't match its SHA256SUMS`);
+  const sums = (await download(`${base}/SHA256SUMS`).catch(() => apiAsset(tag, "SHA256SUMS")))?.toString();
+  if (!sums) throw new Error(`${tag} has no SHA256SUMS`);
+  const listed = (name) => new RegExp(`^([0-9a-f]{64}) +\\*?${name.replace(/[.]/g, "\\.")}$`, "m").exec(sums)?.[1];
+  const want = listed("llama-paddock-agent/paddock-agent.mjs") ?? listed("paddock-agent-linux.mjs");
+  if (!want) throw new Error(`${tag}'s SHA256SUMS doesn't list the agent`);
+  let agent = await download(`https://raw.githubusercontent.com/${REPO}/${tag}/linux/paddock-agent.mjs`).catch(() => null);
+  if (!agent || sha256(agent) !== want) {
+    if (!listed("paddock-agent-linux.mjs")) throw new Error(`the agent at ${tag} didn't download or doesn't match its SHA256SUMS`);
+    agent = await download(`${base}/paddock-agent-linux.mjs`).catch(() => apiAsset(tag, "paddock-agent-linux.mjs"));
+  }
+  if (!agent || sha256(agent) !== want) throw new Error(`the agent from ${tag} doesn't match its SHA256SUMS`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(`${file}.tmp`, agent);
   fs.renameSync(`${file}.tmp`, file);
