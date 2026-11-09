@@ -21,6 +21,11 @@ audit_retention_days: 365   # audit log of who changed what (admins: menu → Au
 # model_library_url: https://ollama.com
 # model_registry_url: https://registry.ollama.ai
 
+# Agents older than the latest agent release are flagged, and admins can update
+# them from the dashboard. auto compares with stable releases, or prereleases on
+# a prerelease dashboard; off stops the dashboard asking GitHub (offline installs).
+# agent_updates: auto
+
 instances:
   - id: ollama-01
     name: ollama-01 · Node-01 P100

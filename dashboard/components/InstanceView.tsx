@@ -14,6 +14,7 @@ import { RequestsTab } from "./RequestsTab";
 import { TABS, type Tab } from "@/lib/tabs";
 import { HostEditor } from "./HostEditor";
 import { AgentKeyNotice, AgentPlainChip, HttpsOffer, agentEncrypted } from "./AgentTls";
+import { AgentUpdateChip, AgentUpdateNotice, agentVersionText } from "./AgentUpdate";
 import { HostAlertPill, HostSilence } from "./AlertBits";
 
 export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
@@ -57,10 +58,11 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
             <span>Ollama {st.version ?? "–"}</span>
             {st.has_agent && (
               <span title={agentEncrypted(st) ? `HTTPS, key ${st.agent_fingerprint ?? "pinned on first connection"}` : undefined}>
-                agent {st.agent_version ?? "unknown"}{agentEncrypted(st) ? " · HTTPS" : ""}
+                agent {agentVersionText(st)}{agentEncrypted(st) ? " · HTTPS" : ""}
               </span>
             )}
             <AgentPlainChip st={st} />
+            <AgentUpdateChip st={st} />
             {st.stats && <span>host {st.stats.system.hostname}{platform ? ` (${platform})` : ""}</span>}
             {svc && <span>service: {svc.active}{svc.sub ? `/${svc.sub}` : ""}</span>}
           </div>
@@ -82,6 +84,7 @@ export function InstanceView({ id, tab }: { id: string; tab: Tab }) {
       {editing && <HostEditor host={st} onClose={() => setEditing(false)} />}
       {st.ollama_error && <div className="notice bad">Ollama: {st.ollama_error}</div>}
       <AgentKeyNotice st={st} />
+      <AgentUpdateNotice st={st} />
       {st.agent_error && !st.agent_key_changed && <div className="notice warn">Agent: {st.agent_error}</div>}
       <HttpsOffer st={st} />
       <nav className="tabs">

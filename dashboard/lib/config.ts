@@ -38,6 +38,10 @@ export interface Settings {
   model_registry_url: string;
   /** Where the library browser reads search results and tag lists: ollama.com, which has no API for it. */
   model_library_url: string;
+  /** Which agent releases count as current: auto follows this dashboard's own channel; off never asks GitHub. */
+  agent_updates: "auto" | "stable" | "dev" | "off";
+  /** The GitHub API the agent releases are read from. */
+  agent_releases_url: string;
   instances: Instance[];
 }
 
@@ -80,6 +84,15 @@ function parseInstance(item: Record<string, any>, fallbackId: string, source: In
     tags: Array.isArray(item.tags) ? item.tags.map(String) : [],
     source,
   };
+}
+
+function agentUpdates(v: unknown): Settings["agent_updates"] {
+  // YAML reads a bare false as a boolean
+  const s = String(v ?? "auto").trim().toLowerCase() || "auto";
+  if (/^(false|off|no|0)$/.test(s)) return "off";
+  if (s === "latest") return "stable";
+  if (s === "auto" || s === "stable" || s === "dev") return s;
+  throw new Error(`agent_updates must be auto, stable, dev or off, not ${JSON.stringify(v)}`);
 }
 
 function positive(v: unknown, key: string): number {
@@ -127,6 +140,8 @@ export function loadSettings(): Settings {
     model_library: !/^(false|off|no|0)$/i.test(String(raw.model_library ?? process.env.PADDOCK_MODEL_LIBRARY ?? "true").trim()),
     model_registry_url: trimSlash(String(raw.model_registry_url || process.env.PADDOCK_MODEL_REGISTRY_URL || "https://registry.ollama.ai")),
     model_library_url: trimSlash(String(raw.model_library_url || process.env.PADDOCK_MODEL_LIBRARY_URL || "https://ollama.com")),
+    agent_updates: agentUpdates(raw.agent_updates ?? process.env.PADDOCK_AGENT_UPDATES),
+    agent_releases_url: trimSlash(String(raw.agent_releases_url || process.env.PADDOCK_AGENT_RELEASES_URL || "https://api.github.com")),
     instances: [...fromConfig, ...fromUi],
   };
 }

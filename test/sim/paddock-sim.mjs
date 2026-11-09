@@ -9,7 +9,7 @@
  * Each simulated host gets two ports, because the dashboard addresses hosts by
  * URL: one serves Ollama's HTTP API (the parts the dashboard uses), the other the
  * agent API of the Linux agent (SplendidChip758/llama-paddock-agent; /health, /stats, /env, /logs,
- * /service/restart, /gpu-check, /gpu/reload-uvm, /runner-starts, with the same bearer-token rule). Like the agents, the agent
+ * /service/restart, /gpu-check, /gpu/reload-uvm, /runner-starts, /update, with the same bearer-token rule). Like the agents, the agent
  * port serves HTTPS with a self-signed certificate (a new key per host and run)
  * and plain HTTP. A third port serves the control API, which switches failure
  * scenarios at runtime.
@@ -66,6 +66,17 @@
  *                     loaded and newly loaded models run on the CPU while nvidia-smi still sees the
  *                     GPUs. The value is what brings the GPU back: "restart" (restarting Ollama) or
  *                     "uvm" (only POST /gpu/reload-uvm). false: the GPU is back at once
+ *        agent_update: what POST /update does: "normal" (the agent restarts as the newest simulated
+ *                     release on the asked channel, or stays as it is when it already runs that),
+ *                     "fail" (the updater fails and the agent keeps its version), "none" (an agent
+ *                     without /update or self_update, like one from before 0.10.0)
+ *
+ * Agent releases, on the control port, like GitHub's API (agent_releases_url: http://<bind>:<B>/_sim/github):
+ *   GET  /_sim/github/repos/<owner>/<repo>/releases   the simulated releases; a repo ending in
+ *                                       -win-agent is the Windows agent's, any other the Linux agent's
+ *   POST /_sim/github/releases          {linux?: [tags], windows?: [tags]}: replace them. Tags with a
+ *                                       "-" are prereleases. Default: the version the hosts' agents run
+ *   GET  /_sim/github/requests          how many times the releases were read
  *
  * Models: loading with a num_ctx whose KV cache doesn't fit in the GPUs puts the rest in system RAM
  * (a partial GPU/CPU split), as does a host without GPUs or num_gpu 0 in the request's options or the
@@ -261,6 +272,7 @@ const SCENARIO_VALUES = {
   agent: ["up", "down", "hang", "error", "bad-token"],
   pull: ["normal", "stall", "fail", "drop"],
   create: ["normal", "stall", "fail"],
+  agent_update: ["normal", "fail", "none"],
 };
 
 function makeHost(n, o) {
@@ -279,7 +291,9 @@ function makeHost(n, o) {
     pullSeconds: o.pullSeconds,
     /** milliseconds per streamed token, so hosts compare differently side by side */
     tokenMs: 20 + 10 * (n - 1),
-    scenario: { ollama: "up", agent: "up", pull: "normal", create: "normal" },
+    scenario: { ollama: "up", agent: "up", pull: "normal", create: "normal", agent_update: "normal" },
+    /** the updater's last run, as the agent's GET /update reports it */
+    update: { state: "idle" },
     gpus: Array.from({ length: o.gpus[n - 1] }, (_, i) => ({
       index: i, uuid: `GPU-${hash(`${id}/${i}`).slice(0, 8)}-${hash(`${id}/${i}`).slice(8, 12)}-sim0-${hash(`${id}/${i}`).slice(12, 24)}`,
     })),
@@ -826,6 +840,7 @@ function agentStats(h) {
     ...(h.agentProtocol != null ? { protocol: h.agentProtocol } : {}),
     platform: "linux",
     fingerprint: agentFingerprint(h),
+    ...(canSelfUpdate(h) ? { self_update: true } : {}),
     system: {
       hostname: h.hostname,
       uptime_s: Math.round(86400 * 3 + (Date.now() - h.startedAt) / 1000),
@@ -885,7 +900,12 @@ async function newOllamaProcess(h) {
 }
 
 const agentRoutes = {
-  "GET /health": (h) => ({ ok: true, version: h.agentVersion ?? undefined, protocol: h.agentProtocol ?? undefined, platform: "linux", hostname: h.hostname, fingerprint: agentFingerprint(h) }),
+  "GET /health": (h) => ({
+    ok: true, version: h.agentVersion ?? undefined, protocol: h.agentProtocol ?? undefined, platform: "linux", hostname: h.hostname,
+    fingerprint: agentFingerprint(h), ...(canSelfUpdate(h) ? { self_update: true } : {}),
+  }),
+  "GET /update": (h) => ({ ...h.update }),
+  "POST /update": async (h, req) => startUpdate(h, await readBody(req)),
   "GET /stats": (h) => agentStats(h),
   "GET /env": (h) => ({
     managed: { ...h.env }, override_path: OVERRIDE_PATH, raw: renderOverride(h.env), allowed: AGENT_ENV_ALLOW,
@@ -941,6 +961,65 @@ const agentRoutes = {
 
 const agentFingerprint = (h) => (h.agentTls ? h.tls.fingerprint : null);
 
+// ------------------------------------------------------------------ agent updates
+/** Simulated agent releases per platform, newest anywhere in the list, as GitHub lists them. */
+const agentReleases = { linux: null, windows: null };
+let releaseReads = 0;
+const releasesOf = (platform) => agentReleases[platform] ?? [`v${repoAgentVersion()}`];
+const isPre = (tag) => tag.includes("-");
+
+function newestRelease(platform, channel) {
+  const tags = releasesOf(platform).filter((t) => channel === "dev" || !isPre(t)).map((t) => t.replace(/^v/, ""));
+  return tags.sort((a, b) => semverCmp(b, a))[0] ?? null;
+}
+
+/** Semver order, a prerelease before its release, as the installer and the dashboard compare. */
+function semverCmp(a, b) {
+  const p = (v) => {
+    const [core, pre] = v.split(/-(.*)/s);
+    return [...core.split(".").map(Number), pre ? pre.split(".") : null];
+  };
+  const x = p(a), y = p(b);
+  for (let i = 0; i < 3; i++) if (x[i] !== y[i]) return x[i] - y[i];
+  if (!x[3] || !y[3]) return (x[3] ? -1 : 0) - (y[3] ? -1 : 0);
+  for (let i = 0; i < Math.max(x[3].length, y[3].length); i++) {
+    const q = x[3][i], r = y[3][i];
+    if (q === undefined || r === undefined) return q === undefined ? -1 : 1;
+    if (q === r) continue;
+    return /^\d+$/.test(q) && /^\d+$/.test(r) ? q - r : q < r ? -1 : 1;
+  }
+  return 0;
+}
+
+const canSelfUpdate = (h) => h.scenario.agent_update !== "none" && !!h.agentVersion;
+
+/** The real agent runs the installer's updater, which reinstalls the agent and restarts it. */
+function startUpdate(h, body) {
+  const channel = body?.channel ?? "stable";
+  if (channel !== "stable" && channel !== "dev") throw new HttpErr(400, 'channel must be "stable" or "dev"');
+  if (h.update.state === "running") throw new HttpErr(409, "an update is already running");
+  h.update = { state: "running" };
+  setTimeout(async () => {
+    if (h.scenario.agent_update === "fail") {
+      h.update = { state: "failed", result: "exit-code", log: ["▸ Downloading the agent", "✖ paddock-agent-linux.mjs doesn't match the release's SHA256SUMS: the download is damaged or was changed. Nothing was installed"] };
+      return;
+    }
+    const target = newestRelease("linux", channel);
+    if (!target || target === h.agentVersion) {
+      h.update = { state: "idle" };
+      return;
+    }
+    // the restart: the port closes for a moment and the new version answers
+    const was = h.scenario.agent;
+    await setAgent(h, "down");
+    await sleep(800);
+    h.agentVersion = target;
+    h.update = { state: "idle" };
+    await setAgent(h, was === "down" ? "up" : was);
+  }, 1500);
+  return { ok: true, channel };
+}
+
 function agentAuthorized(h, req) {
   if (h.scenario.agent === "bad-token") return false;
   const a = req.headers.authorization ?? "";
@@ -961,6 +1040,7 @@ async function handleAgent(h, req, res) {
   const route = agentRoutes[key];
   const before080 = !h.agentVersion || /^0\.[0-7]\./.test(h.agentVersion);
   if (!route || (before080 && /^\/(gpu|runner-starts)/.test(url.pathname))) return sendJson(res, 404, { detail: "not found" });
+  if (url.pathname === "/update" && !canSelfUpdate(h)) return sendJson(res, 404, { detail: "not found" });
   if (url.pathname !== "/health" && !agentAuthorized(h, req)) return sendJson(res, 401, { detail: "invalid agent token" });
   try {
     sendJson(res, 200, await route(h, req, url));
@@ -1085,6 +1165,7 @@ async function applyScenario(h, patch) {
     h.gpuLost = patch.gpu_lost;
   }
   if (patch.pull) h.scenario.pull = patch.pull;
+  if (patch.agent_update) h.scenario.agent_update = patch.agent_update;
   if (patch.create) h.scenario.create = patch.create;
   if (patch.ollama) await setOllama(h, patch.ollama);
   if (patch.agent) await setAgent(h, patch.agent);
@@ -1134,6 +1215,7 @@ function configYaml() {
     "# Generated by test/sim/paddock-sim.mjs for its simulated hosts.",
     "poll_interval: 2",
     "metrics_open: true",
+    `agent_releases_url: http://${opts.bind === "0.0.0.0" ? "127.0.0.1" : opts.bind}:${opts.basePort}/_sim/github`,
     "instances:",
   ];
   for (const h of hosts.values()) {
@@ -1423,6 +1505,28 @@ function handleLibrarySite(req, res, url) {
 /** Paths the library site was asked for, so tests can see what the dashboard cached. */
 const libraryRequests = [];
 
+/** GitHub's releases API, for the dashboard's check for newer agents. */
+async function handleGithub(req, res, url) {
+  if (req.method === "GET" && url.pathname === "/_sim/github/requests") return sendJson(res, 200, { reads: releaseReads });
+  if (req.method === "POST" && url.pathname === "/_sim/github/releases") {
+    const body = await readBody(req);
+    for (const p of ["linux", "windows"]) {
+      if (body?.[p] === undefined) continue;
+      if (!Array.isArray(body[p]) || !body[p].every((t) => /^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(t))) throw new HttpErr(400, `${p} must be a list of tags like v1.2.3`);
+      agentReleases[p] = body[p];
+    }
+    return sendJson(res, 200, { linux: releasesOf("linux"), windows: releasesOf("windows") });
+  }
+  const m = /^\/_sim\/github\/repos\/[^/]+\/([^/]+)\/releases$/.exec(url.pathname);
+  if (req.method !== "GET" || !m) throw new HttpErr(404, "not found");
+  releaseReads++;
+  const platform = m[1].endsWith("-win-agent") ? "windows" : "linux";
+  sendJson(res, 200, releasesOf(platform).map((tag) => ({
+    tag_name: tag, draft: false, prerelease: isPre(tag),
+    assets: [{ name: "SHA256SUMS" }, { name: `paddock-agent-${platform}.mjs` }],
+  })));
+}
+
 /** Blobs by digest, filled as their manifests are served. */
 const registryBlobs = new Map();
 
@@ -1432,6 +1536,7 @@ async function handleControl(req, res) {
     if (req.method === "GET" && /^\/_sim\/registry/.test(url.pathname)) return handleRegistry(req, res, url);
     if (req.method === "GET" && /^\/_sim\/ollama\.com\//.test(url.pathname)) return handleLibrarySite(req, res, url);
     if (req.method === "GET" && url.pathname === "/_sim/library-requests") return sendJson(res, 200, { requests: libraryRequests });
+    if (url.pathname.startsWith("/_sim/github/")) return await handleGithub(req, res, url);
     const wh = /^\/_sim\/webhook\/([A-Za-z0-9_.-]+)(?:\/(fail))?$/.exec(url.pathname);
     if (wh) return await handleWebhook(req, res, wh[1], wh[2]);
     if (req.method === "GET" && (url.pathname === "/_sim" || url.pathname === "/_sim/hosts")) {

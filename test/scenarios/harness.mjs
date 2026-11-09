@@ -157,7 +157,8 @@ export function makeDataDir(sim, { instances = {}, pollInterval = 1, extra = "" 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "paddock-scenario-"));
   const data = path.join(dir, "data");
   fs.mkdirSync(data, { mode: 0o700 });
-  const lines = [`poll_interval: ${pollInterval}`, "metrics_open: true", extra, "instances:"];
+  // the simulator's agent releases, so no test asks GitHub
+  const lines = [`poll_interval: ${pollInterval}`, "metrics_open: true", `agent_releases_url: ${sim.control}/github`, extra, "instances:"];
   for (const h of sim.hosts) {
     const o = { id: h.id, name: h.id, ollama_url: h.ollama_url, ollama_proxy_key: h.ollama_key, agent_url: h.agent_url, agent_token: h.agent_token, ...instances[h.id] };
     lines.push(`  - id: ${o.id}`);

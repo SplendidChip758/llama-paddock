@@ -642,6 +642,10 @@ audit_retention_days: 365   # audit log of who changed what
 # registry; false keeps the dashboard from contacting them.
 # model_library: true
 
+# Agents older than the latest release are flagged and can be updated from the
+# dashboard; off stops it asking GitHub for the agent releases.
+# agent_updates: auto
+
 # Add hosts in the dashboard (Add host). Hosts listed here also work, but are
 # read-only in the UI. Tokens can live in llama-paddock.env as \${VAR}.
 # instances:
