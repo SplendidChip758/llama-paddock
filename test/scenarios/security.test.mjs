@@ -1,6 +1,6 @@
 // Security checks (#83): the dashboard checks each host (Ollama answering without a key, agents over plain
 // HTTP or with weak tokens) and itself (initial passwords, plain HTTP, data file modes, tokens without
-// expiry), says how to fix each failure, lets a failure be dismissed with a note, and raises the
+// expiry), says how to fix each failure, lets a failure be dismissed, and raises the
 // "insecure" alert while a check fails, so a host that slips back sends a notification.
 import { after, before, test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
@@ -79,22 +79,20 @@ test("a proxy that stops checking the key fails the host, and the alert resolves
   await waitFor(async () => !(await alertOf("sim-2", "ollama_open")), { what: "the alert to resolve" });
 });
 
-test("a placeholder agent token fails; dismissing it with a note stops it counting and alerting", async () => {
+test("a placeholder agent token fails; dismissing it stops it counting and alerting", async () => {
   const x = await waitCheck("sim-3", "agent_token", "fail");
   assert.match(x.detail, /placeholder/);
   await waitFor(() => alertOf("sim-3", "agent_token").then((y) => y?.state === "firing"), { what: "the alert to fire" });
   await waitCheck("sim-1", "agent_token", "pass");
 
   const before = (await report()).failing;
-  assert.equal((await c.post("/api/security/dismissals", { instance: "sim-3", check: "agent_token" })).status, 400, "a note is required");
-  assert.equal((await c.post("/api/security/dismissals", { instance: "nope", check: "agent_token", note: "x" })).status, 400);
-  assert.equal((await c.post("/api/security/dismissals", { instance: "sim-3", check: "data_files", note: "x" })).status, 400, "a dashboard check on a host");
-  const r = await c.post("/api/security/dismissals", { instance: "sim-3", check: "agent_token", note: "lab box, isolated VLAN" });
+  assert.equal((await c.post("/api/security/dismissals", { instance: "nope", check: "agent_token" })).status, 400);
+  assert.equal((await c.post("/api/security/dismissals", { instance: "sim-3", check: "data_files" })).status, 400, "a dashboard check on a host");
+  const r = await c.post("/api/security/dismissals", { instance: "sim-3", check: "agent_token" });
   assert.equal(r.status, 201, JSON.stringify(r.data));
   assert.equal(r.data.dismissal.user, "admin");
 
   const d = await waitCheck("sim-3", "agent_token", "dismissed");
-  assert.equal(d.dismissal.note, "lab box, isolated VLAN");
   assert.equal((await report()).failing, before - 1);
   await waitFor(async () => !(await alertOf("sim-3", "agent_token")), { what: "the alert to resolve" });
   const file = path.join(stack.data.data, "security-dismissals.json");

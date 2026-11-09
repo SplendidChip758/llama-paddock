@@ -65,9 +65,7 @@ export function SecurityView() {
   };
 
   const dismiss = (t: SecurityTarget, c: SecurityCheck) => {
-    const note = prompt(`Why is "${c.label}" intended on ${t.name}? The note is shown with the check, and it stops counting and alerting.`);
-    if (!note?.trim()) return;
-    void act(`${t.instance}/${c.id}`, () => api("/api/security/dismissals", { method: "POST", body: { instance: t.instance, check: c.id, note } }), `Dismissed ${c.label} on ${t.name}`);
+    void act(`${t.instance}/${c.id}`, () => api("/api/security/dismissals", { method: "POST", body: { instance: t.instance, check: c.id } }), `Dismissed ${c.label} on ${t.name}`);
   };
 
   const restore = (t: SecurityTarget, c: SecurityCheck) =>
@@ -126,7 +124,7 @@ function CheckLine({ c, busy, readOnly, onFix, onDismiss, onRestore }: {
         <div className="hint" style={{ marginTop: 2 }}>{c.detail}</div>
         {c.dismissal && (
           <div className="hint" style={{ marginTop: 2 }}>
-            Dismissed {ago(new Date(c.dismissal.t * 1000).toISOString())}{c.dismissal.user ? ` by ${c.dismissal.user}` : ""}: {c.dismissal.note}
+            Dismissed {ago(new Date(c.dismissal.t * 1000).toISOString())}{c.dismissal.user ? ` by ${c.dismissal.user}` : ""}
           </div>
         )}
       </div>
