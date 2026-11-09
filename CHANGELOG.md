@@ -1,3 +1,9 @@
+## [0.10.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0...v0.10.0-dev.1) (2026-11-09)
+
+### Features
+
+* report and check the agent protocol version ([#187](https://github.com/SplendidChip758/llama-paddock/issues/187)) ([8678206](https://github.com/SplendidChip758/llama-paddock/commit/86782061c1a15b96d5bb59ce62f02e9c007d64dd)), closes [#59](https://github.com/SplendidChip758/llama-paddock/issues/59)
+
 ## [0.9.0](https://github.com/SplendidChip758/llama-paddock/compare/v0.8.0...v0.9.0) (2026-11-08)
 
 ### Features
