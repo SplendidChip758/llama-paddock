@@ -1,3 +1,9 @@
+## [0.10.0-dev.2](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.1...v0.10.0-dev.2) (2026-11-09)
+
+### Features
+
+* **install:** install agents from the llama-paddock-agent releases ([#188](https://github.com/SplendidChip758/llama-paddock/issues/188)) ([a78703e](https://github.com/SplendidChip758/llama-paddock/commit/a78703efcc7689ea8df97f2f66de618edd75ca49)), closes [#59](https://github.com/SplendidChip758/llama-paddock/issues/59) [SplendidChip758/llama-paddock-agent#4](https://github.com/SplendidChip758/llama-paddock-agent/issues/4)
+
 ## [0.10.0-dev.1](https://github.com/SplendidChip758/llama-paddock/compare/v0.9.0...v0.10.0-dev.1) (2026-11-09)
 
 ### Features
