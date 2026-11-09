@@ -37,6 +37,21 @@ test("a host that goes down is shown as down, and recovers", async ({ page }) =>
   await expect(two.locator(".dot.ok")).toBeVisible({ timeout: 30_000 });
 });
 
+test("an agent on a protocol the dashboard doesn't support is shown as incompatible, with what to update", async ({ page }) => {
+  await page.goto("/");
+  const two = card(page, "sim-2");
+  await expect(two.locator(".dot.ok")).toBeVisible();
+
+  await scenario("sim-2", { agent_protocol: 2 });
+  try {
+    await expect(two.getByText("agent incompatible", { exact: true })).toBeVisible({ timeout: 30_000 });
+    await expect(two.getByText(/it speaks protocol 2, but this dashboard supports 1; update the dashboard/)).toBeVisible();
+  } finally {
+    await scenario("sim-2", { agent_protocol: 1 });
+  }
+  await expect(two.locator(".dot.ok")).toBeVisible({ timeout: 30_000 });
+});
+
 test("clicking a card opens the host", async ({ page }) => {
   await page.goto("/");
   await card(page, "sim-1").click();

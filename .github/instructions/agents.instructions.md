@@ -17,6 +17,7 @@ Each agent is one file, `paddock-agent.mjs`: plain Node ESM with **zero npm depe
 - Don't edit `VERSION`: the release workflow stamps it.
 - When the API changes, change the simulated agent in `test/sim/paddock-sim.mjs` too. The `real-agent` scenario test compares its shapes and env rules with the Linux agent's.
 - The dashboard has to keep working with older agents. Add fields and routes instead of changing existing ones, and have the dashboard handle a missing field.
+- `PROTOCOL` only goes up for a change older dashboards can't follow, which also needs the maintainer's agreement. Bump it in both agents, teach the dashboard the new protocol and raise `AGENT_PROTOCOL.max` in `dashboard/lib/protocol.ts` in the same change. Never bump it for fixes or new optional fields. See docs/api.md, Agent protocol.
 
 ## Checks
 

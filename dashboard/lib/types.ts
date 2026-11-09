@@ -1,4 +1,5 @@
 // Shapes shared between the server (route handlers) and the browser.
+import type { AgentIncompatible } from "./protocol";
 
 export interface GpuStats {
   index: number;
@@ -56,6 +57,8 @@ export interface AgentStats {
   ts: number;
   /** missing before 0.6.0; the dashboard then asks /health instead */
   version?: string;
+  /** the agent protocol (lib/protocol.ts); missing before 0.10.0, which means protocol 1 */
+  protocol?: number;
   platform?: Platform;
   /** SHA-256 of the agent's TLS key (agents from 0.7.0 on), missing when it can't serve HTTPS */
   fingerprint?: string | null;
@@ -169,6 +172,10 @@ export interface InstanceSnapshot {
   agent_error: string | null;
   version: string | null;
   agent_version: string | null;
+  /** the agent protocol it speaks; null until it answers */
+  agent_protocol: number | null;
+  /** The agent speaks a protocol this dashboard doesn't support, and what to update. Agent calls stop meanwhile. */
+  agent_incompatible: AgentIncompatible | null;
   ps: LoadedModel[];
   stats: AgentStats | null;
   /** whether Ollama uses the GPU nvidia-smi sees; null without an agent, an NVIDIA GPU or Ollama answering */

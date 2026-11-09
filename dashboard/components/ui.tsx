@@ -108,6 +108,7 @@ export function CloudBadge({ remoteHost }: { remoteHost?: string | null }) {
 export function statusOf(st: InstanceSnapshot): ["" | "ok" | "warn" | "bad", string] {
   if (!st.updated) return ["", "connecting"];
   if (!st.ollama_ok) return ["bad", "ollama down"];
+  if (st.has_agent && st.agent_incompatible) return ["warn", "agent incompatible"];
   if (st.has_agent && !st.agent_ok) return ["warn", "agent down"];
   return ["ok", "online"];
 }

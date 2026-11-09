@@ -41,6 +41,10 @@ import crypto from "node:crypto";
 import { execFile } from "node:child_process";
 
 const VERSION = "0.9.0";
+// The agent API's protocol, reported in /health and /stats. Unlike VERSION it only goes up when the
+// API changes in a way older dashboards can't follow (a route or field removed or changing meaning),
+// never for fixes or new optional fields. The dashboard compares it with the range it supports.
+const PROTOCOL = 1;
 const TOKEN = process.env.PADDOCK_AGENT_TOKEN || "";
 const UNIT = process.env.PADDOCK_OLLAMA_UNIT || "ollama.service";
 const OVERRIDE_PATH =
@@ -712,10 +716,10 @@ async function readJson(req) {
 }
 
 const routes = {
-  "GET /health": async () => ({ ok: true, version: VERSION, platform: "linux", hostname: os.hostname(), fingerprint: FINGERPRINT }),
+  "GET /health": async () => ({ ok: true, version: VERSION, protocol: PROTOCOL, platform: "linux", hostname: os.hostname(), fingerprint: FINGERPRINT }),
   "GET /stats": async () => {
     const [nvidia, service] = await Promise.all([nvidiaStats(), serviceStatus()]);
-    return { ts: Date.now() / 1000, version: VERSION, platform: "linux", fingerprint: FINGERPRINT, system: systemStats(), nvidia, service };
+    return { ts: Date.now() / 1000, version: VERSION, protocol: PROTOCOL, platform: "linux", fingerprint: FINGERPRINT, system: systemStats(), nvidia, service };
   },
   "GET /env": async () => {
     const st = readEnvState();
