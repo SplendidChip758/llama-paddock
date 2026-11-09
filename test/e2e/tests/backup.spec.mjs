@@ -30,6 +30,11 @@ test("an admin exports the configuration and previews importing it", async ({ pa
   const importCard = page.locator(".card", { has: page.getByRole("heading", { name: "Import" }) });
   await importCard.getByLabel("Export file").setInputFiles(file);
   await importCard.getByLabel(/^Passphrase/).fill(PASSPHRASE);
+  // the parts to import are hidden until asked for, and everything is imported meanwhile
+  await expect(importCard.getByLabel("Users", { exact: true })).toBeHidden();
+  await importCard.getByLabel("Choose what to import").check();
+  await expect(importCard.getByLabel("Users", { exact: true })).toBeChecked();
+  await importCard.getByLabel("Choose what to import").uncheck();
   await importCard.getByRole("button", { name: "Preview import" }).click();
   await expect(importCard.getByRole("row", { name: /admin \(admin\)/ })).toContainText("unchanged");
   await expect(importCard.getByText(/0 to add, 0 to replace/)).toBeVisible();

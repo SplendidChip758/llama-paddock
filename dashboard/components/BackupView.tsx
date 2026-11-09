@@ -145,6 +145,8 @@ const ACTION_TEXT: Record<Action, string> = { add: "add", replace: "replace", sk
 export function ImportForm({ setup = false }: { setup?: boolean }) {
   const [file, setFile] = useState<{ name: string; data: unknown } | null>(null);
   const [passphrase, setPassphrase] = useState("");
+  // everything is imported unless the options are opened and narrowed
+  const [choose, setChoose] = useState(false);
   const [sections, setSections] = useState<Set<Section>>(new Set(SECTIONS.map((s) => s.id)));
   const [plan, setPlan] = useState<ImportResult | null>(null);
   const [done, setDone] = useState<ImportResult | null>(null);
@@ -167,7 +169,7 @@ export function ImportForm({ setup = false }: { setup?: boolean }) {
   const send = (dryRun: boolean) =>
     api<ImportResult>("/api/config/import", {
       method: "POST",
-      body: { file: file?.data, passphrase: passphrase || null, sections: [...sections], dry_run: dryRun },
+      body: { file: file?.data, passphrase: passphrase || null, sections: choose ? [...sections] : SECTIONS.map((s) => s.id), dry_run: dryRun },
     });
 
   const preview = async (e: FormEvent) => {
@@ -231,6 +233,11 @@ export function ImportForm({ setup = false }: { setup?: boolean }) {
         <input type="password" autoComplete="off" value={passphrase} onChange={(e) => { setPassphrase(e.target.value); setPlan(null); }} />
         <div className="hint">Leave it blank for an unencrypted export.</div>
       </label>
+      <label className="row" style={{ marginBottom: 12, gap: 8 }}>
+        <input type="checkbox" checked={choose} onChange={(e) => { setChoose(e.target.checked); setPlan(null); }} />
+        <span>Choose what to import</span>
+      </label>
+      {choose && (
       <fieldset className="field" style={{ border: 0, padding: 0, margin: "0 0 14px" }}>
         <legend className="fieldlabel">Parts to import</legend>
         <div className="chips">
@@ -243,7 +250,8 @@ export function ImportForm({ setup = false }: { setup?: boolean }) {
         </div>
         <div className="hint">Nothing here is removed: entries are added, or replaced when the same host, user or rule exists.</div>
       </fieldset>
-      <button className="btn" type="submit" disabled={busy || !file || !sections.size}>{busy && !plan ? "Reading…" : "Preview import"}</button>
+      )}
+      <button className="btn" type="submit" disabled={busy || !file || (choose && !sections.size)}>{busy && !plan ? "Reading…" : "Preview import"}</button>
 
       {plan && (
         <div style={{ marginTop: 16 }}>
