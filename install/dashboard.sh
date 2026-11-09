@@ -622,6 +622,7 @@ fetch_app() {
   cp -a "$build/.next/standalone/." "$STAGE"/
   mkdir -p "$STAGE/.next"
   cp -a "$build/.next/static" "$STAGE/.next/static"
+  if [[ -d $build/bin ]]; then cp -a "$build/bin" "$STAGE/bin"; fi
   msg_ok "Build complete"
 }
 
@@ -717,6 +718,7 @@ WantedBy=multi-user.target
 EOF
 
   write_updater
+  write_backup_cli
   write_uninstaller
 }
 
@@ -730,6 +732,30 @@ export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BR
 exec bash -c "\$(curl -fsSL ${SELF_URL})"
 EOF
   chmod 755 /usr/local/bin/update-llama-paddock
+}
+
+# paddock-backup: full backups of this install and restoring them, run as root with the
+# service's paths. Releases before it have no bin/paddock-backup.mjs, so no command either.
+write_backup_cli() {
+  if [[ ! -f $APP_DIR/bin/paddock-backup.mjs ]]; then
+    rm -f /usr/local/bin/paddock-backup
+    return
+  fi
+  cat > /usr/local/bin/paddock-backup <<EOF
+#!/usr/bin/env bash
+# Back up and restore the llama-paddock dashboard (written by install/dashboard.sh).
+#   paddock-backup backup | list | verify NAME | restore NAME    (--help for more)
+# restore stops the service while it puts the files back, then starts it again.
+set -euo pipefail
+[[ \$EUID -eq 0 ]] || { echo "paddock-backup: run as root" >&2; exit 1; }
+export PADDOCK_DATA_DIR=${DATA_DIR} PADDOCK_CONFIG=${CFG_DIR}/config.yaml PADDOCK_ENV_FILE=${CFG_DIR}/llama-paddock.env
+if [[ \${1-} == restore ]] && systemctl is-active --quiet llama-paddock 2>/dev/null; then
+  systemctl stop llama-paddock
+  trap 'systemctl start llama-paddock' EXIT
+fi
+$(command -v node) ${APP_DIR}/bin/paddock-backup.mjs "\$@"
+EOF
+  chmod 755 /usr/local/bin/paddock-backup
 }
 
 # Remove the dashboard from this machine. Config, saved hosts and login stay unless you
@@ -747,7 +773,7 @@ local_uninstall() {
   fi
 
   systemctl disable --now llama-paddock >/dev/null 2>&1 || true
-  rm -f /etc/systemd/system/llama-paddock.service /usr/local/bin/update-llama-paddock /usr/local/bin/uninstall-llama-paddock
+  rm -f /etc/systemd/system/llama-paddock.service /usr/local/bin/update-llama-paddock /usr/local/bin/uninstall-llama-paddock /usr/local/bin/paddock-backup
   rm -f /etc/profile.d/00_llama-paddock.sh
   rm -rf "$APP_DIR" "${APP_DIR}.old"
   systemctl daemon-reload 2>/dev/null || true
@@ -851,6 +877,7 @@ local_install() {
   ensure_deps
   if [[ -n $updating ]] && dashboard_is_current; then
     write_updater
+    write_backup_cli
     msg_ok "Already on the latest version ($(cat "$APP_DIR/VERSION")), nothing to update"
     echo "   To reinstall it anyway:  PADDOCK_FORCE=1 update-llama-paddock"
     return

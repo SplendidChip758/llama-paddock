@@ -21,6 +21,7 @@ import {
 import { fitEnv, settingsKey } from "./fit";
 import { nativeContext, parseParameters } from "./params";
 import { startNotifications } from "./notify";
+import { writeLock } from "./store";
 import { dashboardChecks, forgetDismissals, hostChecks, probeOllama, summarize, type OllamaProbe } from "./security";
 import { forgetRequests, syncRequests } from "./requests";
 import { isCloudModel, withSplit } from "./split";
@@ -215,6 +216,7 @@ const g = globalThis as unknown as { __paddock?: Paddock };
 export function paddock(): Paddock {
   if (!g.__paddock) {
     const settings = loadSettings();
+    writeLock();
     g.__paddock = {
       settings,
       instances: new Map(settings.instances.map((i) => [i.id, new InstanceState(i)])),
