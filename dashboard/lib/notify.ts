@@ -172,6 +172,14 @@ export function saveChannels(raw: unknown): NotifyChannel[] {
   return listChannels();
 }
 
+/** Read alert-channels.json again after something else wrote it: a configuration import. */
+export function reloadChannels() {
+  const n = notify();
+  n.channels = readChannels();
+  const ids = new Set(n.channels.map((c) => c.id));
+  for (const id of n.status.keys()) if (!ids.has(id)) n.status.delete(id);
+}
+
 // ============================================================================ messages
 interface Message {
   state: "firing" | "resolved" | "test";
