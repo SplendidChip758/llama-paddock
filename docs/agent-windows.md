@@ -4,15 +4,15 @@ The Windows agent runs in your session next to the Ollama desktop app and adds G
 
 Prerequisite: Node.js 18.15 or newer (`winget install OpenJS.NodeJS.LTS`).
 
-Every [agent release](https://github.com/SplendidChip758/llama-paddock-agent/releases) has `llama-paddock-agent-windows.zip`: the agent, `install.ps1` and `uninstall.ps1`. Download and extract it on the PC:
+The Windows agent has its own repository, [llama-paddock-win-agent](https://github.com/SplendidChip758/llama-paddock-win-agent), and its own releases, apart from the dashboard and the Linux agent. Every [Windows agent release](https://github.com/SplendidChip758/llama-paddock-win-agent/releases) has `llama-paddock-agent-windows.zip`: the agent, `install.ps1` and `uninstall.ps1`. Download and extract it on the PC:
 
 ```powershell
-Invoke-WebRequest https://github.com/SplendidChip758/llama-paddock-agent/releases/latest/download/llama-paddock-agent-windows.zip -OutFile llama-paddock-agent-windows.zip
+Invoke-WebRequest https://github.com/SplendidChip758/llama-paddock-win-agent/releases/latest/download/llama-paddock-agent-windows.zip -OutFile llama-paddock-agent-windows.zip
 Expand-Archive llama-paddock-agent-windows.zip -DestinationPath . -Force
 cd llama-paddock-agent-windows
 ```
 
-For a prerelease, download the zip from that release on the releases page instead. You can also copy [`windows/`](https://github.com/SplendidChip758/llama-paddock-agent/tree/main/windows) from a clone of llama-paddock-agent. The release's `SHA256SUMS` lists the zip's checksum, which `Get-FileHash llama-paddock-agent-windows.zip` shows.
+For a prerelease, download the zip from that release on the releases page instead. You can also run `install.ps1` from a clone of llama-paddock-win-agent. The release's `SHA256SUMS` lists the zip's checksum, which `Get-FileHash llama-paddock-agent-windows.zip` shows.
 
 Then run the installer in that folder **from the account that runs Ollama**. Run it in an admin PowerShell if you want it to add the firewall rule:
 

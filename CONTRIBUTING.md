@@ -278,4 +278,4 @@ On `dev` the same steps produce a prerelease instead: version `X.Y.Z-dev.N`, a G
 
 If nothing releasable landed (only `docs`, `chore`, `ci` and so on), the workflow exits without releasing.
 
-Release assets are `llama-paddock-dashboard-vX.Y.Z.tar.gz` and `SHA256SUMS`. The agents are released from [llama-paddock-agent](https://github.com/SplendidChip758/llama-paddock-agent) the same way, with their own versions. Runtime dependency and base-image updates from Dependabot use `fix(deps): …` so they ship in patch releases.
+Release assets are `llama-paddock-dashboard-vX.Y.Z.tar.gz` and `SHA256SUMS`. The agents are released the same way from their own repositories, [llama-paddock-agent](https://github.com/SplendidChip758/llama-paddock-agent) (Linux) and [llama-paddock-win-agent](https://github.com/SplendidChip758/llama-paddock-win-agent) (Windows), each with its own versions. Runtime dependency and base-image updates from Dependabot use `fix(deps): …` so they ship in patch releases.

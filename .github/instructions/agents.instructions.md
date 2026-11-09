@@ -4,7 +4,7 @@ applyTo: "test/sim/**,test/agent.mjs,test/agent-release"
 
 # Agents
 
-The Linux and Windows agents live in their own repository, [llama-paddock-agent](https://github.com/SplendidChip758/llama-paddock-agent), with their own releases and rules (its AGENTS.md). Change them there. This repository talks to them, simulates them, and tests against a released one.
+The agents live in their own repositories, each with its own releases and rules (its AGENTS.md): the Linux agent in [llama-paddock-agent](https://github.com/SplendidChip758/llama-paddock-agent), the Windows agent in [llama-paddock-win-agent](https://github.com/SplendidChip758/llama-paddock-win-agent). Change them there; an API change needs a PR in both. This repository talks to them, simulates them, and tests against a released one.
 
 ## Rules
 
