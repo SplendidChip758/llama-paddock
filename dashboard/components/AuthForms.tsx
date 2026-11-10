@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, type FormEvent } from "react";
 import { api } from "@/lib/format";
+import { ImportForm } from "./BackupView";
 
 export function LoginForm({ next }: { next: string }) {
   const [username, setUsername] = useState("");
@@ -51,6 +52,7 @@ export function LoginForm({ next }: { next: string }) {
 interface Me {
   auth: boolean;
   username?: string;
+  role?: string | null;
   must_change?: boolean;
   min_password?: number;
 }
@@ -93,38 +95,59 @@ export function ChangePasswordForm() {
   if (!me && !error) return <div className="empty">Loading…</div>;
 
   return (
-    <form onSubmit={submit}>
-      <h1>{forced ? "Choose a new password" : "Change password"}</h1>
-      {forced && (
-        <p className="sub">
-          You signed in with the initial password. Pick your own before continuing. It will be required from now on.
-        </p>
-      )}
-      {error && <div className="notice bad">{error}</div>}
-      {/* lets password managers attach the new password to the right account */}
-      <input type="text" autoComplete="username" value={me?.username ?? ""} readOnly hidden />
-      {!forced && (
+    <>
+      <form onSubmit={submit}>
+        <h1>{forced ? "Choose a new password" : "Change password"}</h1>
+        {forced && (
+          <p className="sub">
+            You signed in with the initial password. Pick your own before continuing. It will be required from now on.
+          </p>
+        )}
+        {error && <div className="notice bad">{error}</div>}
+        {/* lets password managers attach the new password to the right account */}
+        <input type="text" autoComplete="username" value={me?.username ?? ""} readOnly hidden />
+        {!forced && (
+          <label className="field">
+            <span>Current password</span>
+            <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
+          </label>
+        )}
         <label className="field">
-          <span>Current password</span>
-          <input type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} required />
+          <span>New password</span>
+          <input type="password" autoComplete="new-password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <div className="hint">At least {min} characters.</div>
         </label>
+        <label className="field">
+          <span>Confirm new password</span>
+          <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+        </label>
+        <button className="btn primary wide" type="submit" disabled={busy}>
+          {busy ? "Saving…" : forced ? "Set password and continue" : "Change password"}
+        </button>
+        <div className="authfoot row" style={{ justifyContent: "space-between" }}>
+          {forced ? <span /> : <Link className="ghost sm" href="/">Cancel</Link>}
+          <button type="button" className="ghost sm" onClick={signOut}>Sign out</button>
+        </div>
+      </form>
+      {forced && me?.role === "admin" && <SetupImport />}
+    </>
+  );
+}
+
+/** A fresh install can start from another dashboard's configuration export instead. */
+function SetupImport() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="authfoot">
+      {open ? (
+        <>
+          <h3>Import a configuration</h3>
+          <p className="hint">From another dashboard&apos;s Backup page. Its users come with their own passwords.</p>
+          <ImportForm setup />
+        </>
+      ) : (
+        <button type="button" className="ghost sm" onClick={() => setOpen(true)}>Moving from another dashboard? Import its configuration</button>
       )}
-      <label className="field">
-        <span>New password</span>
-        <input type="password" autoComplete="new-password" autoFocus value={password} onChange={(e) => setPassword(e.target.value)} required />
-        <div className="hint">At least {min} characters.</div>
-      </label>
-      <label className="field">
-        <span>Confirm new password</span>
-        <input type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
-      </label>
-      <button className="btn primary wide" type="submit" disabled={busy}>
-        {busy ? "Saving…" : forced ? "Set password and continue" : "Change password"}
-      </button>
-      <div className="authfoot row" style={{ justifyContent: "space-between" }}>
-        {forced ? <span /> : <Link className="ghost sm" href="/">Cancel</Link>}
-        <button type="button" className="ghost sm" onClick={signOut}>Sign out</button>
-      </div>
-    </form>
+    </div>
   );
 }

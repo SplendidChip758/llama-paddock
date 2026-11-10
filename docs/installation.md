@@ -96,3 +96,15 @@ In **Add host**, enter a name and an Ollama URL such as `http://192.168.30.101:1
 An agent is optional for model management. Follow the [Linux](agent-linux.md) or [Windows](agent-windows.md) guide to install one. Both endpoints must be reachable from the dashboard host; `localhost` in a Docker deployment refers to the dashboard container.
 
 Keep Ollama and the agent on a trusted network and limit access to the dashboard host. The dashboard login does not protect direct access to those services.
+
+## Moving the dashboard
+
+To move the dashboard to another machine, or from the installer to Docker, carry its configuration over:
+
+1. On the old dashboard, open **Backup** in the account menu and download a [configuration export](operations.md#configuration-export), encrypted with a passphrase.
+2. Install the new dashboard as above, the same version or newer.
+3. Sign in with its initial password. Before choosing a new one, select **Moving from another dashboard? Import its configuration**, choose the file, enter the passphrase and preview the import, then import it.
+4. Sign in again with your account from the old dashboard.
+5. If the old dashboard had settings or hosts in `config.yaml`, copy them to the new one's `config.yaml` and restart it.
+
+The hosts, their agent tokens and keys, users, API tokens and alert setup come across. Metric history and the audit log stay on the old install. To keep those as well, move the whole data directory instead, with both dashboards stopped and the same version on both. Stop the old dashboard once the new one works, so the two don't send the same alerts.

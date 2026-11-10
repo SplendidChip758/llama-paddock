@@ -4,7 +4,8 @@
 // A full backup is everything needed to put an install back exactly as it was: a consistent
 // snapshot of paddock.db, the other files in the data directory (hosts, users, tokens, pins,
 // rules), config.yaml and the service's env file, with the application and schema versions.
-// It is not the configuration export: it is for rolling back on the same install.
+// It is for rolling back on the same install. Moving the setup to another install is the
+// configuration export (export|import, config-export.mjs).
 //
 // Plain Node with no dependencies, so it works when the dashboard doesn't start. It ships next to
 // server.js and reads the version from the package.json there.
@@ -12,7 +13,9 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import readline from "node:readline";
 import { fileURLToPath } from "node:url";
+import * as configExport from "./config-export.mjs";
 
 const FORMAT = 1;
 const DB = "paddock.db";
@@ -21,8 +24,8 @@ const LOCK = "paddock.lock";
 /** The dashboard's request to the installer's updater (lib/dashboardUpdate.ts). */
 const UPDATE_REQUEST = "update-request.json";
 /** Automatic backups kept per reason; manual ones are kept until removed. */
-const KEEP = { "pre-update": 5, "pre-restore": 3 };
-const REASONS = ["manual", "pre-update", "pre-restore"];
+const KEEP = { "pre-update": 5, "pre-restore": 3, "pre-import": 3 };
+const REASONS = ["manual", "pre-update", "pre-restore", "pre-import"];
 
 const USAGE = `Usage: paddock-backup <command> [options]
 
@@ -33,6 +36,20 @@ const USAGE = `Usage: paddock-backup <command> [options]
   restore <name>      Put the install back as the backup has it. Stop the
                       dashboard first. The current state is backed up first
       --data-only     Leave config.yaml and the env file alone
+
+  export <file>       Export the configuration to move it to another install:
+                      hosts, users, API tokens, alert rules and channels,
+                      config.yaml. No history. Encrypted with a passphrase
+      --unencrypted   Write it in plain text instead
+  import <file>       Add the configuration from an export; nothing is
+                      removed. Stop the dashboard first, or import it from the
+                      dashboard's Backup page. The current state is backed up
+      --dry-run       Only list what would be added, replaced or skipped
+      --only LIST     Only these parts, comma-separated: hosts, users, tokens,
+                      rules, channels, clients, dismissals, config
+      --config        Also write config.yaml when the export's differs
+  The passphrase is asked for, or read from --passphrase-file FILE or
+  $PADDOCK_PASSPHRASE.
 
 Options:
   --dir DIR           Where backups live (default: <data dir>/backups)
@@ -289,7 +306,8 @@ export function backup(opts = {}) {
   if (!REASONS.includes(reason)) throw new UsageError(`--reason must be ${REASONS.join(", ")}`);
   const keep = opts.keep !== undefined ? Number(opts.keep) : KEEP[reason];
   if (keep !== undefined && (!Number.isInteger(keep) || keep < 1)) throw new UsageError("--keep must be a whole number of at least 1");
-  const version = appVersion();
+  // the dashboard passes its own version: bundled into the server, this file can't find package.json by its path
+  const version = opts.version ?? appVersion();
   const data = dataDir();
   if (!fs.existsSync(data)) throw new Error(`the data directory ${data} doesn't exist: nothing to back up (set PADDOCK_DATA_DIR)`);
   const dir = backupsDir(opts);
@@ -475,6 +493,69 @@ export function restore(arg, opts = {}) {
   return { restored: src, manifest: m, before: before && { name: before.name, warning: before.warning }, files: targets.map((t) => t.dest) };
 }
 
+// ============================================================================ configuration export
+async function passphrase(opts, { confirm }) {
+  if (opts["passphrase-file"]) {
+    const f = opts["passphrase-file"];
+    return fs.readFileSync(f === "-" ? 0 : f, "utf8").replace(/\r?\n$/, "");
+  }
+  if (process.env.PADDOCK_PASSPHRASE) return process.env.PADDOCK_PASSPHRASE;
+  if (!process.stdin.isTTY) throw new UsageError("no passphrase: use --passphrase-file FILE or $PADDOCK_PASSPHRASE");
+  const first = await ask("Passphrase: ");
+  if (confirm && (await ask("Again: ")) !== first) throw new Error("the passphrases don't match");
+  return first;
+}
+
+/** A line from the terminal, not echoed. */
+function ask(question) {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stderr, terminal: true });
+  process.stderr.write(question);
+  rl._writeToOutput = () => {};
+  return new Promise((resolve) => rl.question("", (answer) => {
+    rl.close();
+    process.stderr.write("\n");
+    resolve(answer);
+  }));
+}
+
+const paths = () => ({ dataDir: dataDir(), configPath: configPath() });
+
+export async function exportConfig(file, opts = {}) {
+  if (!file) throw new UsageError("where to? Give a file name, or - for standard output");
+  const config = configExport.collect(paths());
+  const pass = opts.unencrypted ? null : await passphrase(opts, { confirm: true });
+  const text = JSON.stringify(configExport.buildExport(config, { passphrase: pass, appVersion: appVersion() }), null, 2) + "\n";
+  if (file === "-") process.stdout.write(text);
+  // never over an existing file: it may be the only copy of another export
+  else fs.writeFileSync(file, text, { mode: 0o600, flag: "wx" });
+  return { file, encrypted: !opts.unencrypted };
+}
+
+export async function importConfig(file, opts = {}) {
+  if (!file) throw new UsageError("which export? Give its file name");
+  let data;
+  try {
+    data = JSON.parse(fs.readFileSync(file, "utf8"));
+  } catch (e) {
+    throw new Error(`can't read ${file}: ${e.message}`);
+  }
+  const info = configExport.inspect(data);
+  const config = configExport.openExport(data, info.encrypted ? await passphrase(opts, { confirm: false }) : null);
+  const sections = opts.only ? opts.only.split(",").map((s) => s.trim()).filter(Boolean) : configExport.SECTIONS;
+  const unknown = sections.filter((s) => !configExport.SECTIONS.includes(s));
+  if (unknown.length) throw new UsageError(`--only: unknown ${unknown.join(", ")} (use ${configExport.SECTIONS.join(", ")})`);
+  const plan = configExport.planImport(config, { ...paths(), sections, writeConfig: !!opts.config });
+  const result = { export: info, items: plan.items, counts: configExport.summarize(plan.items), applied: false, written: [], before: null };
+  if (opts["dry-run"]) return result;
+  const pid = runningDashboard();
+  if (pid) throw new Error(`the dashboard is running (pid ${pid}); stop it first, or import from its Backup page`);
+  if (!plan.items.some((i) => i.action !== "skip")) return result;
+  mkdirPrivate(dataDir());
+  const before = fs.readdirSync(dataDir()).length ? backup({ ...opts, reason: "pre-import" }) : null;
+  const written = configExport.applyImport(plan, { ...paths(), chown: chownToData });
+  return { ...result, applied: true, written, before: before && before.name };
+}
+
 // ============================================================================ CLI
 function parseArgs(argv) {
   const opts = { _: [] };
@@ -485,8 +566,8 @@ function parseArgs(argv) {
       continue;
     }
     const [k, v] = a.slice(2).split(/=(.*)/s);
-    if (["json", "data-only", "help"].includes(k)) opts[k] = true;
-    else if (["dir", "env-file", "reason", "keep"].includes(k)) {
+    if (["json", "data-only", "help", "unencrypted", "dry-run", "config"].includes(k)) opts[k] = true;
+    else if (["dir", "env-file", "reason", "keep", "passphrase-file", "only"].includes(k)) {
       const val = v ?? argv[++i];
       if (val === undefined) throw new UsageError(`--${k} needs a value`);
       opts[k] = val;
@@ -498,7 +579,7 @@ function parseArgs(argv) {
 const when = (t) => new Date(t * 1000).toISOString().replace("T", " ").replace(/\.\d+Z$/, " UTC");
 const size = (n) => (n >= 1 << 20 ? `${(n / (1 << 20)).toFixed(1)} MiB` : `${Math.ceil(n / 1024)} KiB`);
 
-function main(argv) {
+async function main(argv) {
   const opts = parseArgs(argv);
   const [cmd, arg] = opts._;
   if (opts.help || !cmd || cmd === "help") {
@@ -533,17 +614,30 @@ function main(argv) {
       out(r, `restored ${path.basename(r.restored)} (llama-paddock ${r.manifest.app_version}); start the dashboard if it isn't running`);
       break;
     }
+    case "export": {
+      const r = await exportConfig(arg, opts);
+      if (arg !== "-") out(r, `wrote ${arg}${r.encrypted ? "" : " (unencrypted: it holds every secret in plain text)"}`);
+      break;
+    }
+    case "import": {
+      const r = await importConfig(arg, opts);
+      const lines = r.items.map((i) => `${i.action.padEnd(8)}${i.section.padEnd(11)}${i.label}${i.reason ? `: ${i.reason}` : ""}`);
+      const { add, replace, skip } = r.counts;
+      const verb = r.applied ? "imported" : opts["dry-run"] ? "would import" : "nothing to import";
+      lines.push(`${verb}: ${add} to add, ${replace} to replace, ${skip} skipped`);
+      if (r.before) lines.push(`the state it replaced is in backup ${r.before}`);
+      out(r, lines.join("\n"));
+      break;
+    }
     default:
       throw new UsageError(`unknown command ${cmd}`);
   }
 }
 
 if (process.argv[1] && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  try {
-    main(process.argv.slice(2));
-  } catch (e) {
+  main(process.argv.slice(2)).catch((e) => {
     console.error(`paddock-backup: ${e.message}`);
     if (e instanceof UsageError) console.error(`\n${USAGE}`);
     process.exitCode = 2;
-  }
+  });
 }

@@ -16,7 +16,7 @@ const OWN_TOKENS = /^\/api\/tokens(\/|$)/;
 const READ_ONLY_POSTS = [/^\/api\/instances\/[^/]+\/models\/(show|fit)$/, /^\/api\/instances\/[^/]+\/gpu-check$/];
 
 /** Pages and APIs that viewers can't even read: accounts, and the audit log of who did what. */
-const ADMIN_ONLY = /^\/(api\/)?(users|audit)(\/|$)/;
+const ADMIN_ONLY = /^\/(api\/)?(users|audit|config|backup)(\/|$)/;
 
 /**
  * Viewers see everything but change nothing. Checked here rather than in each route, so a new
@@ -29,8 +29,14 @@ function allowed(session: Session, method: string, pathname: string): boolean {
   return OWN_ACCOUNT.includes(pathname) || OWN_TOKENS.test(pathname) || (method === "POST" && READ_ONLY_POSTS.some((re) => re.test(pathname)));
 }
 
-/** Accounts, tokens and passwords are managed from a browser session only, so a leaked token can't mint another or lock its owner out. */
-const SESSION_ONLY = /^\/api\/(users|tokens|auth)(\/|$)/;
+/**
+ * Accounts, tokens and passwords are managed from a browser session only, so a leaked token can't mint
+ * another or lock its owner out. A configuration export holds every secret, and an import adds accounts.
+ */
+const SESSION_ONLY = /^\/api\/(users|tokens|auth|config)(\/|$)/;
+
+/** A fresh install can start from a configuration export before the initial password is replaced. */
+const SETUP_IMPORT = "/api/config/import";
 
 /**
  * The scope a credential needs for this request, or null when no credential may make it. Every token
@@ -140,7 +146,7 @@ export function proxy(req: NextRequest) {
   }
 
   // First login: nothing but the password change until the initial password is replaced.
-  if (session.mustChange && pathname !== "/change-password" && !pathname.startsWith("/api/auth/")) {
+  if (session.mustChange && pathname !== "/change-password" && !pathname.startsWith("/api/auth/") && pathname !== SETUP_IMPORT) {
     if (isApi) return NextResponse.json({ detail: "password change required", code: "must_change" }, { status: 403 });
     return NextResponse.redirect(new URL("/change-password", req.url));
   }

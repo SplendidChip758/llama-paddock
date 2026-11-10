@@ -781,13 +781,15 @@ export const AUDIT_ACTIONS = {
   "security.dismiss": "Dismissed a security check",
   "security.undismiss": "Restored a security check",
   "security.fix": "Fixed data file permissions",
+  "config.export": "Exported the configuration",
+  "config.import": "Imported a configuration",
   "dashboard.update": "Updated the dashboard",
 } as const;
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
 
 export const AUDIT_GROUPS: Record<string, string> = {
   auth: "Sign-in", user: "Users", token: "API tokens", host: "Hosts", ollama: "Ollama service", env: "Environment",
-  model: "Models", job: "Jobs", alert: "Alerts", benchmark: "Benchmarks", settings: "Settings", security: "Security",
+  model: "Models", job: "Jobs", alert: "Alerts", benchmark: "Benchmarks", settings: "Settings", security: "Security", config: "Configuration",
   dashboard: "Dashboard",
 };
 

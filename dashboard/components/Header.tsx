@@ -119,6 +119,7 @@ function UserMenu({ username, role }: { username: string; role?: string | null }
         <div className="menu" onClick={(e) => (e.target as HTMLElement).closest("a") && close()}>
           {role === "admin" && <Link href="/users">Users</Link>}
           {role === "admin" && <Link href="/audit">Audit log</Link>}
+          {role === "admin" && <Link href="/backup">Backup</Link>}
           <Link href="/tokens">API tokens</Link>
           <Link href="/change-password">Change password</Link>
           <button onClick={signOut}>Sign out</button>

@@ -53,7 +53,7 @@ dashboard/        Next.js app (App Router, TypeScript)
   lib/uploads.ts  GGUF uploads for new models: chunks into the data directory, then to Ollama's /api/blobs
   components/     React UI
   lib/auth.ts     login, sessions (checked for every request by proxy.ts)
-  bin/            paddock-backup.mjs: full backups and restore, plain Node shipped next to server.js
+  bin/            paddock-backup.mjs (full backups, restore, configuration export and import) and config-export.mjs, which the dashboard shares: plain Node shipped next to server.js
   lib/dashboardUpdate.ts  newer dashboard releases, and update requests to the installer's root updater
 .github/workflows release.yml (semantic-release: tag, tarball, agents, GHCR image; main + dev)
 docs/             user guides, API reference, screenshots and logo assets

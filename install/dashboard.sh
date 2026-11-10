@@ -761,8 +761,8 @@ EOF
   chmod 755 /usr/local/bin/update-llama-paddock
 }
 
-# paddock-backup: full backups of this install and restoring them, run as root with the
-# service's paths. Releases before it have no bin/paddock-backup.mjs, so no command either.
+# paddock-backup: full backups of this install and restoring them, and the configuration
+# export and import, run as root with the service's paths. Releases before it have no bin/paddock-backup.mjs, so no command either.
 write_backup_cli() {
   if [[ ! -f $APP_DIR/bin/paddock-backup.mjs ]]; then
     rm -f /usr/local/bin/paddock-backup
@@ -772,11 +772,17 @@ write_backup_cli() {
 #!/usr/bin/env bash
 # Back up and restore the llama-paddock dashboard (written by install/dashboard.sh).
 #   paddock-backup backup | list | verify NAME | restore NAME    (--help for more)
-# restore stops the service while it puts the files back, then starts it again.
+#   paddock-backup export FILE | import FILE
+# restore and import stop the service while they write the files, then start it again.
 set -euo pipefail
 [[ \$EUID -eq 0 ]] || { echo "paddock-backup: run as root" >&2; exit 1; }
 export PADDOCK_DATA_DIR=${DATA_DIR} PADDOCK_CONFIG=${CFG_DIR}/config.yaml PADDOCK_ENV_FILE=${CFG_DIR}/llama-paddock.env
-if [[ \${1-} == restore ]] && systemctl is-active --quiet llama-paddock 2>/dev/null; then
+stop=0
+case \${1-} in
+  restore) stop=1 ;;
+  import) [[ " \$* " == *" --dry-run "* ]] || stop=1 ;;
+esac
+if (( stop )) && systemctl is-active --quiet llama-paddock 2>/dev/null; then
   systemctl stop llama-paddock
   trap 'systemctl start llama-paddock' EXIT
 fi
