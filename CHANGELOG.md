@@ -1,3 +1,9 @@
+## [0.10.0-dev.8](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.7...v0.10.0-dev.8) (2026-11-10)
+
+### Features
+
+* update the dashboard from the UI ([#193](https://github.com/SplendidChip758/llama-paddock/issues/193)) ([e4ea339](https://github.com/SplendidChip758/llama-paddock/commit/e4ea339b80e3a2da8dff71a7f3693ab242475605)), closes [#15](https://github.com/SplendidChip758/llama-paddock/issues/15) [#48](https://github.com/SplendidChip758/llama-paddock/issues/48)
+
 ## [0.10.0-dev.7](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.6...v0.10.0-dev.7) (2026-11-09)
 
 ### Features
