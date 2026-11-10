@@ -91,6 +91,35 @@ jobs:
             test/e2e/test-results/
           retention-days: 14
 
+  # The Docker update and rollback steps in docs/operations.md (#48), from a published image to the
+  # image built from this PR, on the same data volume.
+  docker-update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build the image
+        run: docker build -q -t llama-paddock:pr dashboard
+
+      # the newest stable image once one has paddock-backup (from 0.10.0), the prerelease image until then
+      - name: Pick the image to update from
+        id: old
+        run: |
+          for tag in latest dev; do
+            img=ghcr.io/splendidchip758/llama-paddock:$tag
+            if docker pull -q "$img" >/dev/null && docker run --rm "$img" test -e /usr/local/bin/paddock-backup; then
+              echo "image=$img" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done
+          echo "::error::no published image has paddock-backup"
+          exit 1
+
+      - name: Update and roll back
+        env:
+          OLD_IMAGE: ${{ steps.old.outputs.image }}
+        run: bash .github/scripts/docker-update-test.sh "$OLD_IMAGE" llama-paddock:pr
+
   # The rulesets require a check named "agents". The agents themselves are checked in
   # SplendidChip758/llama-paddock-agent; the scenario tests run the dashboard against one.
   agents:

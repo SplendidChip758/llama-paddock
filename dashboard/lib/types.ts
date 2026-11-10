@@ -100,6 +100,58 @@ export interface AgentReleases {
   platforms: Record<Platform, { latest: string | null; checked: number | null; error: string | null; url: string }>;
 }
 
+/** A dashboard release newer than the running one, with its notes (Markdown, as GitHub has them). */
+export interface DashboardRelease {
+  version: string;
+  notes: string;
+  url: string;
+  /** unix seconds */
+  published: number | null;
+}
+
+/** An update of the dashboard itself, as the installer's updater reports it. */
+export interface DashboardUpdateRun {
+  /** requested: waiting for the updater to pick it up; rolled_back: it failed and the previous version is back */
+  state: "requested" | "running" | "done" | "failed" | "rolled_back";
+  /** the version asked for */
+  version: string | null;
+  /** the version before it */
+  from: string | null;
+  /** unix seconds */
+  started: number | null;
+  finished: number | null;
+  /** what went wrong, or that the updater hasn't picked the request up */
+  message: string | null;
+  /** the pre-update backup, by name (paddock-backup list) */
+  backup: string | null;
+  /** the end of the updater's output */
+  log: string[];
+}
+
+/** GET /api/dashboard-update: whether a newer dashboard is out, and how this install updates. */
+export interface DashboardUpdate {
+  current: string;
+  /** the releases compared with: prereleases for a prerelease dashboard */
+  channel: "stable" | "dev";
+  /** false when update_check is off: GitHub isn't asked */
+  check: boolean;
+  latest: string | null;
+  available: boolean;
+  /** releases newer than this one, newest first (at most 10) */
+  releases: DashboardRelease[];
+  /** unix seconds of the last answer from GitHub */
+  checked: number | null;
+  error: string | null;
+  /** the releases page */
+  url: string;
+  /** installer: install/dashboard.sh with its updater; docker: the image; other: anything else */
+  method: "installer" | "docker" | "other";
+  /** an admin can update from the dashboard (POST /api/dashboard-update) */
+  can_update: boolean;
+  /** the last update started from the dashboard, if the updater has a record of one */
+  run: DashboardUpdateRun | null;
+}
+
 export interface AgentStats {
   ts: number;
   /** missing before 0.6.0; the dashboard then asks /health instead */
@@ -731,12 +783,14 @@ export const AUDIT_ACTIONS = {
   "security.fix": "Fixed data file permissions",
   "config.export": "Exported the configuration",
   "config.import": "Imported a configuration",
+  "dashboard.update": "Updated the dashboard",
 } as const;
 export type AuditAction = keyof typeof AUDIT_ACTIONS;
 
 export const AUDIT_GROUPS: Record<string, string> = {
   auth: "Sign-in", user: "Users", token: "API tokens", host: "Hosts", ollama: "Ollama service", env: "Environment",
   model: "Models", job: "Jobs", alert: "Alerts", benchmark: "Benchmarks", settings: "Settings", security: "Security", config: "Configuration",
+  dashboard: "Dashboard",
 };
 
 /**

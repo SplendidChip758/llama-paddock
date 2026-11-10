@@ -8,13 +8,55 @@ Take a [backup](#backups) before upgrading, especially when changing release cha
 
 | Installation | Update |
 |---|---|
-| Dashboard installer | Run `update-llama-paddock` inside its container/VM, or `pct exec <ctid> -- update-llama-paddock` from Proxmox. It stays on the channel you installed from; see [Update channels](#update-channels) |
-| Docker Compose | Run `docker compose pull` then `docker compose up -d` from the Compose directory |
+| Dashboard installer | Click **Update to …** on the dashboard's update page (see [Updating the dashboard](#updating-the-dashboard)), or run `update-llama-paddock` inside its container/VM, or `pct exec <ctid> -- update-llama-paddock` from Proxmox. It stays on the channel you installed from; see [Update channels](#update-channels) |
+| Docker Compose | Take a backup, then run `docker compose pull` and `docker compose up -d` from the Compose directory; see [Docker updates](#docker-updates) |
 | Linux agent | Run `update-llama-paddock-agent` on the Ollama host, or `pct exec <ctid> -- update-llama-paddock-agent` from Proxmox. It follows the same [update channels](#update-channels) as the dashboard updater |
 | Windows agent | Extract `llama-paddock-agent-windows.zip` from the new [Windows agent release](https://github.com/SplendidChip758/llama-paddock-win-agent/releases) and re-run `install.ps1` from the same account; see [Windows updates](agent-windows.md#settings-and-updates) |
 | Source | Update your checkout and repeat the [build steps](installation.md#from-source) |
 
-Installer updates keep configuration and existing agent tokens. Docker updates retain the data volume.
+Installer updates keep configuration and existing agent tokens, and take a full backup first. If the new release doesn't start, the installer puts the previous one and the backup back. Docker updates retain the data volume.
+
+### Updating the dashboard
+
+The dashboard looks for a newer release of itself every 6 hours, on its own channel: stable releases, or prereleases too when it runs a prerelease. When one is out, the version in the header shows **update**. Click it for the release notes of every release since yours and the way to update this install. **Check now** asks GitHub straight away. To stop the dashboard asking GitHub at all, set [`update_check: false`](configuration.md#dashboard-settings).
+
+| Installation | From the dashboard |
+|---|---|
+| Dashboard installer | Admins click **Update to …**. See [below](#installer-updates-from-the-dashboard) |
+| Docker Compose | Shows the commands to run: a backup, then the image update. See [Docker updates](#docker-updates) |
+| Source or anything else | Not supported: the page says so. Update it the way you installed it |
+
+#### Installer updates from the dashboard
+
+The dashboard runs as an unprivileged user and can't update itself. Instead it writes a request (`update-request.json`) into its data directory. The installer sets up `llama-paddock-update.path`, which starts `llama-paddock-updater` as root when the request appears. The updater takes nothing from the request but a release tag. It refuses a tag that isn't newer than the installed release, or a prerelease on a stable install. Then it runs `update-llama-paddock` with that tag, on the install's own channel. The update then goes the same way as one you start with `update-llama-paddock`:
+
+1. It downloads the release and checks it against the release's `SHA256SUMS`. A file that doesn't match is never installed.
+2. It stops the dashboard and takes a full [backup](#backups) with `paddock-backup` (reason `pre-update`). If the backup fails, it starts the old release again and changes nothing.
+3. It installs the new release, keeping the old one next to it, and starts the dashboard.
+4. It waits up to 2 minutes for `/api/healthz` to answer with the new version. If it does, the old release is removed. If not, the updater stops the dashboard, puts the old release back, restores the backup and starts it again. The update page then says the update failed and the previous version is back, with the updater's output.
+
+While it runs, the dashboard restarts and the update page reconnects on its own. An update that was interrupted (a crash, a reboot, a killed updater) is rolled back the same way: by `llama-paddock-recover.service` before the dashboard starts at boot, or the next time the updater or the installer runs.
+
+The updater writes its status and output to `/var/lib/llama-paddock-update/` (`status.json`, `update.log`); `journalctl -u llama-paddock-update` has the rest. Installs from before 0.10.0 get the updater the next time `update-llama-paddock` runs. Starting an update is logged in the [audit log](security.md#audit-log) as `dashboard.update`.
+
+#### Docker updates
+
+The dashboard can't replace its own image. Run these next to your `docker-compose.yml`:
+
+```bash
+docker compose exec llama-paddock paddock-backup backup --reason pre-update
+docker compose pull
+docker compose up -d
+```
+
+The first command prints the backup's name. If the new version doesn't work, roll back:
+
+1. Pin the previous version in `docker-compose.yml`, for example `image: ghcr.io/splendidchip758/llama-paddock:0.10.0`. Every release is published under its version.
+2. `docker compose stop`
+3. `docker compose run --rm llama-paddock paddock-backup restore <name>`
+4. `docker compose up -d`
+
+Restore with the version the backup was taken with, or a newer one: `paddock-backup` refuses a backup from a newer version than the image. CI runs these steps on every pull request, from the published image to the one built from the change.
 
 ### Update channels
 
@@ -27,7 +69,7 @@ Installer updates keep configuration and existing agent tokens. Docker updates r
 | `update-llama-paddock dev` | The newest release including [prereleases](#prereleases), and switches the install to the prerelease channel |
 | `update-llama-paddock v0.8.0` | That exact release. A prerelease tag (`v0.9.0-dev.3`) puts the install on the prerelease channel, a stable tag on the stable channel |
 
-If the install is already on the release the command would fetch, the updater says so and stops: nothing is downloaded, and the dashboard or agent isn't restarted. It still goes ahead when the service isn't running, to bring it back. To reinstall the same release anyway (to repair an install, say), set `PADDOCK_FORCE=1`: `PADDOCK_FORCE=1 update-llama-paddock`.
+`update-llama-paddock` checks the release against its `SHA256SUMS` before installing it, takes a backup and rolls back when the new version doesn't come up, as described in [Installer updates from the dashboard](#installer-updates-from-the-dashboard). If the install is already on the release the command would fetch, the updater says so and stops: nothing is downloaded, and the dashboard or agent isn't restarted. It still goes ahead when the service isn't running, to bring it back. To reinstall the same release anyway (to repair an install, say), set `PADDOCK_FORCE=1`: `PADDOCK_FORCE=1 update-llama-paddock`.
 
 An install follows the channel it was installed or last switched to, so a prerelease install keeps getting prereleases and a stable one keeps getting stable releases. The channel is not shared between the dashboard and its agents: update each with the argument you want. Agents are released on their own, so their versions differ from the dashboard's. A dashboard works with every agent whose [protocol](api.md#agent-protocol) it supports, and shows **agent incompatible** for the others. When a release changes the protocol, update the dashboard first. Switching a prerelease install back to stable can leave a newer data format behind; read the [prerelease notes](#prereleases) first.
 

@@ -25,6 +25,9 @@
 #   PADDOCK_TUI=0     plain text prompts instead of whiptail dialogs
 #   PADDOCK_UNINSTALL=1  remove the dashboard instead (same as uninstall-llama-paddock)
 #   PADDOCK_PURGE=1   with PADDOCK_UNINSTALL: also delete config, saved hosts and login
+#   PADDOCK_CHANNEL   latest | dev: the channel update-llama-paddock follows afterwards, when
+#                     PADDOCK_VERSION is a tag (default: the tag's own channel). The dashboard's
+#                     updater sets it, so an update from the dashboard never switches channel
 #   CT_OS, CT_ID, CT_PASSWORD, CT_ROOT_SSH, CT_SSH_KEY, CT_IP, …  preset the Proxmox settings
 set -euo pipefail
 
@@ -177,6 +180,7 @@ is_prerelease() { [[ $VERSION == dev || $VERSION == v*-* ]]; }
 # (a prerelease tag counts as the prerelease channel, a stable tag as stable)
 CHANNEL=latest
 is_prerelease && CHANNEL=dev
+case ${PADDOCK_CHANNEL-} in latest | stable) CHANNEL=latest ;; dev) CHANNEL=dev ;; esac
 
 prerelease_notice() {
   local text="You are installing a PRERELEASE of llama-paddock (${VERSION}, from the ${BRANCH} branch).
@@ -523,9 +527,9 @@ ensure_deps() {
   msg_ok "Node.js $(node -p 'process.versions.node')"
 }
 
-# Sets RELEASE_TAG and ASSET_URL from the GitHub API (empty if there is no release)
+# Sets RELEASE_TAG, ASSET_URL and SUMS_URL from the GitHub API (empty if there is no release)
 resolve_release() {
-  RELEASE_TAG=""; ASSET_URL=""
+  RELEASE_TAG=""; ASSET_URL=""; SUMS_URL=""
   local api="https://api.github.com/repos/${REPO}/releases"
   case $VERSION in
     latest) api+="/latest" ;;
@@ -535,7 +539,7 @@ resolve_release() {
   local json; json=$(curl -fsSL -H "Accept: application/vnd.github+json" "$api" 2>/dev/null) || return 0
   # The list isn't reliably newest first (it once put v0.8.0-dev.10 after dev.8), so pick
   # the highest version, not the first entry
-  read -r RELEASE_TAG ASSET_URL < <(node -e '
+  read -r RELEASE_TAG ASSET_URL SUMS_URL < <(node -e '
     let r = JSON.parse(require("fs").readFileSync(0, "utf8"));
     const ver = (t) => {
       const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(t || "");
@@ -557,7 +561,8 @@ resolve_release() {
         .sort((x, y) => cmp(ver(y.tag_name), ver(x.tag_name)))[0] || {};
     }
     const a = (r.assets || []).find((x) => /^llama-paddock-dashboard-.*\.tar\.gz$/.test(x.name));
-    console.log(r.tag_name || "", a ? a.browser_download_url : "");
+    const sums = (r.assets || []).find((x) => x.name === "SHA256SUMS");
+    console.log(r.tag_name || "", a ? a.browser_download_url : "", sums ? sums.browser_download_url : "");
   ' <<<"$json") || true
 }
 
@@ -570,6 +575,19 @@ dashboard_is_current() {
   resolve_release
   RELEASE_CHECKED=1  # fetch_app reuses this answer instead of asking GitHub again
   [[ -n $RELEASE_TAG && $RELEASE_TAG == "$(cat "$APP_DIR/VERSION" 2>/dev/null)" ]]
+}
+
+# verify_asset FILE NAME — check a downloaded release file against the release's SHA256SUMS, so a
+# damaged or swapped download is never installed. Every dashboard release has them.
+verify_asset() {
+  local file=$1 name=$2 want got
+  [[ -n $SUMS_URL ]] || die "release $RELEASE_TAG has no SHA256SUMS, so $name can't be checked; nothing was changed"
+  curl -fsSL "$SUMS_URL" -o "$file.sums" || die "couldn't download SHA256SUMS for $RELEASE_TAG; nothing was changed"
+  want=$(awk -v n="$name" '$2 == n || $2 == "*" n { print $1; exit }' "$file.sums")
+  got=$(sha256sum "$file" | cut -d' ' -f1)
+  [[ -n $want ]] || die "SHA256SUMS of $RELEASE_TAG doesn't list $name; nothing was changed"
+  [[ $got == "$want" ]] || die "$name doesn't match its checksum in SHA256SUMS (download damaged or tampered with); nothing was changed"
+  msg_ok "Checked $name against SHA256SUMS"
 }
 
 # Fetches/builds the app into $STAGE (server.js + .next/static + node_modules); sets INSTALLED_VERSION
@@ -596,6 +614,7 @@ fetch_app() {
       if [[ -n $ASSET_URL ]]; then
         msg_info "Downloading release $RELEASE_TAG"
         curl -fsSL "$ASSET_URL" -o "$work/app.tar.gz"
+        verify_asset "$work/app.tar.gz" "${ASSET_URL##*/}"
         tar -xzf "$work/app.tar.gz" -C "$work"
         cp -a "$work"/llama-paddock-dashboard/. "$STAGE"/
         INSTALLED_VERSION="$RELEASE_TAG"
@@ -646,6 +665,10 @@ audit_retention_days: 365   # audit log of who changed what
 # Agents older than the latest release are flagged and can be updated from the
 # dashboard; off stops it asking GitHub for the agent releases.
 # agent_updates: auto
+
+# Newer dashboard releases are shown under the version, and admins can install
+# them from the dashboard; false stops it asking GitHub.
+# update_check: true
 
 # Add hosts in the dashboard (Add host). Hosts listed here also work, but are
 # read-only in the UI. Tokens can live in llama-paddock.env as \${VAR}.
@@ -712,6 +735,9 @@ ReadOnlyPaths=${APP_DIR} ${CFG_DIR}
 StateDirectory=llama-paddock
 StateDirectoryMode=0700
 Environment=PADDOCK_DATA_DIR=${DATA_DIR}
+# updates from the dashboard: it asks llama-paddock-updater and reads its status here
+Environment=PADDOCK_INSTALL_METHOD=installer
+Environment=PADDOCK_UPDATER_DIR=${UPDATER_DIR}
 
 [Install]
 WantedBy=multi-user.target
@@ -719,6 +745,7 @@ EOF
 
   write_updater
   write_backup_cli
+  write_self_updater
   write_uninstaller
 }
 
@@ -764,6 +791,297 @@ EOF
   chmod 755 /usr/local/bin/paddock-backup
 }
 
+# ================================================================= safe updates (#48)
+# An update stops the dashboard, takes a full backup with paddock-backup, swaps in the new release
+# and keeps the old one next to it until the new one answers. If it doesn't, the old release and
+# the backup are put back. A marker file says an update is under way, so one that was interrupted
+# (a crash, a reboot) is rolled back the next time the installer, the updater or the machine starts.
+# These functions are also copied into llama-paddock-updater, which runs them without this script.
+UPDATER_DIR=/var/lib/llama-paddock-update
+UPDATE_MARKER=$UPDATER_DIR/in-progress
+UPDATE_REQUEST=$DATA_DIR/update-request.json
+UPDATE_LOCK=/run/llama-paddock-update.lock
+UPDATE_CMD=/usr/local/bin/update-llama-paddock
+# exit code of an update that failed and was rolled back
+ROLLED_BACK=3
+
+# marker_get KEY — a value from the marker (lines of key=value, written by begin_update)
+marker_get() { sed -n "s/^$1=//p" "$UPDATE_MARKER" 2>/dev/null | head -1; }
+
+# True when the marker belongs to no running update: its process is gone, or the machine rebooted
+marker_stale() {
+  [[ -f $UPDATE_MARKER ]] || return 1
+  local pid boot; pid=$(marker_get pid); boot=$(marker_get boot)
+  [[ $boot != "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" ]] && return 0
+  [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null && return 1
+  return 0
+}
+
+# run_backup_tool TOOL ARGS… — paddock-backup with the service's paths. TOOL may come from the
+# other release: the version it records and checks is always the one installed in $APP_DIR
+run_backup_tool() {
+  local tool=$1; shift
+  PADDOCK_APP_DIR=$APP_DIR PADDOCK_DATA_DIR=$DATA_DIR PADDOCK_CONFIG=$CFG_DIR/config.yaml \
+    PADDOCK_ENV_FILE=$CFG_DIR/llama-paddock.env node "$tool" "$@"
+}
+
+# The first paddock-backup of the given app directories that exists
+find_backup_tool() {
+  local d
+  for d in "$@"; do [[ -f $d/bin/paddock-backup.mjs ]] && { echo "$d/bin/paddock-backup.mjs"; return 0; }; done
+  return 1
+}
+
+# rollback_update WHY [boot] — put back the release and data from before the update in the marker.
+# "boot" when run before the dashboard starts at boot: systemctl would cancel that start.
+rollback_update() {
+  local why=$1 boot=${2-} from phase backup tool
+  from=$(marker_get from); phase=$(marker_get phase); backup=$(marker_get backup)
+  msg_warn "Rolling back to ${from:-the previous release}: $why"
+  [[ -z $boot ]] && systemctl stop llama-paddock 2>/dev/null || true
+  # the dashboard is stopped (or not started yet, at boot): a pid left in its lock may belong to
+  # another process by now, and would make the restore refuse
+  rm -f "$DATA_DIR/paddock.lock"
+  if [[ $phase == swapped ]]; then
+    if [[ -d ${APP_DIR}.old ]]; then
+      rm -rf "${APP_DIR}.failed"
+      [[ -d $APP_DIR ]] && mv "$APP_DIR" "${APP_DIR}.failed"
+      mv "${APP_DIR}.old" "$APP_DIR"
+    fi
+    # the new release may have upgraded the data: the backup has it as the old release left it
+    if [[ -n $backup ]]; then
+      if tool=$(find_backup_tool "$APP_DIR" "${APP_DIR}.failed") \
+        && run_backup_tool "$tool" restore "$backup" >/dev/null; then
+        msg_ok "Restored backup $backup"
+      else
+        msg_warn "Couldn't restore backup $backup: restore it with paddock-backup restore $backup"
+      fi
+    fi
+    rm -rf "${APP_DIR}.failed"
+  fi
+  rm -f "$UPDATE_MARKER"
+  if [[ -z $boot ]]; then
+    systemctl start llama-paddock 2>/dev/null || true
+  fi
+  msg_ok "Rolled back to ${from:-the previous release}"
+}
+
+# recover_update [boot] — roll back an update that was interrupted
+recover_update() {
+  marker_stale || return 0
+  rollback_update "an earlier update to $(marker_get to) didn't finish" "${1-}"
+}
+
+# begin_update — with the service stopped: a full backup, then the marker. Fails (and starts the
+# old release again) when the backup can't be taken, before anything is changed
+begin_update() {
+  local tool from backup="" out err
+  from=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)
+  install -d -m 750 -o root -g "$SVC_USER" "$UPDATER_DIR"
+  # the old release's paddock-backup, or the new one's for releases that shipped without it
+  if [[ -d $DATA_DIR ]] && tool=$(find_backup_tool "$APP_DIR" "$STAGE"); then
+    msg_info "Taking a full backup before updating"
+    err=$(mktemp)
+    if ! out=$(run_backup_tool "$tool" backup --reason pre-update --json 2>"$err"); then
+      cat "$err" >&2; rm -f "$err"
+      systemctl start llama-paddock 2>/dev/null || true
+      die "couldn't take a backup before updating, so nothing was changed"
+    fi
+    rm -f "$err"
+    backup=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(0, "utf8")).name)' <<<"$out")
+    msg_ok "Pre-update backup: $backup"
+  else
+    msg_warn "No paddock-backup to take a backup with: updating without one"
+  fi
+  printf 'phase=backed-up\nfrom=%s\nto=%s\nbackup=%s\npid=%s\nboot=%s\n' \
+    "$from" "$INSTALLED_VERSION" "$backup" "$$" "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" >"$UPDATE_MARKER"
+  chmod 600 "$UPDATE_MARKER"
+}
+
+# From here on a rollback swaps the releases back and restores the backup
+mark_swapped() { [[ -f $UPDATE_MARKER ]] && sed -i 's/^phase=.*/phase=swapped/' "$UPDATE_MARKER" || true; }
+
+finish_update() {
+  rm -rf "${APP_DIR}.old"
+  rm -f "$UPDATE_MARKER"
+}
+
+# dashboard_healthy VERSION SECONDS — /api/healthz answers, from VERSION when it is a release tag
+dashboard_healthy() {
+  local want="" body
+  [[ $1 =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]] && want=${1#v}
+  for _ in $(seq 1 "$2"); do
+    if body=$(curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/api/healthz" 2>/dev/null); then
+      [[ -z $want || $body == *"\"version\":\"${want}\""* ]] && return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# The local install's exit trap: clean up, and roll back an update this run started but didn't finish
+on_install_exit() {
+  local rc=$?
+  rm -rf "${WORK:-}"
+  [[ -n ${STAGE:-} && -d ${STAGE:-} ]] && rm -rf "$STAGE"
+  if ((rc != 0 && rc != ROLLED_BACK)) && [[ -f $UPDATE_MARKER && $(marker_get pid) == "$$" ]]; then
+    rollback_update "the update stopped with an error"
+    exit $ROLLED_BACK
+  fi
+}
+
+# ---------------------------------------------------------------- updates from the dashboard
+# The dashboard runs unprivileged: it writes $UPDATE_REQUEST, and llama-paddock-update.path starts
+# llama-paddock-updater as root, which takes nothing but a release tag from the file and runs
+# update-llama-paddock with it. It reports in $UPDATER_DIR, which the service can read.
+
+# newer_version A B — A is a later version than B (semver, as resolve_release orders them)
+newer_version() {
+  node -e '
+    const ver = (t) => {
+      const m = /^v?(\d+)\.(\d+)\.(\d+)(?:-(.+))?$/.exec(t || "");
+      return m ? [+m[1], +m[2], +m[3], m[4] ? m[4].split(".") : null] : null;
+    };
+    const a = ver(process.argv[1]), b = ver(process.argv[2]);
+    if (!a || !b) process.exit(b ? 1 : 0);
+    const cmp = () => {
+      for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+      if (!a[3] || !b[3]) return (a[3] ? -1 : 0) - (b[3] ? -1 : 0);
+      for (let i = 0; i < Math.max(a[3].length, b[3].length); i++) {
+        const x = a[3][i], y = b[3][i];
+        if (x === undefined || y === undefined) return x === undefined ? -1 : 1;
+        if (x === y) continue;
+        return /^\d+$/.test(x) && /^\d+$/.test(y) ? x - y : x < y ? -1 : 1;
+      }
+      return 0;
+    };
+    process.exit(cmp() > 0 ? 0 : 1);
+  ' "$1" "$2"
+}
+
+# write_status STATE VERSION FROM [MESSAGE] [BACKUP] — what the dashboard shows about the update
+write_status() {
+  local tmp; tmp=$(mktemp "$UPDATER_DIR/.status.XXXXXX")
+  S_STATE=$1 S_VERSION=${2#v} S_FROM=${3#v} S_MESSAGE=${4-} S_BACKUP=${5-} S_STARTED=${UPDATE_STARTED-} node -e '
+    const e = process.env, now = Date.now() / 1000;
+    process.stdout.write(JSON.stringify({
+      state: e.S_STATE, version: e.S_VERSION || null, from: e.S_FROM || null, started: Number(e.S_STARTED) || now,
+      finished: e.S_STATE === "running" ? null : now, message: e.S_MESSAGE || null, backup: e.S_BACKUP || null,
+    }) + "\n");
+  ' >"$tmp"
+  chmod 640 "$tmp"; chgrp "$SVC_USER" "$tmp"
+  mv -f "$tmp" "$UPDATER_DIR/status.json"
+}
+
+updater_run() {
+  local log=$UPDATER_DIR/update.log want="" from rc=0 now backup
+  exec 9>"$UPDATE_LOCK"
+  flock -n 9 || return 0
+  recover_update
+  [[ -e $UPDATE_REQUEST || -L $UPDATE_REQUEST ]] || return 0
+  # the dashboard wrote this file: take only a release tag from it, and never follow a link
+  if [[ -f $UPDATE_REQUEST && ! -L $UPDATE_REQUEST ]]; then
+    want=$(head -c 4096 "$UPDATE_REQUEST" \
+      | grep -oE '"version"[[:space:]]*:[[:space:]]*"v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?"' \
+      | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?' | head -1) || true
+  fi
+  rm -f "$UPDATE_REQUEST"
+  from=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)
+  UPDATE_STARTED=$(date +%s)
+  : >"$log"; chmod 640 "$log"; chgrp "$SVC_USER" "$log"
+  if [[ -z $want ]]; then
+    write_status failed "" "$from" "the request didn't name a release"
+    return 0
+  fi
+  if [[ $CHANNEL == latest && $want == *-* ]]; then
+    write_status failed "$want" "$from" "$want is a prerelease and this install follows stable releases"
+    return 0
+  fi
+  if ! newer_version "$want" "$from"; then
+    write_status failed "$want" "$from" "$want isn't newer than $from"
+    return 0
+  fi
+  write_status running "$want" "$from"
+  PADDOCK_CHANNEL=$CHANNEL "$UPDATE_CMD" "$want" >>"$log" 2>&1 || rc=$?
+  # the installer died without rolling back (killed, say)
+  if [[ -f $UPDATE_MARKER ]] && marker_stale; then
+    rollback_update "the update stopped (exit code $rc)" >>"$log" 2>&1 || true
+    rc=$ROLLED_BACK
+  fi
+  now=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)
+  backup=$(sed -n 's/.*Pre-update backup: //p' "$log" | tail -1)
+  if ((rc == 0)) && [[ $now == "$want" ]]; then
+    write_status done "$want" "$from" "" "$backup"
+  elif ((rc == ROLLED_BACK)); then
+    write_status rolled_back "$want" "$from" "$(grep -E 'Rolling back' "$log" | sed 's/.*Rolling back to [^:]*: //' | tail -1)" "$backup"
+  else
+    write_status failed "$want" "$from" "update-llama-paddock stopped with exit code $rc; ${now#v} is installed" "$backup"
+  fi
+}
+
+
+write_self_updater() {
+  install -d -m 750 -o root -g "$SVC_USER" "$UPDATER_DIR"
+  {
+    echo '#!/usr/bin/env bash'
+    echo '# Updates the llama-paddock dashboard asks for, run as root by llama-paddock-update.service,'
+    echo '# and rolling back an interrupted update at boot (written by install/dashboard.sh).'
+    echo '#   llama-paddock-updater run | recover'
+    echo 'set -euo pipefail'
+    declare -p APP_DIR CFG_DIR DATA_DIR SVC_USER CHANNEL UPDATER_DIR UPDATE_MARKER UPDATE_REQUEST UPDATE_LOCK UPDATE_CMD ROLLED_BACK
+    declare -f init_colors msg_info msg_ok msg_warn die marker_get marker_stale run_backup_tool find_backup_tool \
+      rollback_update recover_update newer_version write_status updater_run
+    echo 'init_colors'
+    echo 'case ${1-} in'
+    echo '  run) updater_run ;;'
+    echo '  recover) recover_update boot ;;'
+    echo '  *) echo "usage: llama-paddock-updater run | recover" >&2; exit 2 ;;'
+    echo 'esac'
+  } >/usr/local/sbin/llama-paddock-updater
+  chmod 700 /usr/local/sbin/llama-paddock-updater
+
+  cat >/etc/systemd/system/llama-paddock-update.path <<EOF
+[Unit]
+Description=llama-paddock: watch for an update the dashboard asks for
+
+[Path]
+PathExists=${UPDATE_REQUEST}
+
+[Install]
+WantedBy=paths.target
+EOF
+  cat >/etc/systemd/system/llama-paddock-update.service <<EOF
+[Unit]
+Description=llama-paddock: update the dashboard
+After=network-online.target llama-paddock-recover.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/llama-paddock-updater run
+TimeoutStartSec=30min
+EOF
+  cat >/etc/systemd/system/llama-paddock-recover.service <<EOF
+[Unit]
+Description=llama-paddock: roll back an interrupted dashboard update
+Before=llama-paddock.service
+ConditionPathExists=${UPDATE_MARKER}
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/llama-paddock-updater recover
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  if [[ -d /run/systemd/system ]]; then
+    systemctl daemon-reload
+    systemctl enable llama-paddock-recover.service >/dev/null 2>&1 || true
+    systemctl enable --now llama-paddock-update.path >/dev/null 2>&1 \
+      || msg_warn "couldn't start llama-paddock-update.path: updates from the dashboard won't start"
+  fi
+}
+
 # Remove the dashboard from this machine. Config, saved hosts and login stay unless you
 # say so (or PADDOCK_PURGE=1), so a reinstall picks them up again.
 local_uninstall() {
@@ -778,10 +1096,13 @@ local_uninstall() {
     purge=1
   fi
 
-  systemctl disable --now llama-paddock >/dev/null 2>&1 || true
+  systemctl disable --now llama-paddock llama-paddock-update.path llama-paddock-recover.service >/dev/null 2>&1 || true
   rm -f /etc/systemd/system/llama-paddock.service /usr/local/bin/update-llama-paddock /usr/local/bin/uninstall-llama-paddock /usr/local/bin/paddock-backup
+  rm -f /etc/systemd/system/llama-paddock-update.path /etc/systemd/system/llama-paddock-update.service \
+    /etc/systemd/system/llama-paddock-recover.service /usr/local/sbin/llama-paddock-updater
+  rm -rf "$UPDATER_DIR"
   rm -f /etc/profile.d/00_llama-paddock.sh
-  rm -rf "$APP_DIR" "${APP_DIR}.old"
+  rm -rf "$APP_DIR" "${APP_DIR}.old" "${APP_DIR}.failed"
   systemctl daemon-reload 2>/dev/null || true
   if [[ -n $purge ]]; then
     rm -rf "$CFG_DIR" "$DATA_DIR"
@@ -863,7 +1184,7 @@ write_uninstaller() {
     echo '# Remove the llama-paddock dashboard from this machine (written by install/dashboard.sh)'
     echo '# PADDOCK_YES=1 skips the questions; PADDOCK_PURGE=1 also deletes config, saved hosts and login.'
     echo 'set -euo pipefail'
-    declare -p APP_DIR CFG_DIR DATA_DIR SVC_USER
+    declare -p APP_DIR CFG_DIR DATA_DIR SVC_USER UPDATER_DIR
     declare -f init_colors msg_info msg_ok msg_warn die confirm local_uninstall
     echo 'init_colors'
     echo 'local_uninstall'
@@ -874,7 +1195,10 @@ write_uninstaller() {
 local_install() {
   [[ $EUID -eq 0 ]] || die "run as root"
   WORK=""; STAGE=""
-  trap 'rm -rf "${WORK:-}"; [[ -n ${STAGE:-} && -d ${STAGE:-} ]] && rm -rf "$STAGE"; true' EXIT
+  trap on_install_exit EXIT
+  local has_systemd=""
+  [[ -d /run/systemd/system ]] && has_systemd=1
+  [[ -n $has_systemd ]] && recover_update
   local updating=""
   [[ -f $APP_DIR/server.js ]] && updating=1
 
@@ -884,6 +1208,15 @@ local_install() {
   if [[ -n $updating ]] && dashboard_is_current; then
     write_updater
     write_backup_cli
+    # installs from before updates from the dashboard: the service needs the updater's settings
+    if [[ -n $has_systemd ]] && ! grep -q PADDOCK_UPDATER_DIR /etc/systemd/system/llama-paddock.service 2>/dev/null; then
+      write_service
+      systemctl daemon-reload
+      systemctl restart llama-paddock
+      msg_ok "Restarted llama-paddock to turn on updates from the dashboard"
+    else
+      [[ -n $has_systemd ]] && write_self_updater
+    fi
     msg_ok "Already on the latest version ($(cat "$APP_DIR/VERSION")), nothing to update"
     echo "   To reinstall it anyway:  PADDOCK_FORCE=1 update-llama-paddock"
     return
@@ -893,17 +1226,20 @@ local_install() {
   fetch_app
   echo "$INSTALLED_VERSION" > "$STAGE/VERSION"
 
-  local has_systemd=""
-  [[ -d /run/systemd/system ]] && has_systemd=1
   [[ -n $has_systemd ]] && systemctl stop llama-paddock 2>/dev/null || true
+  # with systemd, an update can be checked and rolled back: backup first, old release kept until the new one answers
+  local safe=""
+  [[ -n $updating && -n $has_systemd ]] && safe=1
+  [[ -n $safe ]] && begin_update
 
   # swap in the new build
   rm -rf "${APP_DIR}.old"
+  [[ -n $safe ]] && mark_swapped
   [[ -d $APP_DIR ]] && mv "$APP_DIR" "${APP_DIR}.old"
   mv "$STAGE" "$APP_DIR"
   chown -R root:"$SVC_USER" "$APP_DIR"
   chmod -R u=rwX,g=rX,o= "$APP_DIR"
-  rm -rf "${APP_DIR}.old"
+  [[ -n $safe ]] || rm -rf "${APP_DIR}.old"
   msg_ok "Installed $INSTALLED_VERSION to $APP_DIR"
 
   write_config
@@ -922,12 +1258,21 @@ local_install() {
     systemctl daemon-reload
     systemctl enable --now llama-paddock >/dev/null 2>&1
     systemctl restart llama-paddock
-    local ok=""
-    for _ in $(seq 1 20); do
-      curl -fsS "http://127.0.0.1:${PORT}/api/healthz" >/dev/null 2>&1 && { ok=1; break; }
-      sleep 1
-    done
-    [[ -n $ok ]] && msg_ok "Service llama-paddock is running" || msg_warn "Service not answering yet — check: journalctl -u llama-paddock"
+    if [[ -n $safe ]]; then
+      # migrations on a large database can take a while on first start
+      if dashboard_healthy "$INSTALLED_VERSION" 120; then
+        finish_update
+        msg_ok "Service llama-paddock is running $INSTALLED_VERSION"
+      else
+        journalctl -u llama-paddock -n 30 --no-pager 2>/dev/null >&2 || true
+        rollback_update "$INSTALLED_VERSION didn't answer on /api/healthz within 2 minutes"
+        exit $ROLLED_BACK
+      fi
+    elif dashboard_healthy "" 20; then
+      msg_ok "Service llama-paddock is running"
+    else
+      msg_warn "Service not answering yet — check: journalctl -u llama-paddock"
+    fi
   else
     msg_warn "systemd not running here; start it manually:"
     echo "     set -a; . ${CFG_DIR}/llama-paddock.env; set +a; node ${APP_DIR}/server.js"

@@ -181,7 +181,7 @@ function prepareStandalone() {
   return server;
 }
 
-export async function startDashboard(dataDir, { port } = {}) {
+export async function startDashboard(dataDir, { port, env: extraEnv = {} } = {}) {
   const server = prepareStandalone();
   port ??= await freePorts(1, DASHBOARD_PORTS);
   const env = { ...process.env };
@@ -195,6 +195,7 @@ export async function startDashboard(dataDir, { port } = {}) {
     PADDOCK_CONFIG: dataDir.config,
     PADDOCK_USERNAME: USERNAME,
     PADDOCK_PASSWORD: INITIAL_PASSWORD,
+    ...extraEnv,
   });
   const child = new Child("dashboard", process.execPath, [server], { cwd: STANDALONE, env });
   const url = `http://127.0.0.1:${port}`;
@@ -297,10 +298,10 @@ export function metric(text, name, labels) {
 /**
  * Start a simulator, a data dir and a signed-in dashboard. `data` can be a function of the simulator,
  * for config that depends on its ports. `seed(dataDir)` runs before the dashboard starts, to put files
- * from an older version in place. `stop()` tears all of it down and, when a
+ * from an older version in place. `env` adds to the dashboard's environment. `stop()` tears all of it down and, when a
  * test marked the stack as failed, prints the processes' recent output, since CI only shows the assertion.
  */
-export async function startStack({ sim: simOpts = {}, data: dataOpts = {}, seed } = {}) {
+export async function startStack({ sim: simOpts = {}, data: dataOpts = {}, seed, env } = {}) {
   const stack = { sim: null, data: null, dashboard: null, client: null, failed: false };
   stack.stop = async () => {
     if (stack.failed) {
@@ -313,7 +314,7 @@ export async function startStack({ sim: simOpts = {}, data: dataOpts = {}, seed 
     stack.sim = await startSim(simOpts);
     stack.data = makeDataDir(stack.sim, typeof dataOpts === "function" ? dataOpts(stack.sim) : dataOpts);
     seed?.(stack.data);
-    stack.dashboard = await startDashboard(stack.data);
+    stack.dashboard = await startDashboard(stack.data, { env });
     stack.client = await new Client(stack.dashboard.url).login();
   } catch (e) {
     stack.failed = true;

@@ -10,9 +10,9 @@ import { Logo } from "./Logo";
 import { api } from "@/lib/format";
 import { MODES, PALETTES, applyTheme, currentTheme, type Mode, type Palette } from "@/lib/theme";
 import { loudAlerts } from "./AlertBits";
+import { VersionLink } from "./DashboardUpdate";
 
 export function Header({ version }: { version: string }) {
-  const pre = version.includes("-");
   const { instances, jobs, setJobsOpen, me, alerts, readOnly, security } = usePaddock();
   const path = usePathname();
   const m = path.match(/^\/i\/([^/]+)(?:\/([^/]+))?/);
@@ -28,7 +28,7 @@ export function Header({ version }: { version: string }) {
         <Link className="brand" href="/" aria-label="llama-paddock home">
           <Logo />
         </Link>
-        <span className={`ver ${pre ? "pre" : ""}`} title={`llama-paddock dashboard ${version}${pre ? " (prerelease)" : ""}`}>v{version}</span>
+        <VersionLink version={version} />
         <nav className="instnav">
           <Link href="/" className={path === "/" ? "active" : ""}>Overview</Link>
           {instances.map((st) => {

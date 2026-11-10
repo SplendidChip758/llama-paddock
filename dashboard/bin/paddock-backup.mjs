@@ -21,6 +21,8 @@ const FORMAT = 1;
 const DB = "paddock.db";
 /** Written by a running dashboard: restore refuses while that process is alive. */
 const LOCK = "paddock.lock";
+/** The dashboard's request to the installer's updater (lib/dashboardUpdate.ts). */
+const UPDATE_REQUEST = "update-request.json";
 /** Automatic backups kept per reason; manual ones are kept until removed. */
 const KEEP = { "pre-update": 5, "pre-restore": 3, "pre-import": 3 };
 const REASONS = ["manual", "pre-update", "pre-restore", "pre-import"];
@@ -152,7 +154,8 @@ function dataFiles(backups) {
         if (!rel && e.name === "uploads") continue;
         walk(r);
       } else if (e.isFile()) {
-        if (!rel && (isDbFile(e.name) || e.name === LOCK)) continue;
+        // a pending update request would start the update again after a restore
+        if (!rel && (isDbFile(e.name) || e.name === LOCK || e.name === UPDATE_REQUEST)) continue;
         if (e.name.endsWith(".tmp")) continue;
         out.push(r);
       }

@@ -49,6 +49,7 @@ See [Updates and backups](operations.md) before upgrading or switching channels.
 | `PADDOCK_PORT` | `8080` | Dashboard listen port |
 | `PADDOCK_LOCAL=1` | | install on the Proxmox host itself instead of creating a CT |
 | `PADDOCK_YES=1` | | non-interactive, accept defaults |
+| `PADDOCK_CHANNEL` | the tag's | with a release tag in `PADDOCK_VERSION`: the channel `update-llama-paddock` follows afterwards, `latest` or `dev`. The dashboard's updater sets it, so an update from the dashboard never switches channel |
 
 For prereleases and uninstall instructions, see [Operations](operations.md).
 
