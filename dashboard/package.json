@@ -14,7 +14,7 @@
     "test:scenarios": "node ../test/agent.mjs && node --test --test-concurrency=1 --test-timeout=180000 \"../test/scenarios/*.test.mjs\""
   },
   "dependencies": {
-    "next": "16.4.3",
+    "next": "16.4.5",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "server-only": "^0.0.1",
