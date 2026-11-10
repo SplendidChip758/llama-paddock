@@ -17,6 +17,7 @@ Admins can see who changed what under **Audit log** in the account menu, filtere
 - Ollama restarts, GPU fixes and environment changes
 - model pulls, creates, copies, deletes, loads and unloads, and cancelled jobs
 - alert rule, channel and silence changes, benchmarks started, cancelled or deleted, and request client names
+- configuration exports and imports
 - dashboard updates, rollbacks, release channel switches and automatic updates turned on or off
 
 Each record has the time, the user, the API token if the change came with one, the client address, the host, what was acted on and a short detail. The detail says **which** environment variables changed, never their values, and that a token, key or password changed, never what to. Prompts are never recorded, so the test prompt isn't logged. A failed sign-in names the account only when it exists: the text typed as a username might be a password. Saving a list of rules, channels or client names that didn't change records nothing.
@@ -36,7 +37,7 @@ The dashboard is designed for a trusted LAN or a reverse proxy, not the open int
 [API tokens](api.md#api-tokens) let scripts call the API as their user. Each is 256 random bits, shown once and stored as a SHA-256 hash in `credentials.json` (mode 600), so the file can't be used to sign in. Make a token read-only unless the script has to change something: a read-and-write admin token can restart Ollama and edit its environment on every host.
 
 - **Scopes and roles:** a token can only do what both its scopes and its user's current role allow. Demoting a user takes write access from their tokens for good; removing the user removes them.
-- **No credential management:** tokens can't create or revoke tokens, manage users or change passwords. Those need a signed-in browser.
+- **No credential management:** tokens can't create or revoke tokens, manage users, change passwords or export and import the configuration. Those need a signed-in browser.
 - **Expiry and revocation:** set an expiry when you create one, and revoke it under **API tokens** when a script is retired or a token may have leaked. Admins can see and revoke every user's tokens. Each token shows when it was last used (to the minute).
 - **Lockout:** five unknown or wrong tokens from one address lock that address out of token requests for five minutes. Unlike the login there is no limit for everyone together: a 256-bit token can't be guessed, and a forgotten script with a revoked token shouldn't lock every other script or person out. Token failures don't count towards the login lockout either.
 - **Transport:** like the session cookie, a token crosses the network in clear text unless the dashboard is behind TLS.

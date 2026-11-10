@@ -317,8 +317,15 @@ export function addInstance(body: InstanceInput): Instance {
 export function updateInstance(id: string, body: InstanceInput): Instance {
   const p = paddock();
   const st = editable(id);
+  const inst: Instance = { ...st.inst, ...hostFields(body, st.inst) };
+  replaceInstance(p, st, inst);
+  persistHosts(p);
+  return inst;
+}
+
+function replaceInstance(p: Paddock, st: InstanceState, inst: Instance) {
+  const { id } = inst;
   const prev = st.inst;
-  const inst: Instance = { ...prev, ...hostFields(body, prev) };
   // New endpoints mean the old status and history no longer apply. A new Ollama key, the switch to
   // https:// or a new pin don't: it's the same server, so only the status is reset (the next poll fills it in again).
   const moved = inst.ollama_url !== prev.ollama_url || !sameEndpoint(inst.agent_url, prev.agent_url) || inst.agent_token !== prev.agent_token;
@@ -337,8 +344,26 @@ export function updateInstance(id: string, body: InstanceInput): Instance {
     next.restart_settled = st.restart_settled;
     p.instances.set(id, next);
   } else st.inst = inst;
-  persistHosts(p);
-  return inst;
+}
+
+/**
+ * Take in hosts.json and the learned pins after a configuration import wrote them. An import only
+ * adds and replaces, so no host goes; config.yaml's own hosts are left as they were loaded.
+ */
+export function reloadHosts() {
+  const p = paddock();
+  for (const inst of loadSettings().instances) {
+    const st = p.instances.get(inst.id);
+    if (!st) {
+      if (inst.source !== "ui") continue;
+      p.instances.set(inst.id, new InstanceState(inst));
+      // ids can be reused after a host is removed
+      deleteHistory(inst.id);
+    } else if (st.inst.source === inst.source && JSON.stringify(st.inst) !== JSON.stringify(inst)) {
+      if (inst.source === "ui") replaceInstance(p, st, inst);
+      else if (st.inst.agent_fingerprint !== inst.agent_fingerprint) replaceInstance(p, st, { ...st.inst, agent_fingerprint: inst.agent_fingerprint });
+    }
+  }
 }
 
 export function removeInstance(id: string) {

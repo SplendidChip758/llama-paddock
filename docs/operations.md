@@ -92,7 +92,7 @@ An install follows the channel it was installed or last switched to, so a prerel
 
 `paddock-backup` takes a **full backup**: everything needed to put an install back exactly as it was. It holds a consistent snapshot of `paddock.db` (history, alerts, benchmarks, the audit log, jobs), the other files in the [data directory](configuration.md#data-directory) (hosts, users, API tokens, pinned agent keys, alert rules and channels), `config.yaml` and, for installer installs, the service's env file. Each backup records the application and database schema versions and a SHA-256 checksum for every file. Backups hold secrets: they're written with mode 600, in a directory only the dashboard's user can read.
 
-A full backup is for putting the same install back, for example after an update that went wrong. It isn't a way to move the dashboard to another machine.
+A full backup is for putting the same install back, for example after an update that went wrong. To move the dashboard to another machine, use a [configuration export](#configuration-export) instead.
 
 The dashboard can keep running while you take a backup: the database is read in a single transaction, so the copy is consistent. Uploads in progress (`uploads/`) aren't included.
 
@@ -123,6 +123,39 @@ A restore:
 - leaves `config.yaml` alone when it's unchanged, so a read-only Docker mount isn't a problem. When it has changed and can't be written, the restore stops before changing anything: use `--data-only`.
 
 `paddock-backup` comes with releases from 0.10.0. With older releases, stop the dashboard and copy the data directory, `config.yaml` and the env file by hand, keeping ownership and permissions. Agent tokens and settings live on each Ollama host: back those up there if you need to rebuild a host.
+
+### Configuration export
+
+A **configuration export** moves the dashboard's setup to another install: one small file with what you set up, without what the dashboard recorded. It's what you need to move to another machine, or from the installer to Docker. Unlike a full backup, it doesn't roll an install back.
+
+| In the export | Not in the export |
+|---|---|
+| Hosts added in the dashboard, with their agent tokens, Ollama proxy keys and pinned agent keys | Metric history, events and alert history |
+| Users, with their password hashes and roles | Jobs, benchmarks and the audit log |
+| API tokens (as hashes: the tokens themselves keep working) | Silences |
+| Alert rules and channels, with the channels' URLs, tokens and SMTP passwords | The session key: everyone signs in again |
+| Request client names and dismissed security checks | The service's env file |
+| `config.yaml` | Theme choices, which each browser keeps |
+
+**Export** under **Backup** in the account menu (admins). The file is encrypted with a passphrase of at least 12 characters (scrypt and AES-256-GCM). Without the passphrase it can't be read or imported, and it can't be recovered. You can choose to export it unencrypted instead: the file then holds every agent token, key and password hash in plain text, so keep it where only you can read it and delete it once imported. Either way the export asks for your password, and it's recorded in the audit log.
+
+**Import** it on the other install under **Backup**, or on a fresh install from the first sign-in screen, before you choose a password (**Moving from another dashboard?**). Choose the file and enter the passphrase (tick **Choose what to import** to limit it to some parts), then **Preview import**: it lists every host, user, token, rule and channel that would be added, replaced or skipped, and why. Nothing changes until you press **Import**. Then:
+
+- nothing is removed. An entry is added, or replaced when this install has the same host ID, user name (whatever the case), token, rule or channel ID. An entry that is the same here is skipped.
+- a replaced user gets the password from the export and is signed out, you too. After an import on a fresh install, sign in with your account from the other install.
+- an API token is imported with its user. A token whose user isn't imported and doesn't exist here is skipped.
+- a host whose ID `config.yaml` defines here is skipped: `config.yaml` comes first.
+- hosts, rules and channels take effect at once, without a restart.
+- the dashboard never writes `config.yaml`. When the export's is different, the preview says so; copy the settings by hand or import it with `paddock-backup import --config`, then restart the dashboard.
+
+From the shell, `paddock-backup` does the same:
+
+| Command | Does |
+|---|---|
+| `paddock-backup export <file>` | Writes the export to `<file>` (mode 600; `-` for standard output). It never overwrites a file. `--unencrypted` skips the passphrase |
+| `paddock-backup import <file>` | Imports an export. `--dry-run` only lists what would happen; `--only hosts,users,…` limits it to some parts (`hosts`, `users`, `tokens`, `rules`, `channels`, `clients`, `dismissals`, `config`); `--config` also writes `config.yaml` when it differs |
+
+The passphrase is asked for at the terminal, or read from `--passphrase-file FILE` (`-` for standard input) or `PADDOCK_PASSPHRASE`. `import` refuses while the dashboard runs, except with `--dry-run`: the installer's command stops and starts `llama-paddock` for you. Before an import changes anything, from the shell or the dashboard, it takes a full backup (reason `pre-import`, newest 3 kept), so `paddock-backup restore` undoes it. If that backup fails, the import doesn't run. With Docker, run it in a one-off container while the dashboard is stopped, as for a restore, with the file in a mounted directory.
 
 ## Prereleases
 

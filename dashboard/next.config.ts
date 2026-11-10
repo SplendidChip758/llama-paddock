@@ -12,6 +12,8 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  // loaded at run time by lib/configExport.ts, so the file tracer can't see them
+  outputFileTracingIncludes: { "/api/config/import": ["./bin/paddock-backup.mjs", "./bin/config-export.mjs"] },
   poweredByHeader: false,
   headers: async () => [{ source: "/(.*)", headers: securityHeaders }],
 };

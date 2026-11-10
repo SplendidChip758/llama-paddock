@@ -1,3 +1,9 @@
+## [0.10.0-dev.7](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.6...v0.10.0-dev.7) (2026-11-09)
+
+### Features
+
+* **dashboard:** export and import the configuration ([#194](https://github.com/SplendidChip758/llama-paddock/issues/194)) ([ab22cb0](https://github.com/SplendidChip758/llama-paddock/commit/ab22cb08b770c3d0064c45458f6e5c7e40d99c00)), closes [#87](https://github.com/SplendidChip758/llama-paddock/issues/87) [#87](https://github.com/SplendidChip758/llama-paddock/issues/87)
+
 ## [0.10.0-dev.6](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.5...v0.10.0-dev.6) (2026-11-09)
 
 ### Features
