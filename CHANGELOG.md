@@ -1,3 +1,9 @@
+## [0.10.0-dev.9](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.8...v0.10.0-dev.9) (2026-11-10)
+
+### Features
+
+* roll back, switch channel and auto-update from the dashboard ([#195](https://github.com/SplendidChip758/llama-paddock/issues/195)) ([ae880f9](https://github.com/SplendidChip758/llama-paddock/commit/ae880f9eca632c00fa721e1c4d6756a9725b275d)), closes [#15](https://github.com/SplendidChip758/llama-paddock/issues/15) [#48](https://github.com/SplendidChip758/llama-paddock/issues/48) [#193](https://github.com/SplendidChip758/llama-paddock/issues/193) [#48](https://github.com/SplendidChip758/llama-paddock/issues/48)
+
 ## [0.10.0-dev.8](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.7...v0.10.0-dev.8) (2026-11-10)
 
 ### Features
