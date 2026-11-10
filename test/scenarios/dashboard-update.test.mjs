@@ -113,18 +113,110 @@ test("what the updater reports is shown, with its output", async () => {
   const now = Date.now() / 1000;
   fs.writeFileSync(path.join(updater, "status.json"), JSON.stringify({
     state: "rolled_back", version: LATEST, from: VERSION, started: now - 60, finished: now,
-    message: `v${LATEST} didn't answer on /api/healthz within 2 minutes`, backup: "20261109T000000Z-pre-update",
+    message: `v${LATEST} didn't answer on /api/healthz within 2 minutes`, backup: "20261109T000000Z-v0.10.0-pre-update",
   }));
   fs.writeFileSync(path.join(updater, "update.log"), " \x1b[33m!\x1b[0m Rolling back\n \x1b[32m✔\x1b[0m Rolled back\n");
   const u = (await c.get("/api/dashboard-update")).data;
   assert.equal(u.run.state, "rolled_back");
-  assert.equal(u.run.backup, "20261109T000000Z-pre-update");
+  assert.equal(u.run.backup, "20261109T000000Z-v0.10.0-pre-update");
   assert.match(u.run.message, /healthz/);
   assert.deepEqual(u.run.log, [" ! Rolling back", " ✔ Rolled back"]);
+  // the updater from 0.10.0 only updated, and named nobody
+  assert.equal(u.run.action, "update");
+  assert.equal(u.run.by, null);
   // it isn't under way any more, so it can be tried again
   const again = await c.post("/api/dashboard-update", { version: LATEST });
   assert.equal(again.status, 200, JSON.stringify(again.data));
   fs.rmSync(request);
+});
+
+// ============================================================================ history, rollback, channel, automatic updates
+/** A pre-update backup taken by an older version, as the updater keeps it in the data directory. */
+function olderBackup(older) {
+  const app = fs.mkdtempSync(path.join(os.tmpdir(), "paddock-oldapp-"));
+  fs.writeFileSync(path.join(app, "package.json"), JSON.stringify({ version: older }));
+  const env = { ...process.env, PADDOCK_DATA_DIR: holder.stack.data.data, PADDOCK_CONFIG: holder.stack.data.config, PADDOCK_APP_DIR: app };
+  const r = spawnSync(process.execPath, [path.join(REPO, "dashboard/bin/paddock-backup.mjs"), "backup", "--reason", "pre-update", "--json"], { env, encoding: "utf8" });
+  fs.rmSync(app, { recursive: true, force: true });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout).name;
+}
+
+const history = (entries) =>
+  fs.writeFileSync(path.join(updater, "history.jsonl"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+
+test("the history lists finished runs newest first; an update can be rolled back while its backup is kept", async () => {
+  const kept = olderBackup("0.0.2");
+  const now = Date.now() / 1000;
+  history([
+    { state: "done", action: "update", version: "0.0.2", from: "0.0.1", started: now - 900, finished: now - 860, backup: "20200101T000000Z-v0.0.1-pre-update", by: "terminal" },
+    { state: "rolled_back", action: "automatic", version: "9.9.9", from: "0.0.2", started: now - 600, finished: now - 560, message: "it didn't answer", backup: null, by: "automatic" },
+    { state: "done", action: "update", version: VERSION, from: "0.0.2", started: now - 300, finished: now - 260, backup: kept, by: "admin" },
+    "not json",
+  ]);
+  const u = (await c.get("/api/dashboard-update")).data;
+  assert.deepEqual(u.history.map((h) => [h.action, h.state, h.by, h.can_roll_back]), [
+    ["update", "done", "admin", true],
+    ["automatic", "rolled_back", "automatic", false],
+    // its backup is gone
+    ["update", "done", "terminal", false],
+  ]);
+
+  assert.equal((await c.post("/api/dashboard-update", { action: "rollback", backup: "20200101T000000Z-v0.0.1-pre-update" })).status, 409);
+  const r = await c.post("/api/dashboard-update", { action: "rollback", backup: kept });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.run.state, "requested");
+  assert.equal(r.data.run.action, "rollback");
+  const req = JSON.parse(fs.readFileSync(request, "utf8"));
+  assert.deepEqual([req.action, req.version, req.backup, req.requested_by], ["rollback", "v0.0.2", kept, "admin"]);
+  const audit = (await c.get("/api/audit?action=dashboard.rollback")).data.entries[0];
+  assert.equal(audit.target, "0.0.2");
+  fs.rmSync(request);
+});
+
+test("a channel switch goes to the updater; the channel shown is the updater's", async () => {
+  fs.writeFileSync(path.join(updater, "channel"), "latest\n");
+  let u = (await c.get("/api/dashboard-update")).data;
+  assert.equal(u.channel, "stable");
+  assert.equal((await c.post("/api/dashboard-update", { action: "channel", channel: "stable" })).status, 409);
+  assert.equal((await c.post("/api/dashboard-update", { action: "channel", channel: "nightly" })).status, 400);
+
+  const r = await c.post("/api/dashboard-update", { action: "channel", channel: "dev" });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.run.action, "channel");
+  assert.equal(JSON.parse(fs.readFileSync(request, "utf8")).channel, "dev");
+  fs.rmSync(request);
+
+  // as the updater writes it after the switch
+  fs.writeFileSync(path.join(updater, "channel"), "dev\n");
+  u = (await c.get("/api/dashboard-update")).data;
+  assert.equal(u.channel, "dev");
+});
+
+test("automatic updates are turned on and off through the updater, and only on the stable channel", async () => {
+  // still on prereleases from the test above
+  let r = await c.post("/api/dashboard-update", { action: "auto", enabled: true });
+  assert.equal(r.status, 409);
+  assert.match(r.data.detail, /stable/);
+
+  fs.writeFileSync(path.join(updater, "channel"), "latest\n");
+  let u = (await c.get("/api/dashboard-update")).data;
+  assert.equal(u.auto_update, false);
+  r = await c.post("/api/dashboard-update", { action: "auto", enabled: true });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  // shown as on before the updater has written it, and not as an update under way
+  assert.equal(r.data.auto_update, true);
+  assert.notEqual(r.data.run?.state, "requested");
+  assert.equal(JSON.parse(fs.readFileSync(request, "utf8")).enabled, true);
+  // one request at a time
+  assert.equal((await c.post("/api/dashboard-update", { action: "auto", enabled: false })).status, 409);
+
+  // as the updater does
+  fs.rmSync(request);
+  fs.writeFileSync(path.join(updater, "auto-update"), "on\n");
+  u = (await c.get("/api/dashboard-update")).data;
+  assert.equal(u.auto_update, true);
+  assert.equal((await c.get("/api/audit?action=dashboard.auto_update")).data.entries[0].detail, "on");
 });
 
 test("without the updater, the dashboard says to run update-llama-paddock", async () => {

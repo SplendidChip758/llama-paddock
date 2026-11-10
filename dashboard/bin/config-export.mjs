@@ -59,7 +59,10 @@ function writeFile(file, text, { chown, keepMode = false } = {}) {
     // new file
   }
   const tmp = `${file}.${process.pid}.tmp`;
-  fs.writeFileSync(/*turbopackIgnore: true*/ tmp, text, { mode: 0o600 });
+  // run as root by paddock-backup import, in a directory the dashboard's user can change: never
+  // write through something already at the temp name
+  fs.rmSync(/*turbopackIgnore: true*/ tmp, { force: true });
+  fs.writeFileSync(/*turbopackIgnore: true*/ tmp, text, { mode: 0o600, flag: "wx" });
   if (keepMode && prev) {
     fs.chmodSync(/*turbopackIgnore: true*/ tmp, prev.mode & 0o777);
     if (process.getuid?.() === 0) fs.chownSync(/*turbopackIgnore: true*/ tmp, prev.uid, prev.gid);

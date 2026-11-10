@@ -28,6 +28,10 @@
 #   PADDOCK_CHANNEL   latest | dev: the channel update-llama-paddock follows afterwards, when
 #                     PADDOCK_VERSION is a tag (default: the tag's own channel). The dashboard's
 #                     updater sets it, so an update from the dashboard never switches channel
+#   PADDOCK_NO_DOWNGRADE=1  never install a release older than the installed one: switch the
+#                     channel only (the newer release stays until the channel catches up)
+#   PADDOCK_RESTORE_BACKUP  a pre-update backup (paddock-backup list) to restore after installing
+#                     PADDOCK_VERSION: rolls an update back to the version and data from before it
 #   CT_OS, CT_ID, CT_PASSWORD, CT_ROOT_SSH, CT_SSH_KEY, CT_IP, …  preset the Proxmox settings
 set -euo pipefail
 
@@ -925,15 +929,22 @@ on_install_exit() {
   rm -rf "${WORK:-}"
   [[ -n ${STAGE:-} && -d ${STAGE:-} ]] && rm -rf "$STAGE"
   if ((rc != 0 && rc != ROLLED_BACK)) && [[ -f $UPDATE_MARKER && $(marker_get pid) == "$$" ]]; then
+    local backup from to
+    backup=$(marker_get backup); from=$(marker_get from); to=$(marker_get to)
     rollback_update "the update stopped with an error"
+    history_terminal rolled_back "${UPDATE_ACTION:-update}" "$to" "$from" "the update stopped with an error" "$backup"
     exit $ROLLED_BACK
   fi
 }
 
 # ---------------------------------------------------------------- updates from the dashboard
 # The dashboard runs unprivileged: it writes $UPDATE_REQUEST, and llama-paddock-update.path starts
-# llama-paddock-updater as root, which takes nothing but a release tag from the file and runs
-# update-llama-paddock with it. It reports in $UPDATER_DIR, which the service can read.
+# llama-paddock-updater as root. The request asks for one of: an update to a release tag, a
+# rollback to the version a pre-update backup was taken from, a channel switch, or turning
+# automatic updates on or off. The updater checks every field before using it and runs
+# update-llama-paddock for the rest. It reports in $UPDATER_DIR, which the service can read:
+# status.json (the last run), update.log (its output), history.jsonl, channel and auto-update.
+# llama-paddock-auto-update.timer runs it every 6 hours for automatic updates.
 
 # newer_version A B — A is a later version than B (semver, as resolve_release orders them)
 newer_version() {
@@ -959,86 +970,212 @@ newer_version() {
   ' "$1" "$2"
 }
 
-# write_status STATE VERSION FROM [MESSAGE] [BACKUP] — what the dashboard shows about the update
-write_status() {
-  local tmp; tmp=$(mktemp "$UPDATER_DIR/.status.XXXXXX")
-  S_STATE=$1 S_VERSION=${2#v} S_FROM=${3#v} S_MESSAGE=${4-} S_BACKUP=${5-} S_STARTED=${UPDATE_STARTED-} node -e '
-    const e = process.env, now = Date.now() / 1000;
-    process.stdout.write(JSON.stringify({
-      state: e.S_STATE, version: e.S_VERSION || null, from: e.S_FROM || null, started: Number(e.S_STARTED) || now,
-      finished: e.S_STATE === "running" ? null : now, message: e.S_MESSAGE || null, backup: e.S_BACKUP || null,
-    }) + "\n");
-  ' >"$tmp"
-  chmod 640 "$tmp"; chgrp "$SVC_USER" "$tmp"
-  mv -f "$tmp" "$UPDATER_DIR/status.json"
+# write_root_file NAME MODE — stdin to $UPDATER_DIR/NAME, readable by the service's group
+write_root_file() {
+  local tmp; tmp=$(mktemp "$UPDATER_DIR/.$1.XXXXXX")
+  cat >"$tmp"
+  chmod "$2" "$tmp"; chgrp "$SVC_USER" "$tmp"
+  mv -f "$tmp" "$UPDATER_DIR/$1"
 }
 
-updater_run() {
-  local log=$UPDATER_DIR/update.log want="" from rc=0 now backup
-  exec 9>"$UPDATE_LOCK"
-  flock -n 9 || return 0
-  recover_update
-  [[ -e $UPDATE_REQUEST || -L $UPDATE_REQUEST ]] || return 0
-  # the dashboard wrote this file: take only a release tag from it, and never follow a link
-  if [[ -f $UPDATE_REQUEST && ! -L $UPDATE_REQUEST ]]; then
-    want=$(head -c 4096 "$UPDATE_REQUEST" \
-      | grep -oE '"version"[[:space:]]*:[[:space:]]*"v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?"' \
-      | grep -oE 'v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?' | head -1) || true
-  fi
-  rm -f "$UPDATE_REQUEST"
-  from=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)
-  UPDATE_STARTED=$(date +%s)
-  : >"$log"; chmod 640 "$log"; chgrp "$SVC_USER" "$log"
-  if [[ -z $want ]]; then
-    write_status failed "" "$from" "the request didn't name a release"
-    return 0
-  fi
-  if [[ $CHANNEL == latest && $want == *-* ]]; then
-    write_status failed "$want" "$from" "$want is a prerelease and this install follows stable releases"
-    return 0
-  fi
-  if ! newer_version "$want" "$from"; then
-    write_status failed "$want" "$from" "$want isn't newer than $from"
-    return 0
-  fi
-  write_status running "$want" "$from"
-  PADDOCK_CHANNEL=$CHANNEL "$UPDATE_CMD" "$want" >>"$log" 2>&1 || rc=$?
+# write_status STATE ACTION VERSION FROM [MESSAGE] [BACKUP] [BY] — the last run, for the dashboard;
+# a finished run is also added to the history
+write_status() {
+  local json
+  json=$(S_STATE=$1 S_ACTION=$2 S_VERSION=${3#v} S_FROM=${4#v} S_MESSAGE=${5-} S_BACKUP=${6-} S_BY=${7-} \
+    S_STARTED=${UPDATE_STARTED-} node -e '
+    const e = process.env, now = Date.now() / 1000;
+    console.log(JSON.stringify({
+      state: e.S_STATE, action: e.S_ACTION, version: e.S_VERSION || null, from: e.S_FROM || null,
+      started: Number(e.S_STARTED) || now, finished: e.S_STATE === "running" ? null : now,
+      message: e.S_MESSAGE || null, backup: e.S_BACKUP || null, by: e.S_BY || null,
+    }));
+  ')
+  write_root_file status.json 640 <<<"$json"
+  [[ $1 == running ]] && return 0
+  # newest last; the dashboard shows the newest 50, a few hundred are kept
+  { tail -n 199 "$UPDATER_DIR/history.jsonl" 2>/dev/null || true; echo "$json"; } | write_root_file history.jsonl 640
+}
+
+# The run's backup and result, from the installer's output
+log_backup() { sed -n 's/.*Pre-update backup: //p' "$1" | tail -1; }
+log_rollback_reason() { grep -E 'Rolling back' "$1" | sed 's/.*Rolling back to [^:]*: //' | tail -1; }
+
+# parse_request — "action version backup channel by enabled" from $UPDATE_REQUEST, each field
+# checked ("-" when missing or invalid). The dashboard wrote the file: never follow a link
+parse_request() {
+  node -e '
+    const fs = require("fs");
+    let r = {};
+    try {
+      const st = fs.lstatSync(process.argv[1]);
+      if (st.isFile() && st.size <= 4096) r = JSON.parse(fs.readFileSync(process.argv[1], "utf8")) || {};
+    } catch {}
+    const ok = (re, v) => (typeof v === "string" && re.test(v) ? v : "-");
+    const actions = ["update", "rollback", "channel", "auto"];
+    // requests from 0.10.0 name only a version
+    const action = actions.includes(r.action) ? r.action : r.action === undefined && r.version ? "update" : "-";
+    console.log([
+      action,
+      ok(/^v\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/, r.version),
+      ok(/^\d{8}T\d{6}Z-v[0-9A-Za-z.-]+-pre-update(-\d+)?$/, r.backup),
+      ok(/^(latest|dev)$/, r.channel),
+      ok(/^[A-Za-z0-9_.@-]{1,64}$/, r.requested_by),
+      r.enabled === true ? "on" : r.enabled === false ? "off" : "-",
+    ].join(" "));
+  ' "$UPDATE_REQUEST"
+}
+
+# backup_version NAME — the version a pre-update backup in the data directory was taken from
+backup_version() {
+  local dir=$DATA_DIR/backups/$1
+  [[ -d $dir && ! -L $dir && ! -L $DATA_DIR/backups && -f $dir/manifest.json && ! -L $dir/manifest.json ]] || return 1
+  node -e '
+    const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    if (m.reason !== "pre-update" || !/^\d+\.\d+\.\d+(-[0-9A-Za-z.]+)?$/.test(m.app_version || "")) process.exit(1);
+    console.log(m.app_version);
+  ' "$dir/manifest.json"
+}
+
+# run_install BY ACTION VERSION FROM LOG ENV… ARG — update-llama-paddock with ENV, then the result
+run_install() {
+  local by=$1 action=$2 want=$3 from=$4 log=$5 rc=0 now backup
+  shift 5
+  env PADDOCK_UPDATER_RUN=1 "$@" >>"$log" 2>&1 || rc=$?
   # the installer died without rolling back (killed, say)
   if [[ -f $UPDATE_MARKER ]] && marker_stale; then
     rollback_update "the update stopped (exit code $rc)" >>"$log" 2>&1 || true
     rc=$ROLLED_BACK
   fi
   now=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)
-  backup=$(sed -n 's/.*Pre-update backup: //p' "$log" | tail -1)
-  if ((rc == 0)) && [[ $now == "$want" ]]; then
-    write_status done "$want" "$from" "" "$backup"
-  elif ((rc == ROLLED_BACK)); then
-    write_status rolled_back "$want" "$from" "$(grep -E 'Rolling back' "$log" | sed 's/.*Rolling back to [^:]*: //' | tail -1)" "$backup"
+  backup=$(log_backup "$log")
+  if ((rc == ROLLED_BACK)); then
+    write_status rolled_back "$action" "$want" "$from" "$(log_rollback_reason "$log")" "$backup" "$by"
+  elif ((rc != 0)); then
+    write_status failed "$action" "$want" "$from" "update-llama-paddock stopped with exit code $rc; ${now#v} is installed" "$backup" "$by"
+  elif [[ $action == channel && $now == "$from" ]]; then
+    write_status done "$action" "$now" "$from" "$(grep -E 'stays on' "$log" | sed 's/^[^A-Za-z]*//' | tail -1)" "" "$by"
+  elif [[ -z $want || $now == "$want" ]]; then
+    write_status done "$action" "$now" "$from" "" "$backup" "$by"
   else
-    write_status failed "$want" "$from" "update-llama-paddock stopped with exit code $rc; ${now#v} is installed" "$backup"
+    write_status failed "$action" "$want" "$from" "${now#v} is installed, not ${want#v}" "$backup" "$by"
   fi
 }
 
+updater_run() {
+  local log=$UPDATER_DIR/update.log action want backup channel by enabled from to
+  exec 9>"$UPDATE_LOCK"
+  flock -n 9 || return 0
+  recover_update
+  [[ -e $UPDATE_REQUEST || -L $UPDATE_REQUEST ]] || return 0
+  read -r action want backup channel by enabled < <(parse_request)
+  rm -f "$UPDATE_REQUEST"
+  [[ $want == - ]] && want=""; [[ $backup == - ]] && backup=""; [[ $channel == - ]] && channel=""
+  [[ $by == - ]] && by=""; [[ $enabled == - ]] && enabled=""
+  from=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)
+  UPDATE_STARTED=$(date +%s)
+
+  case $action in
+    auto)
+      # a setting, not a run: no status or history
+      [[ -n $enabled ]] && write_root_file auto-update 644 <<<"$enabled"
+      return 0 ;;
+    update)
+      if [[ -z $want ]]; then write_status failed update "" "$from" "the request didn't name a release" "" "$by"; return 0; fi
+      if [[ $CHANNEL == latest && $want == *-* ]]; then
+        write_status failed update "$want" "$from" "$want is a prerelease and this install follows stable releases" "" "$by"; return 0
+      fi
+      if ! newer_version "$want" "$from"; then write_status failed update "$want" "$from" "$want isn't newer than $from" "" "$by"; return 0; fi
+      ;;
+    rollback)
+      if [[ -z $backup ]] || ! to=$(backup_version "$backup"); then
+        write_status failed rollback "$want" "$from" "there is no pre-update backup ${backup:-by that name} to roll back with" "" "$by"; return 0
+      fi
+      if [[ ${want#v} != "$to" ]] || ! newer_version "$from" "$want"; then
+        write_status failed rollback "$want" "$from" "backup $backup is from $to; it can only roll back an install newer than that" "" "$by"; return 0
+      fi
+      ;;
+    channel)
+      if [[ -z $channel ]]; then write_status failed channel "" "$from" "the request didn't name a channel" "" "$by"; return 0; fi
+      ;;
+    *)
+      write_status failed update "" "$from" "the request didn't say what to do" "" "$by"; return 0 ;;
+  esac
+
+  : >"$log"; chmod 640 "$log"; chgrp "$SVC_USER" "$log"
+  write_status running "$action" "$want" "$from" "" "" "$by"
+  case $action in
+    update) run_install "$by" update "$want" "$from" "$log" PADDOCK_CHANNEL="$CHANNEL" PADDOCK_NO_DOWNGRADE=1 "$UPDATE_CMD" "$want" ;;
+    rollback) run_install "$by" rollback "$want" "$from" "$log" PADDOCK_CHANNEL="$CHANNEL" PADDOCK_RESTORE_BACKUP="$backup" "$UPDATE_CMD" "$want" ;;
+    # the newest release on the new channel; never an older one (stable from a prerelease waits)
+    channel) run_install "$by" channel "" "$from" "$log" PADDOCK_CHANNEL="$channel" PADDOCK_NO_DOWNGRADE=1 "$UPDATE_CMD" "$( [[ $channel == dev ]] && echo dev || echo stable)" ;;
+  esac
+}
+
+# llama-paddock-auto-update.timer: install a newer stable release when automatic updates are on.
+# Nothing is recorded when there is nothing new
+updater_auto() {
+  local log out from now rc=0
+  exec 9>"$UPDATE_LOCK"
+  flock -n 9 || return 0
+  recover_update
+  [[ $(cat "$UPDATER_DIR/auto-update" 2>/dev/null) == on && $CHANNEL == latest ]] || return 0
+  from=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)
+  out=$(mktemp)
+  UPDATE_STARTED=$(date +%s)
+  env PADDOCK_UPDATER_RUN=1 PADDOCK_CHANNEL=latest PADDOCK_NO_DOWNGRADE=1 "$UPDATE_CMD" stable >"$out" 2>&1 || rc=$?
+  if [[ -f $UPDATE_MARKER ]] && marker_stale; then
+    rollback_update "the update stopped (exit code $rc)" >>"$out" 2>&1 || true
+    rc=$ROLLED_BACK
+  fi
+  now=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)
+  if ((rc == 0)) && [[ $now == "$from" ]]; then
+    rm -f "$out"
+    return 0
+  fi
+  log=$UPDATER_DIR/update.log
+  write_root_file update.log 640 <"$out"
+  rm -f "$out"
+  if ((rc == ROLLED_BACK)); then
+    write_status rolled_back automatic "" "$from" "$(log_rollback_reason "$log")" "$(log_backup "$log")" automatic
+  elif ((rc != 0)); then
+    write_status failed automatic "" "$from" "update-llama-paddock stopped with exit code $rc; ${now#v} is installed" "$(log_backup "$log")" automatic
+  else
+    write_status done automatic "$now" "$from" "" "$(log_backup "$log")" automatic
+  fi
+}
+
+# history_terminal STATE ACTION VERSION FROM [MESSAGE] [BACKUP] — record an update run from a
+# terminal; the updater records its own runs
+history_terminal() {
+  [[ -z ${PADDOCK_UPDATER_RUN-} && -d $UPDATER_DIR ]] || return 0
+  UPDATE_STARTED=${UPDATE_STARTED-} write_status "$@" terminal >/dev/null 2>&1 || true
+}
 
 write_self_updater() {
   install -d -m 750 -o root -g "$SVC_USER" "$UPDATER_DIR"
   {
     echo '#!/usr/bin/env bash'
     echo '# Updates the llama-paddock dashboard asks for, run as root by llama-paddock-update.service,'
-    echo '# and rolling back an interrupted update at boot (written by install/dashboard.sh).'
-    echo '#   llama-paddock-updater run | recover'
+    echo '# automatic updates (llama-paddock-auto-update.timer), and rolling back an interrupted update'
+    echo '# at boot (written by install/dashboard.sh).'
+    echo '#   llama-paddock-updater run | auto | recover'
     echo 'set -euo pipefail'
     declare -p APP_DIR CFG_DIR DATA_DIR SVC_USER CHANNEL UPDATER_DIR UPDATE_MARKER UPDATE_REQUEST UPDATE_LOCK UPDATE_CMD ROLLED_BACK
     declare -f init_colors msg_info msg_ok msg_warn die marker_get marker_stale run_backup_tool find_backup_tool \
-      rollback_update recover_update newer_version write_status updater_run
+      rollback_update recover_update newer_version write_root_file write_status log_backup log_rollback_reason \
+      parse_request backup_version run_install updater_run updater_auto
     echo 'init_colors'
     echo 'case ${1-} in'
     echo '  run) updater_run ;;'
+    echo '  auto) updater_auto ;;'
     echo '  recover) recover_update boot ;;'
-    echo '  *) echo "usage: llama-paddock-updater run | recover" >&2; exit 2 ;;'
+    echo '  *) echo "usage: llama-paddock-updater run | auto | recover" >&2; exit 2 ;;'
     echo 'esac'
   } >/usr/local/sbin/llama-paddock-updater
   chmod 700 /usr/local/sbin/llama-paddock-updater
+  # the channel update-llama-paddock follows, for the dashboard to show
+  write_root_file channel 644 <<<"$CHANNEL"
 
   cat >/etc/systemd/system/llama-paddock-update.path <<EOF
 [Unit]
@@ -1061,6 +1198,30 @@ Type=oneshot
 ExecStart=/usr/local/sbin/llama-paddock-updater run
 TimeoutStartSec=30min
 EOF
+  cat >/etc/systemd/system/llama-paddock-auto-update.service <<EOF
+[Unit]
+Description=llama-paddock: install a newer stable release, when automatic updates are on
+After=network-online.target llama-paddock-recover.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/llama-paddock-updater auto
+TimeoutStartSec=30min
+EOF
+  cat >/etc/systemd/system/llama-paddock-auto-update.timer <<EOF
+[Unit]
+Description=llama-paddock: look for a newer stable release every 6 hours
+
+[Timer]
+OnBootSec=30min
+OnUnitActiveSec=6h
+RandomizedDelaySec=30min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
   cat >/etc/systemd/system/llama-paddock-recover.service <<EOF
 [Unit]
 Description=llama-paddock: roll back an interrupted dashboard update
@@ -1077,6 +1238,8 @@ EOF
   if [[ -d /run/systemd/system ]]; then
     systemctl daemon-reload
     systemctl enable llama-paddock-recover.service >/dev/null 2>&1 || true
+    # the timer runs whatever the setting: the updater does nothing while automatic updates are off
+    systemctl enable --now llama-paddock-auto-update.timer >/dev/null 2>&1 || true
     systemctl enable --now llama-paddock-update.path >/dev/null 2>&1 \
       || msg_warn "couldn't start llama-paddock-update.path: updates from the dashboard won't start"
   fi
@@ -1096,10 +1259,12 @@ local_uninstall() {
     purge=1
   fi
 
-  systemctl disable --now llama-paddock llama-paddock-update.path llama-paddock-recover.service >/dev/null 2>&1 || true
+  systemctl disable --now llama-paddock llama-paddock-update.path llama-paddock-recover.service \
+    llama-paddock-auto-update.timer >/dev/null 2>&1 || true
   rm -f /etc/systemd/system/llama-paddock.service /usr/local/bin/update-llama-paddock /usr/local/bin/uninstall-llama-paddock /usr/local/bin/paddock-backup
   rm -f /etc/systemd/system/llama-paddock-update.path /etc/systemd/system/llama-paddock-update.service \
-    /etc/systemd/system/llama-paddock-recover.service /usr/local/sbin/llama-paddock-updater
+    /etc/systemd/system/llama-paddock-recover.service /usr/local/sbin/llama-paddock-updater \
+    /etc/systemd/system/llama-paddock-auto-update.timer /etc/systemd/system/llama-paddock-auto-update.service
   rm -rf "$UPDATER_DIR"
   rm -f /etc/profile.d/00_llama-paddock.sh
   rm -rf "$APP_DIR" "${APP_DIR}.old" "${APP_DIR}.failed"
@@ -1199,8 +1364,16 @@ local_install() {
   local has_systemd=""
   [[ -d /run/systemd/system ]] && has_systemd=1
   [[ -n $has_systemd ]] && recover_update
-  local updating=""
-  [[ -f $APP_DIR/server.js ]] && updating=1
+  local updating="" before=""
+  [[ -f $APP_DIR/server.js ]] && updating=1 && before=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)
+  UPDATE_STARTED=$(date +%s)
+  UPDATE_ACTION=update
+  if [[ -n ${PADDOCK_RESTORE_BACKUP-} ]]; then
+    [[ $PADDOCK_RESTORE_BACKUP =~ ^[0-9]{8}T[0-9]{6}Z-v[0-9A-Za-z.-]+-pre-update(-[0-9]+)?$ ]] \
+      || die "PADDOCK_RESTORE_BACKUP must name a pre-update backup (paddock-backup list)"
+    [[ -n $updating && -n $has_systemd ]] || die "PADDOCK_RESTORE_BACKUP needs an existing install run by systemd"
+    UPDATE_ACTION=rollback
+  fi
 
   [[ -n $updating ]] && msg_info "Existing install found ($(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)) — updating, config is kept"
 
@@ -1220,6 +1393,17 @@ local_install() {
     msg_ok "Already on the latest version ($(cat "$APP_DIR/VERSION")), nothing to update"
     echo "   To reinstall it anyway:  PADDOCK_FORCE=1 update-llama-paddock"
     return
+  fi
+  # a channel switch to stable from a newer prerelease: switch, but keep the newer release
+  if [[ -n $updating && -n ${PADDOCK_NO_DOWNGRADE-} ]]; then
+    [[ -n ${RELEASE_CHECKED-} ]] || { resolve_release; RELEASE_CHECKED=1; }
+    if [[ -n $RELEASE_TAG ]] && ! newer_version "$RELEASE_TAG" "$before"; then
+      write_updater
+      write_backup_cli
+      [[ -n $has_systemd ]] && write_self_updater
+      msg_ok "$before stays on until a newer ${CHANNEL/latest/stable} release than $RELEASE_TAG is out"
+      return
+    fi
   fi
   id "$SVC_USER" &>/dev/null || useradd --system --home-dir "$APP_DIR" --no-create-home --shell /usr/sbin/nologin "$SVC_USER"
 
@@ -1241,6 +1425,13 @@ local_install() {
   chmod -R u=rwX,g=rX,o= "$APP_DIR"
   [[ -n $safe ]] || rm -rf "${APP_DIR}.old"
   msg_ok "Installed $INSTALLED_VERSION to $APP_DIR"
+  # a rollback: the older release gets the data it had before the update
+  if [[ -n ${PADDOCK_RESTORE_BACKUP-} ]]; then
+    local rtool
+    rtool=$(find_backup_tool "$APP_DIR" "${APP_DIR}.old") || die "no paddock-backup to restore $PADDOCK_RESTORE_BACKUP with"
+    run_backup_tool "$rtool" restore "$PADDOCK_RESTORE_BACKUP" >/dev/null || die "couldn't restore backup $PADDOCK_RESTORE_BACKUP"
+    msg_ok "Restored backup $PADDOCK_RESTORE_BACKUP"
+  fi
 
   write_config
   PORT=$(sed -n 's/^PORT=//p' "$CFG_DIR/llama-paddock.env" | tail -1); PORT=${PORT:-8080}
@@ -1260,12 +1451,15 @@ local_install() {
     systemctl restart llama-paddock
     if [[ -n $safe ]]; then
       # migrations on a large database can take a while on first start
+      local backup; backup=$(marker_get backup)
       if dashboard_healthy "$INSTALLED_VERSION" 120; then
         finish_update
         msg_ok "Service llama-paddock is running $INSTALLED_VERSION"
+        history_terminal done "$UPDATE_ACTION" "$INSTALLED_VERSION" "$before" "" "$backup"
       else
         journalctl -u llama-paddock -n 30 --no-pager 2>/dev/null >&2 || true
         rollback_update "$INSTALLED_VERSION didn't answer on /api/healthz within 2 minutes"
+        history_terminal rolled_back "$UPDATE_ACTION" "$INSTALLED_VERSION" "$before" "it didn't answer on /api/healthz within 2 minutes" "$backup"
         exit $ROLLED_BACK
       fi
     elif dashboard_healthy "" 20; then

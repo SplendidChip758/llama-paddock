@@ -50,6 +50,8 @@ See [Updates and backups](operations.md) before upgrading or switching channels.
 | `PADDOCK_LOCAL=1` | | install on the Proxmox host itself instead of creating a CT |
 | `PADDOCK_YES=1` | | non-interactive, accept defaults |
 | `PADDOCK_CHANNEL` | the tag's | with a release tag in `PADDOCK_VERSION`: the channel `update-llama-paddock` follows afterwards, `latest` or `dev`. The dashboard's updater sets it, so an update from the dashboard never switches channel |
+| `PADDOCK_NO_DOWNGRADE=1` | | never install a release older than the installed one: a channel switch to stable then only switches, and the newer prerelease stays |
+| `PADDOCK_RESTORE_BACKUP` | | a pre-update backup to restore after installing the release in `PADDOCK_VERSION`: [rolls an update back](operations.md#rolling-back-an-update) to that version and its data |
 
 For prereleases and uninstall instructions, see [Operations](operations.md).
 
