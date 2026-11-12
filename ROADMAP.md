@@ -11,7 +11,7 @@ llama-paddock is the control plane for inference hardware you own. Gateways rout
 | M1 | [Foundations](#m1-foundations) | Reliable history, secure connections, automated checks, Grafana | 0.x |
 | M2 | [Model workbench](#m2-model-workbench) | Find, size, create and benchmark models | 0.x |
 | M3 | [Alerts & diagnostics](#m3-alerts--diagnostics) | Find out when something breaks, and why | 0.x |
-| M4 | [Access & displays](#m4-access--displays) | Users, scoped tokens, audit log, accessibility and themes | 0.x |
+| M4 | [Access & displays](#m4-access--displays) | Users, scoped tokens, audit log and themes | 0.x |
 | M5 | [Updates](#m5-updates--10) | Tested upgrades, backup and recovery | ends with **1.0** |
 | M6 | [Platforms](#m6-platforms) | Agent platforms, local inference backends, GPU topology, shared PCs | 1.x |
 | M7 | [Routing gateway](#m7-routing-gateway) | Transparent fleet gateway, providers and optimization | core 1.x; see Versioning |
@@ -53,17 +53,16 @@ Versions are cut by semantic-release from commit messages, so a milestone usuall
 | [#82](https://github.com/SplendidChip758/llama-paddock/issues/82) | Simulated host and agent in CI | Every later gate check runs on it |
 | [#59](https://github.com/SplendidChip758/llama-paddock/issues/59) | Agents in their own repository with a protocol version and independent releases | Agent updates pull from its releases |
 | [#18](https://github.com/SplendidChip758/llama-paddock/issues/18) | Windows agent as a real Windows service (base), replacing the scheduled task | A supported Windows install the upgrade promise can cover |
-| [#86](https://github.com/SplendidChip758/llama-paddock/issues/86) | Accessibility: keyboard, screen readers, contrast | Named in the checklist |
 | [#15](https://github.com/SplendidChip758/llama-paddock/issues/15) | Agent versions and agent updates from the dashboard, with verified assets and recovery | Upgrade promise |
 | [#87](https://github.com/SplendidChip758/llama-paddock/issues/87) | Backup and restore: config export, full pre-update backup, CLI restore | Recovery promise |
 | [#48](https://github.com/SplendidChip758/llama-paddock/issues/48) | Dashboard update from the UI and the documented Docker path | Upgrade promise |
 | [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) | Run the checklist, record the evidence, make the deliberate semantic-release change | The gate itself |
 
-**Explicitly not in 1.0.0:** anything in M6 to M13, including the Ollama updater (#74, now M8), the wall display and PWA (#11 and #12, now M13), the Windows service's full feature set (#148) and the quality lab (M11).
+**Explicitly not in 1.0.0:** anything in M6 to M13, including the Ollama updater (#74, now M8), accessibility (#86, now Later), the wall display and PWA (#11 and #12, now M13), the Windows service's full feature set (#148) and the quality lab (M11).
 
 ### Delivery order
 
-Through 1.0.0: #82, then #59 and #18 together, then #86, then #15 and #87 together, then #48, then #34. Nothing else merges ahead of these unless it is a fix.
+Through 1.0.0: #82, then #59 and #18 together, then #15 and #87 together, then #48, then #34. Nothing else merges ahead of these unless it is a fix.
 
 After 1.0.0, in slices, each gated by evidence before the next widens scope:
 
@@ -81,7 +80,7 @@ This is the release gate; [#34](https://github.com/SplendidChip758/llama-paddock
 - M1's done-when checks pass, including verified connections and simulator regression checks. History and observed availability/model events survive restarts; missing observations remain unknown, and persistence failures are visible.
 - M2's done-when checks pass: a model can be found in the library and created, a reproducible benchmark compares two hosts, and fit estimates state their assumptions and confidence. Unknown estimates and remote cloud models are clearly identified.
 - Core M3 alerts and GPU/context diagnostics have reproducible simulator checks, including firing, resolution, flapping and observation gaps.
-- M4 users, scoped API tokens and audit records work; permissions are enforced on the server, viewer/display credentials cannot mutate state, and existing login data migrates. Core controls work with a keyboard and expose accessible names.
+- M4 users, scoped API tokens and audit records work; permissions are enforced on the server, viewer/display credentials cannot mutate state, and existing login data migrates.
 - The agent protocol has a documented compatibility range independent of dashboard/agent release numbers. CI covers supported older agents, incompatible agents, and upgrade order.
 - The Windows agent runs as a service and migrates from the scheduled task without losing its token.
 - Supported stable upgrade paths and platform exceptions are documented. Automatic migrations, config/env compatibility and a documented stable `/api` are verified by CI starting from the latest stable 0.x release before 1.0. Subsequent 1.x releases test their supported stable predecessors.
@@ -135,15 +134,14 @@ Know when something breaks and why, with evidence. Hardware health, request expl
 
 ## M4: Access & displays
 
-Users, scoped tokens, audit records, accessibility and themes, all before 1.0. The wall display and the PWA build on the same credentials in M13; keep the credential design ready for display and gateway scopes.
+Users, scoped tokens, audit records and themes, all before 1.0. The wall display and the PWA build on the same credentials in M13; keep the credential design ready for display and gateway scopes.
 
 - **Users and roles.** Several users, each with an **admin** role (full control) or a **viewer** role (read-only). Admins manage users in the UI. The current single login becomes the first admin.
 - **API tokens.** Tokens for scripts, Home Assistant and cron jobs, stored hashed and shown once. Enforce explicit scopes and user permissions on every request, with expiry/revocation and no privilege increase after a role change. Display links and gateway keys (M7) build on the same credential mechanism but have distinct scopes; a display token must not grant general API or gateway access.
 - **Audit log.** Who restarted, changed or deleted what, and when. Admins can filter it by user, host and action. No prompts, passwords or env values are recorded.
 - **Themes.** A light / dark / system switch, built-in presets (including high contrast), and a custom theme editor for the accent, background, text and status colors, with a contrast check. Themes are saved per user and can be imported and exported as JSON. Charts and the wall display follow the theme.
-- **Accessibility.** Keyboard navigation, screen reader labels, status never shown by colour alone, and reduced motion, checked in CI so it doesn't regress.
 
-**Done when:** a viewer account can't change anything, a script can read the fleet with a viewer token, the dashboard works with a keyboard alone and with a screen reader, and each user can pick or build their own color theme.
+**Done when:** a viewer account can't change anything, a script can read the fleet with a viewer token, and each user can pick or build their own color theme.
 
 ## M5: Updates → 1.0
 
@@ -283,6 +281,7 @@ Builds on M4's credentials after 1.0: more screens for the same fleet.
 
 New ideas can be proposed through feature requests and assigned a milestone once their scope is clear. Detailed designs for the items below live in the [planning repository](https://github.com/SplendidChip758/llama-paddock-docs).
 
+- **Accessibility.** Keyboard navigation, screen reader labels, status never shown by colour alone, and reduced motion, checked in CI so it doesn't regress ([#86](https://github.com/SplendidChip758/llama-paddock/issues/86)). Not a 1.0 gate.
 - **Cross-node model sharding.** Splitting one model across GPUs on different hosts. llama.cpp's RPC backend is documented by its maintainers as experimental and insecure, and vLLM multi-node needs modern GPUs and a trusted network. A lab spike on isolated hardware may inform it; unscheduled until a supported runtime path exists.
 - **GPU capacity provisioner.** Quoting, renting, bootstrapping and terminating cloud GPUs from the dashboard with separate authorization and spend caps. M8's rented-host enrollment covers the manual path; evaluate existing provisioners before writing provider code.
 - **Infrastructure simulator.** What-if comparisons (a new GPU, a bigger model, rented capacity versus API tokens) built from measured profiles with explicit uncertainty. Needs M2 extensions, M9 profiles and M6 topology first; the advisor cards shipped earlier in M3.
