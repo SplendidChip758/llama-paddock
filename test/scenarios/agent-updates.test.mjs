@@ -23,9 +23,9 @@ before(async () => {
 });
 after(() => holder.stack?.stop());
 
-async function publish(linux) {
+async function publish(linux, windows) {
   const r = await fetch(`${sim.control}/github/releases`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ linux }),
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ linux, windows }),
   });
   assert.equal(r.status, 200, await r.text());
   const rel = await c.get("/api/agent-releases?refresh=1");
@@ -44,9 +44,11 @@ test("agents on the newest release aren't flagged", async () => {
 });
 
 test("an older agent is flagged and updated from the dashboard", async () => {
-  const rel = await publish([`v${current}`, "v9.0.0-dev.1", "v8.0.0"]);
+  // Windows agent releases ship llama-paddock-agent-setup.exe (before it, the Node.js agent's zip)
+  const rel = await publish([`v${current}`, "v9.0.0-dev.1", "v8.0.0"], ["v0.10.0", "v0.11.0-dev.1"]);
   assert.equal(rel.platforms.linux.latest, "9.0.0-dev.1");
   assert.equal(rel.platforms.linux.error, null);
+  assert.equal(rel.platforms.windows.latest, "0.11.0-dev.1", JSON.stringify(rel.platforms.windows));
   await c.waitInstance("sim-1", (x) => x.agent_update?.outdated && x.agent_update.latest === "9.0.0-dev.1", "the agent to be flagged");
 
   const r = await c.post("/api/instances/sim-1/agent-update");

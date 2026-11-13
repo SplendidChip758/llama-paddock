@@ -13,11 +13,12 @@ export const AGENT_REPOS: Record<Platform, string> = {
 };
 /**
  * A release file each platform's agent installs from, any of them; a release without one (or
- * SHA256SUMS) can't be installed. Linux releases up to 0.10.0-dev.2 had the agent as a file of its own.
+ * SHA256SUMS) can't be installed. Linux releases up to 0.10.0-dev.2 had the agent as a file of its own;
+ * Windows releases had the Node.js agent's zip before the setup.
  */
 const ASSETS: Record<Platform, string[]> = {
   linux: ["llama-paddock-agent-linux.tar.gz", "paddock-agent-linux.mjs"],
-  windows: ["llama-paddock-agent-windows.zip"],
+  windows: ["llama-paddock-agent-setup.exe", "llama-paddock-agent-windows.zip"],
 };
 
 const FRESH_MS = 6 * 60 * 60_000;
