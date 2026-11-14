@@ -11,7 +11,7 @@ group named after it. Keep that format. -->
 
 - [The dashboard](installation.md): Proxmox, Debian/Ubuntu, Docker, source builds, adding hosts and moving the dashboard
 - [The agent on Linux](agent-linux.md): install, settings, firewall, updates and removal
-- [The agent on Windows](agent-windows.md): the logon task, firewall, settings and updates
+- [The agent on Windows](agent-windows.md): the setup, the service and its tray app, settings and updates
 
 ## Configure
 

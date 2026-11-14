@@ -73,7 +73,7 @@ Every response carries `Content-Security-Policy: frame-ancestors 'none'; base-ur
 
 ## Encrypted agent connections
 
-Agents from 0.7.0 on serve HTTPS. On its first start an agent creates an ECDSA key and a self-signed certificate for it (Linux: `/etc/llama-paddock-agent.key` and `.crt`, mode 600 for the key; Windows: `agent.key` and `agent.crt` next to `agent.json`), and its installer prints the key's fingerprint, `SHA256:…`. You can use your own key and certificate instead with `PADDOCK_AGENT_TLS_KEY` and `PADDOCK_AGENT_TLS_CERT` ([Linux](agent-linux.md#https), [Windows](agent-windows.md#settings-and-updates)).
+Agents from 0.7.0 on serve HTTPS. On its first start an agent creates an ECDSA key and a self-signed certificate for it (Linux: `/etc/llama-paddock-agent.key` and `.crt`, mode 600 for the key; Windows: `agent.key` and `agent.crt` next to `agent.json` in `%ProgramData%\llama-paddock-agent`, readable only by SYSTEM and administrators), and its installer prints the key's fingerprint, `SHA256:…`. You can use your own key and certificate instead with `PADDOCK_AGENT_TLS_KEY` and `PADDOCK_AGENT_TLS_CERT` ([Linux](agent-linux.md#https), [Windows](agent-windows.md#settings-and-updates)).
 
 The dashboard doesn't check the certificate against a CA. It **pins the agent's key**, and checks it on every connection before it sends the token:
 

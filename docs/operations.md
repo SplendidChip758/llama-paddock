@@ -11,7 +11,7 @@ Take a [backup](#backups) before upgrading, especially when changing release cha
 | Dashboard installer | Click **Update to …** on the dashboard's update page (see [Updating the dashboard](#updating-the-dashboard)), or run `update-llama-paddock` inside its container/VM, or `pct exec <ctid> -- update-llama-paddock` from Proxmox. It stays on the channel you installed from; see [Update channels](#update-channels) |
 | Docker Compose | Take a backup, then run `docker compose pull` and `docker compose up -d` from the Compose directory; see [Docker updates](#docker-updates) |
 | Linux agent | Run `update-llama-paddock-agent` on the Ollama host, or `pct exec <ctid> -- update-llama-paddock-agent` from Proxmox. It follows the same [update channels](#update-channels) as the dashboard updater |
-| Windows agent | Extract `llama-paddock-agent-windows.zip` from the new [Windows agent release](https://github.com/SplendidChip758/llama-paddock-win-agent/releases) and re-run `install.ps1` from the same account; see [Windows updates](agent-windows.md#settings-and-updates) |
+| Windows agent | Run `llama-paddock-agent-setup.exe` from the new [Windows agent release](https://github.com/SplendidChip758/llama-paddock-win-agent/releases); it keeps the token, the HTTPS key and the settings. See [Windows updates](agent-windows.md#settings-and-updates) |
 | Source | Update your checkout and repeat the [build steps](installation.md#from-source) |
 
 Installer updates keep configuration and existing agent tokens, and take a full backup first. If the new release doesn't start, the installer puts the previous one and the backup back. Docker updates retain the data volume.
@@ -187,7 +187,8 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-pa
 | Agent: "it doesn't answer HTTPS" | The agent is older than 0.7.0. Update it, or use `http://` in the agent URL until then. |
 | Agent: "this agent only accepts HTTPS" | The agent runs with `PADDOCK_AGENT_HTTP=off`. Use **Switch to HTTPS** on the host's page, or `https://` in the agent URL. |
 | "The agent's key has changed" | The agent presented a different key than the pinned one, and the dashboard stopped calling it. If you replaced the key or reinstalled the agent, compare the presented fingerprint with the installer's output and accept it. See [encrypted agent connections](security.md#encrypted-agent-connections). |
-| Windows host disappears after signing out | Both the Ollama desktop app and agent logon task need the user's session. |
+| Windows: Ollama shows as stopped after signing out | The Ollama desktop app runs in its user's session, so it stops when they sign out; the agent keeps reporting the PC. See [How it works with Ollama](agent-windows.md#how-it-works-with-ollama). |
+| Windows: "sign in on the PC: Ollama runs in your session" | The agent's tray app isn't running in the Ollama user's session. Sign in, or start **llama-paddock agent** from the Start menu. |
 | No GPU process memory on Windows | Consumer GPUs in WDDM mode do not expose per-process VRAM through `nvidia-smi`, so the process table can be empty. |
 | Models run on the CPU although `nvidia-smi` shows the GPU | See the **GPU check** on the host's Monitor tab and [its causes and fixes](gpu-check.md#causes-and-fixes). A suspend and resume, or a driver update without a reboot, are the usual reasons. |
 | No AMD or Apple GPU cards | GPU collection currently uses `nvidia-smi`; AMD and Apple support are planned. |
