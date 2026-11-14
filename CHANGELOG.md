@@ -1,3 +1,9 @@
+## [0.10.0-dev.11](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.10...v0.10.0-dev.11) (2026-11-14)
+
+### Features
+
+* **dashboard:** recognize Windows agent releases that ship the setup ([#199](https://github.com/SplendidChip758/llama-paddock/issues/199)) ([08a5a9d](https://github.com/SplendidChip758/llama-paddock/commit/08a5a9d171e99693b43d7b31523b4c127b0544c2)), closes [#18](https://github.com/SplendidChip758/llama-paddock/issues/18)
+
 ## [0.10.0-dev.10](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.9...v0.10.0-dev.10) (2026-11-10)
 
 ### Bug Fixes
