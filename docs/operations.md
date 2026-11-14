@@ -182,6 +182,7 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-pa
 | Symptom | Check |
 |---|---|
 | Dashboard cannot reach Ollama | Check the URL from the dashboard host/container, the host firewall and `OLLAMA_HOST`. In Docker, `localhost` refers to the dashboard container. |
+| Ollama unreachable: `ERR_SSL_WRONG_VERSION_NUMBER` | The Ollama URL uses `https://`, but Ollama only speaks plain HTTP. Use `http://<host>:11434`; only the agent URL uses `https://`. |
 | Models work but GPU stats, environment or logs do not | Check the agent URL and token, port 11435, and whether the agent is running. `/health` on the agent is unauthenticated; a successful health check does not verify the token. |
 | Agent: "incompatible: it speaks protocol …" (**agent incompatible**) | The agent speaks an [agent protocol](api.md#agent-protocol) this dashboard doesn't support. The message says whether to update the dashboard or the agent. Until then, the dashboard doesn't call the agent. |
 | Agent: "it doesn't answer HTTPS" | The agent is older than 0.7.0. Update it, or use `http://` in the agent URL until then. |

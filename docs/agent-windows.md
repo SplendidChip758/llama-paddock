@@ -14,17 +14,18 @@ The setup asks:
 
 - **Who runs Ollama on this PC.** It suggests the user running Ollama now, or the only one with it installed. The agent reads that user's Ollama log, models and environment variables.
 - **The agent port and the addresses to allow** (default: TCP 11435 from `LocalSubnet`), for a Windows Firewall rule on Private and Domain networks.
+- **Whether to let the dashboard reach Ollama** (on by default). Ollama for Windows only listens on `localhost`. With this, the setup sets `OLLAMA_HOST` to `0.0.0.0:11434` unless it's already set, restarts Ollama, and adds a firewall rule, "llama-paddock Ollama", for its port from the same addresses as the agent's. Ollama has no password, so only allow addresses you trust.
 
 It then:
 
 - installs the agent to `C:\Program Files\llama-paddock-agent` and registers the `llama-paddock-agent` service, which starts with Windows and restarts after a failure,
 - writes `%ProgramData%\llama-paddock-agent\agent.json` with a generated token; the folder is readable only by SYSTEM and administrators,
 - registers the tray app to start when anyone signs in, adds it to the Start menu as **llama-paddock agent**, and starts it for you,
-- shows the agent URL, the token and the fingerprint of the agent's HTTPS key. Enter them under **Add host**, with the `https://` URL; see [encrypted agent connections](security.md#encrypted-agent-connections). The token isn't shown again.
+- shows the agent URL, the token, the fingerprint of the agent's HTTPS key and the Ollama URL. Enter them under **Add host**: the agent URL with `https://` (see [encrypted agent connections](security.md#encrypted-agent-connections)), the Ollama URL with `http://`, since Ollama has no HTTPS. The token isn't shown again; [Settings and updates](#settings-and-updates) says where to read it.
 
 **Over the earlier Node.js agent** (a scheduled task), the setup keeps its token, HTTPS key and settings and removes the task once the service answers, so the dashboard needs no change. If the service doesn't start, the Node.js agent is started again.
 
-**Ollama on Windows only listens on `localhost` by default.** Once the agent is up, set `OLLAMA_HOST` to `0.0.0.0:11434` in the dashboard's Environment tab. The agent restarts Ollama with it. Also allow TCP 11434 from the dashboard host through Windows Firewall; the setup opens only the agent's port.
+**If the dashboard can't reach Ollama**, because you left the option off, or the setup said `OLLAMA_HOST` only lets this PC in: set `OLLAMA_HOST` to `0.0.0.0:11434` in the dashboard's Environment tab, and the agent restarts Ollama with it. Then allow TCP 11434 from the dashboard host through Windows Firewall. An update or a move from the Node.js agent leaves Ollama's settings as they are.
 
 ### Silent install
 
@@ -37,13 +38,14 @@ It then:
 | `/OLLAMAUSER=` | the user running Ollama, or the only one with it installed | The account that runs Ollama: `name`, `DOMAIN\name` or a SID. Needed when Ollama is installed for several users |
 | `/PORT=` | `11435` | The agent port, for a new install |
 | `/ALLOWFROM=` | `LocalSubnet` | The firewall rule's remote addresses, for a new install |
-| `/NOFIREWALL=1` | | Don't add the firewall rule |
+| `/NOFIREWALL=1` | | Don't add the firewall rules |
+| `/OLLAMANETWORK=` | `1` for a new install | `0`: leave Ollama listening on `localhost` only. `1` on an update or a move from the Node.js agent: open it to the network as a new install does |
 
 A silent install that couldn't start the agent exits with code 1; the reason is in the log. A new install's token is in `agent.json`.
 
 ### Uninstall
 
-Remove **llama-paddock agent** in **Settings > Apps**. It asks whether to keep the token and the HTTPS key, so a later install is the same host to the dashboard. Silently: `"C:\Program Files\llama-paddock-agent\unins000.exe" /VERYSILENT`, with `/KEEPDATA=1` to keep them. Your Ollama variables are left as they are.
+Remove **llama-paddock agent** in **Settings > Apps**. It asks whether to keep the token and the HTTPS key, so a later install is the same host to the dashboard. Silently: `"C:\Program Files\llama-paddock-agent\unins000.exe" /VERYSILENT`, with `/KEEPDATA=1` to keep them. It removes both firewall rules. Your Ollama variables, `OLLAMA_HOST` included, are left as they are.
 
 ## How it works with Ollama
 
@@ -57,7 +59,7 @@ The Windows agent only ever shows Ollama-related variables (`OLLAMA_*`, `CUDA_*`
 
 ## Settings and updates
 
-Settings live in `%ProgramData%\llama-paddock-agent\agent.json`, which only administrators can edit. Restart the service after a change (`Restart-Service llama-paddock-agent` in an admin PowerShell). Environment variables override values in this file.
+Settings live in `%ProgramData%\llama-paddock-agent\agent.json`, which only administrators can edit. To read the token again, in a PowerShell window opened as administrator: `(Get-Content "$env:ProgramData\llama-paddock-agent\agent.json" | ConvertFrom-Json).PADDOCK_AGENT_TOKEN`. Restart the service after a change (`Restart-Service llama-paddock-agent` in an admin PowerShell). Environment variables override values in this file.
 
 | Setting | Default | Purpose |
 |---|---|---|
