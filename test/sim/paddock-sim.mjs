@@ -42,6 +42,7 @@
  *   POST /_sim/hosts/<id>/scenario      change behaviour, JSON body with any of:
  *        ollama:  "up" | "down" (port closed) | "hang" (never answers) | "error" (HTTP 500)
  *        agent:   "up" | "down" | "hang" | "error" | "bad-token" (401 for every token)
+ *                 | "malformed" (/stats answers without its system, nvidia and service parts)
  *        pull:    "normal" | "stall" (stops making progress) | "fail" (error line mid-stream)
  *                 | "drop" (connection cut mid-stream)
  *        create:  "normal" | "stall" | "fail"
@@ -277,7 +278,7 @@ const OVERRIDE_PATH = "/etc/systemd/system/ollama.service.d/override.conf";
 
 const SCENARIO_VALUES = {
   ollama: ["up", "down", "hang", "error"],
-  agent: ["up", "down", "hang", "error", "bad-token"],
+  agent: ["up", "down", "hang", "error", "bad-token", "malformed"],
   pull: ["normal", "stall", "fail", "drop"],
   create: ["normal", "stall", "fail"],
   agent_update: ["normal", "fail", "none"],
@@ -914,7 +915,10 @@ const agentRoutes = {
   }),
   "GET /update": (h) => ({ ...h.update }),
   "POST /update": async (h, req) => startUpdate(h, await readBody(req)),
-  "GET /stats": (h) => agentStats(h),
+  "GET /stats": (h) => {
+    const s = agentStats(h);
+    return h.scenario.agent === "malformed" ? { ts: s.ts, version: s.version, protocol: s.protocol, platform: s.platform } : s;
+  },
   "GET /env": (h) => ({
     managed: { ...h.env }, override_path: OVERRIDE_PATH, raw: renderOverride(h.env), allowed: AGENT_ENV_ALLOW,
     platform: "linux", effective: { ...BASE_UNIT_ENV, ...h.env }, external: { ...BASE_UNIT_ENV },

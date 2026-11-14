@@ -86,6 +86,10 @@ class InstanceState {
   ps: PsModel[] = [];
   stats: AgentStats | null = null;
   updated: number | null = null;
+  /** a poll of this host is still running: the next round skips it rather than start another */
+  polling = false;
+  /** the last error that stopped a poll of this host, so it is logged once and not every round */
+  poll_error: string | null = null;
   /** what has been recorded in the events table for this host; see observe() */
   observed: Observation | null = null;
   /** Ollama restarts started from the dashboard that are still running, and when the last one's effects should be over (ms) */
@@ -790,6 +794,10 @@ async function followAgentUpdate(st: InstanceState) {
 // ============================================================================ poller
 const AGENT_VERSION_RECHECK_MS = 10 * 60_000;
 
+/** A /stats answer with the parts the dashboard reads unchecked. */
+const statsShaped = (s: AgentStats | null) =>
+  !!s && typeof s.system?.mem === "object" && typeof s.system.net === "object" && Array.isArray(s.nvidia?.gpus) && typeof s.service === "object";
+
 /** Record the protocol an agent reports in /stats; true when this dashboard doesn't support it. */
 function agentSpeaks(st: InstanceState, stats: AgentStats | null): boolean {
   if (!stats) return false;
@@ -837,6 +845,11 @@ async function pollOne(st: InstanceState): Promise<HistoryPoint> {
       st.agent_error = incompatibleText(st.agent_protocol!, st.agent_incompatible!);
       st.stats = null;
       if (typeof a.value?.version === "string") st.agent_version = a.value.version;
+    } else if (!statsShaped(a.value)) {
+      // the history point, alerts and fit estimates read these parts without checking each time
+      st.agent_ok = false;
+      st.agent_error = "the agent's /stats answer is missing its system, nvidia or service part";
+      st.stats = null;
     } else {
       st.agent_ok = true;
       st.agent_error = null;
@@ -940,65 +953,125 @@ function syncAllRequests(p: Paddock) {
   }
 }
 
+/**
+ * A host's poll waits at most this long for this round. Every call in it has its own timeout, so this
+ * only catches what those miss; the poll keeps running and the host is skipped until it ends.
+ */
+const POLL_DEADLINE_MS = 30_000;
+
+/** Poll one host for this round: rejects when the poll fails or misses the deadline, and logs why once. */
+function pollRound(st: InstanceState): Promise<HistoryPoint> {
+  st.polling = true;
+  const poll = pollOne(st).finally(() => (st.polling = false));
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`no answer within ${POLL_DEADLINE_MS / 1000} s`)), POLL_DEADLINE_MS);
+  });
+  return Promise.race([poll, late]).then(
+    (point) => {
+      st.poll_error = null;
+      return point;
+    },
+    (e) => {
+      const text = errText(e);
+      if (st.poll_error !== text) console.error(`[llama-paddock] ${st.inst.id}: polling failed:`, e);
+      st.poll_error = text;
+      throw e;
+    },
+  ).finally(() => clearTimeout(timer));
+}
+
+/** Run one step of a round for one host: a failing step is logged and must not stop polling. */
+function hostStep(st: InstanceState, what: string, step: () => void) {
+  try {
+    step();
+  } catch (e) {
+    console.error(`[llama-paddock] ${st.inst.id}: ${what} failed:`, e);
+  }
+}
+
 async function pollLoop(p: Paddock) {
   let maintained = 0;
   for (let round = 0; ; round++) {
     const started = Date.now();
-    const polled = [...p.instances.values()];
-    const results = await Promise.allSettled(polled.map(pollOne));
-    // skip hosts that were removed or re-pointed while the poll was in flight
-    const rows: [string, HistoryPoint][] = [];
-    const observed: InstanceState[] = [];
-    results.forEach((r, i) => {
-      if (r.status === "fulfilled" && p.instances.get(polled[i].inst.id) === polled[i]) {
-        rows.push([polled[i].inst.id, r.value]);
-        observed.push(polled[i]);
-      }
-    });
-    // a poll that is late by a few intervals (plus slack for hosts that time out) is a gap in observation
-    const gapAfter = 3 * p.settings.poll_interval + 30;
-    const changes = observed.map((st) => observe(st, gapAfter));
-    observed.forEach((st, i) => trackModels(st, changes[i].events));
     try {
-      recordModelSizes(observed.flatMap(newSizes));
+      maintained = await pollAll(p, round, started, maintained);
     } catch (e) {
-      console.error("[llama-paddock] saving model sizes failed:", e);
-    }
-    for (const st of observed) {
-      if (wantsGpuEvidence(st)) void refreshGpuEvidence(st);
-      refreshModelState(st, p.settings.poll_interval);
-    }
-    if (round % REQUESTS_EVERY_POLLS === REQUESTS_EVERY_POLLS - 1) syncAllRequests(p);
-    for (const st of observed) refreshSecurityProbe(st, round);
-    try {
-      evaluateAlerts([...observed.map(polledHost), polledDashboard()], [...p.instances.keys(), DASHBOARD_TARGET], gapAfter);
-    } catch (e) {
-      console.error("[llama-paddock] evaluating alert rules failed:", e);
-    }
-    try {
-      recordObservations(changes.map((c) => c.span), changes.flatMap((c) => c.events));
-    } catch (e) {
-      console.error("[llama-paddock] saving host events failed:", e);
-      // these changes weren't stored, so start over: the next poll opens new spans with the state as found
-      for (const st of observed) st.observed = null;
-    }
-    try {
-      recordSamples(rows);
-      if (started - maintained >= MAINTAIN_EVERY_MS) {
-        maintained = started;
-        maintainHistory(p.settings.history_retention_days);
-        try {
-          trimAudit(p.settings.audit_retention_days);
-        } catch (e) {
-          console.error("[llama-paddock] trimming the audit log failed:", e);
-        }
-      }
-    } catch (e) {
-      console.error("[llama-paddock] saving metric history failed:", e);
+      // the loop is the only thing that polls: whatever went wrong, the next round must still run
+      console.error("[llama-paddock] a polling round failed:", e);
     }
     const wait = Math.max(500, p.settings.poll_interval * 1000 - (Date.now() - started));
     await new Promise((r) => setTimeout(r, wait));
   }
+}
+
+/** One polling round; returns when history was last maintained. */
+async function pollAll(p: Paddock, round: number, started: number, maintained: number): Promise<number> {
+  const polled = [...p.instances.values()].filter((st) => !st.polling);
+  const results = await Promise.allSettled(polled.map(pollRound));
+  // skip hosts that were removed or re-pointed while the poll was in flight
+  const rows: [string, HistoryPoint][] = [];
+  const observed: InstanceState[] = [];
+  const changes: ReturnType<typeof observe>[] = [];
+  // a poll that is late by a few intervals (plus slack for hosts that time out) is a gap in observation
+  const gapAfter = 3 * p.settings.poll_interval + 30;
+  results.forEach((r, i) => {
+    const st = polled[i];
+    if (r.status !== "fulfilled" || p.instances.get(st.inst.id) !== st) return;
+    hostStep(st, "recording what changed", () => {
+      const c = observe(st, gapAfter);
+      trackModels(st, c.events);
+      rows.push([st.inst.id, r.value]);
+      observed.push(st);
+      changes.push(c);
+    });
+  });
+  try {
+    recordModelSizes(observed.flatMap(newSizes));
+  } catch (e) {
+    console.error("[llama-paddock] saving model sizes failed:", e);
+  }
+  for (const st of observed) {
+    hostStep(st, "reading model details", () => {
+      if (wantsGpuEvidence(st)) void refreshGpuEvidence(st);
+      refreshModelState(st, p.settings.poll_interval);
+    });
+  }
+  if (round % REQUESTS_EVERY_POLLS === REQUESTS_EVERY_POLLS - 1) {
+    try {
+      syncAllRequests(p);
+    } catch (e) {
+      console.error("[llama-paddock] reading request logs failed:", e);
+    }
+  }
+  for (const st of observed) hostStep(st, "the security probe", () => refreshSecurityProbe(st, round));
+  try {
+    evaluateAlerts([...observed.map(polledHost), polledDashboard()], [...p.instances.keys(), DASHBOARD_TARGET], gapAfter);
+  } catch (e) {
+    console.error("[llama-paddock] evaluating alert rules failed:", e);
+  }
+  try {
+    recordObservations(changes.map((c) => c.span), changes.flatMap((c) => c.events));
+  } catch (e) {
+    console.error("[llama-paddock] saving host events failed:", e);
+    // these changes weren't stored, so start over: the next poll opens new spans with the state as found
+    for (const st of observed) st.observed = null;
+  }
+  try {
+    recordSamples(rows);
+    if (started - maintained >= MAINTAIN_EVERY_MS) {
+      maintained = started;
+      maintainHistory(p.settings.history_retention_days);
+      try {
+        trimAudit(p.settings.audit_retention_days);
+      } catch (e) {
+        console.error("[llama-paddock] trimming the audit log failed:", e);
+      }
+    }
+  } catch (e) {
+    console.error("[llama-paddock] saving metric history failed:", e);
+  }
+  return maintained;
 }
 
 // ============================================================================ security checks

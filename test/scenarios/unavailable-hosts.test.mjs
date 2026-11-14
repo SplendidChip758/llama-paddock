@@ -91,6 +91,18 @@ test("agent comes back", async () => {
   assert.notEqual(metric(m, "paddock_gpu_utilization_ratio", { instance: "sim-2", gpu: 0 }), undefined);
 });
 
+test("an agent's malformed /stats is an agent error, and polling goes on for every host", async () => {
+  await sim.scenario("sim-2", { agent: "malformed" });
+  const i = await c.waitInstance("sim-2", (x) => x.ollama_ok && !x.agent_ok, "agent reported malformed");
+  assert.match(i.agent_error, /missing/);
+  // the other host is still polled, and so is this one
+  const before = { 1: (await c.instance("sim-1")).updated, 2: i.updated };
+  await c.waitInstance("sim-1", (x) => x.updated > before[1], "sim-1 polled again");
+  await c.waitInstance("sim-2", (x) => x.updated > before[2], "sim-2 polled again");
+  await sim.scenario("sim-2", { agent: "up" });
+  await c.waitInstance("sim-2", healthy, "agent back up");
+});
+
 test("both down at once, then both back", async () => {
   await sim.scenario("sim-1", { ollama: "down", agent: "down" });
   const i = await c.waitInstance("sim-1", (x) => !x.ollama_ok && !x.agent_ok, "both down");
