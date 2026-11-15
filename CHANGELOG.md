@@ -1,3 +1,9 @@
+## [0.10.0-dev.12](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.11...v0.10.0-dev.12) (2026-11-15)
+
+### Bug Fixes
+
+* **dashboard:** keep polling when one host's poll fails or hangs ([#201](https://github.com/SplendidChip758/llama-paddock/issues/201)) ([1f4c495](https://github.com/SplendidChip758/llama-paddock/commit/1f4c49599556d500a1ba792142014eb1297b9760))
+
 ## [0.10.0-dev.11](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.10...v0.10.0-dev.11) (2026-11-14)
 
 ### Features
