@@ -160,22 +160,88 @@ function GpuCard({ g, gi, hist, procs }: { g: GpuStats; gi: number; hist: Histor
         <SparkCell label="Temp" value={`${g.temp_c ?? "–"}°C`} values={series("t")} max={100} />
         <SparkCell label="Power" value={`${g.power_w != null ? g.power_w.toFixed(0) : "–"} W`} values={series("p")} max={g.power_limit_w} />
       </div>
-      {mine.length > 0 && (
-        <div style={{ marginTop: 12 }}>
-          <table>
-            <thead><tr><th>PID</th><th>Process</th><th className="r">VRAM</th></tr></thead>
-            <tbody>
-              {mine.map((p) => (
-                <tr key={`${p.pid}`}>
-                  <td className="num">{p.pid}</td>
-                  <td className="mono" style={{ fontSize: 12 }}>{p.name}</td>
-                  <td className="r num">{fmtMiB(p.mem_mib)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <ProcessTable procs={mine} />
+    </div>
+  );
+}
+
+// ===== GPU process table
+
+type ProcKey = "pid" | "name" | "mem";
+const PROC_PREFS = "paddock.gpuprocs";
+const PROC_LIMITS = [5, 10, 20, 50, 0]; // 0 = all
+
+/** Sortable, collapsible process list. Windows hosts can list dozens of processes, so show the top few by default. */
+function ProcessTable({ procs }: { procs: GpuProcess[] }) {
+  const [open, setOpen] = useState(true);
+  const [limit, setLimit] = useState(10);
+  const [sort, setSort] = useState<{ key: ProcKey; dir: 1 | -1 }>({ key: "mem", dir: -1 });
+
+  // per-browser convenience; storage can be unavailable (private mode)
+  useEffect(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(PROC_PREFS) ?? "{}");
+      if (typeof v.open === "boolean") setOpen(v.open);
+      if (PROC_LIMITS.includes(v.limit)) setLimit(v.limit);
+      if (["pid", "name", "mem"].includes(v.key) && (v.dir === 1 || v.dir === -1)) setSort({ key: v.key, dir: v.dir });
+    } catch {}
+  }, []);
+  const save = (next: { open: boolean; limit: number; sort: { key: ProcKey; dir: 1 | -1 } }) => {
+    setOpen(next.open);
+    setLimit(next.limit);
+    setSort(next.sort);
+    try {
+      localStorage.setItem(PROC_PREFS, JSON.stringify({ open: next.open, limit: next.limit, key: next.sort.key, dir: next.sort.dir }));
+    } catch {}
+  };
+  const pick = (key: ProcKey) =>
+    save({ open, limit, sort: { key, dir: sort.key === key ? (sort.dir === 1 ? -1 : 1) : key === "name" ? 1 : -1 } });
+
+  if (procs.length === 0) return null;
+  const rows = [...procs].sort((a, b) => {
+    if (sort.key === "name") return sort.dir * a.name.localeCompare(b.name);
+    const x = sort.key === "pid" ? a.pid : a.mem_mib;
+    const y = sort.key === "pid" ? b.pid : b.mem_mib;
+    if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1; // unknown values last either way
+    return sort.dir * (x - y);
+  });
+  const shown = limit > 0 ? rows.slice(0, limit) : rows;
+  const arrow = (k: ProcKey) => (sort.key === k ? (sort.dir === 1 ? " ▲" : " ▼") : "");
+  const th = (k: ProcKey, label: string, cls?: string) => (
+    <th className={cls} aria-sort={sort.key === k ? (sort.dir === 1 ? "ascending" : "descending") : "none"}>
+      <button type="button" className="thsort" onClick={() => pick(k)}>{label}{arrow(k)}</button>
+    </th>
+  );
+  return (
+    <div style={{ marginTop: 12 }}>
+      <div className="proc-head">
+        <button type="button" className="thsort" aria-expanded={open} onClick={() => save({ open: !open, limit, sort })}>
+          {open ? "▾" : "▸"} Processes ({procs.length})
+        </button>
+        {open && procs.length > PROC_LIMITS[0] && (
+          <label className="faint" style={{ fontSize: 12 }}>
+            Show{" "}
+            <select className="btn sm" value={limit} onChange={(e) => save({ open, limit: Number(e.target.value), sort })}>
+              {PROC_LIMITS.map((n) => <option key={n} value={n}>{n === 0 ? "All" : n}</option>)}
+            </select>
+          </label>
+        )}
+      </div>
+      {open && (
+        <table>
+          <thead><tr>{th("pid", "PID")}{th("name", "Process")}{th("mem", "VRAM", "r")}</tr></thead>
+          <tbody>
+            {shown.map((p) => (
+              <tr key={`${p.pid}`}>
+                <td className="num">{p.pid}</td>
+                <td className="mono" style={{ fontSize: 12 }}>{p.name}</td>
+                <td className="r num">{p.mem_mib != null ? fmtMiB(p.mem_mib) : "–"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       )}
+      {open && shown.length < procs.length && <div className="faint" style={{ fontSize: 12, marginTop: 6 }}>Showing {shown.length} of {procs.length}</div>}
     </div>
   );
 }
