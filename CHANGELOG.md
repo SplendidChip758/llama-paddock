@@ -1,3 +1,9 @@
+## [0.10.0-dev.13](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.12...v0.10.0-dev.13) (2026-11-15)
+
+### Features
+
+* **dashboard:** sort, collapse and limit the GPU process list ([#202](https://github.com/SplendidChip758/llama-paddock/issues/202)) ([20c96e6](https://github.com/SplendidChip758/llama-paddock/commit/20c96e6c166c4a49d747912e83bde514ccb7066c))
+
 ## [0.10.0-dev.12](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.11...v0.10.0-dev.12) (2026-11-15)
 
 ### Bug Fixes
