@@ -43,6 +43,7 @@
  *        ollama:  "up" | "down" (port closed) | "hang" (never answers) | "error" (HTTP 500)
  *        agent:   "up" | "down" | "hang" | "error" | "bad-token" (401 for every token)
  *                 | "malformed" (/stats answers without its system, nvidia and service parts)
+ *                 | "no-handshake" (accepts connections, then never starts TLS or answers)
  *        pull:    "normal" | "stall" (stops making progress) | "fail" (error line mid-stream)
  *                 | "drop" (connection cut mid-stream)
  *        create:  "normal" | "stall" | "fail"
@@ -278,7 +279,7 @@ const OVERRIDE_PATH = "/etc/systemd/system/ollama.service.d/override.conf";
 
 const SCENARIO_VALUES = {
   ollama: ["up", "down", "hang", "error"],
-  agent: ["up", "down", "hang", "error", "bad-token", "malformed"],
+  agent: ["up", "down", "hang", "error", "bad-token", "malformed", "no-handshake"],
   pull: ["normal", "stall", "fail", "drop"],
   create: ["normal", "stall", "fail"],
   agent_update: ["normal", "fail", "none"],
@@ -328,6 +329,8 @@ function makeHost(n, o) {
     startedAt: Date.now(),
     pid: 1000 + n * 37,
     hung: new Set(),
+    /** agent connections held open without a handshake ("no-handshake") */
+    heldSockets: new Set(),
     servers: {},
     agentTls: true,
     agentHttp: true,
@@ -793,6 +796,8 @@ function agentServer(h) {
     socket.on("error", () => socket.destroy());
     socket.once("close", () => sockets.delete(socket));
     socket.once("readable", () => {
+      // like a host that is half up: the connection opens, and nothing more happens
+      if (h.scenario.agent === "no-handshake") return void h.heldSockets.add(socket);
       const head = socket.read(1);
       if (!head) return socket.destroy();
       socket.unshift(head);
@@ -1091,6 +1096,8 @@ function stopListening(server) {
 function releaseHung(h) {
   for (const res of h.hung) res.destroy();
   h.hung.clear();
+  for (const s of h.heldSockets) s.destroy();
+  h.heldSockets.clear();
 }
 
 async function setOllama(h, state) {

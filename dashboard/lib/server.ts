@@ -637,9 +637,12 @@ function agentRequest(inst: Instance, method: string, path: string, body: unknow
       reject(e);
     };
     const timer = setTimeout(() => {
-      req.destroy(Object.assign(new Error("timed out"), { name: "TimeoutError" }));
-      // a handshake still in progress isn't the request's socket yet
+      const e = Object.assign(new Error("timed out"), { name: "TimeoutError" });
+      req.destroy(e);
+      // a handshake still in progress isn't the request's socket yet, so destroying the request
+      // reports nothing: reject here, or a host that never finishes the handshake stalls the caller
       socket?.destroy();
+      fail(e);
     }, timeoutMs);
     req.on("error", fail);
     req.end(payload);
