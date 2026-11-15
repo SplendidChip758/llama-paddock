@@ -158,3 +158,16 @@ test("an https:// URL for an agent from before 0.7.0 says why it fails", async (
   assert.match(r.data.agent.detail, /before 0\.7\.0/);
   await sim.scenario("sim-4", { agent_tls: true });
 });
+
+test("an https:// agent that never finishes the handshake times out, and polling goes on", async () => {
+  await c.waitInstance("sim-1", (x) => x.agent_ok, "agent online over HTTPS");
+  await sim.scenario("sim-1", { agent: "no-handshake" });
+  const i = await c.waitInstance("sim-1", (x) => x.ollama_ok && !x.agent_ok, "agent timed out");
+  assert.match(i.agent_error, /timed out/);
+  // the poll ended, so this host and the others keep being polled
+  const before = { 1: i.updated, 3: (await c.instance("sim-3")).updated };
+  await c.waitInstance("sim-1", (x) => x.updated > before[1], "sim-1 polled again");
+  await c.waitInstance("sim-3", (x) => x.updated > before[3], "sim-3 polled again");
+  await sim.scenario("sim-1", { agent: "up" });
+  await c.waitInstance("sim-1", (x) => x.agent_ok, "agent back up");
+});
