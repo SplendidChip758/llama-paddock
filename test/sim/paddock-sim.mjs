@@ -73,6 +73,8 @@
  *                     "fail" (the updater fails and the agent keeps its version), "none" (an agent
  *                     without /update or self_update, like one from before 0.10.0). Default: "normal"
  *                     when the agent in test/agent-release has /update, else "none"
+ *        agent_platform: "linux" (default) | "windows": the platform /health and /stats report, and
+ *                     whose simulated releases an update installs. The other routes stay Linux's
  *
  * Agent and dashboard releases, on the control port, like GitHub's API (agent_releases_url: http://<bind>:<B>/_sim/github):
  *   GET  /_sim/github/repos/<owner>/<repo>/releases   the simulated releases; repo llama-paddock is the
@@ -283,6 +285,7 @@ const SCENARIO_VALUES = {
   pull: ["normal", "stall", "fail", "drop"],
   create: ["normal", "stall", "fail"],
   agent_update: ["normal", "fail", "none"],
+  agent_platform: ["linux", "windows"],
 };
 
 function makeHost(n, o) {
@@ -298,6 +301,7 @@ function makeHost(n, o) {
     ollamaVersion: "0.12.6",
     agentVersion: repoAgentVersion(),
     agentProtocol: repoAgentProtocol(),
+    agentPlatform: "linux",
     pullSeconds: o.pullSeconds,
     /** milliseconds per streamed token, so hosts compare differently side by side */
     tokenMs: 20 + 10 * (n - 1),
@@ -852,7 +856,7 @@ function agentStats(h) {
     ts: t,
     ...(h.agentVersion ? { version: h.agentVersion } : {}),
     ...(h.agentProtocol != null ? { protocol: h.agentProtocol } : {}),
-    platform: "linux",
+    platform: h.agentPlatform,
     fingerprint: agentFingerprint(h),
     ...(canSelfUpdate(h) ? { self_update: true } : {}),
     system: {
@@ -915,7 +919,7 @@ async function newOllamaProcess(h) {
 
 const agentRoutes = {
   "GET /health": (h) => ({
-    ok: true, version: h.agentVersion ?? undefined, protocol: h.agentProtocol ?? undefined, platform: "linux", hostname: h.hostname,
+    ok: true, version: h.agentVersion ?? undefined, protocol: h.agentProtocol ?? undefined, platform: h.agentPlatform, hostname: h.hostname,
     fingerprint: agentFingerprint(h), ...(canSelfUpdate(h) ? { self_update: true } : {}),
   }),
   "GET /update": (h) => ({ ...h.update }),
@@ -1023,7 +1027,7 @@ function startUpdate(h, body) {
       h.update = { state: "failed", result: "exit-code", log: ["▸ Downloading the agent", "✖ paddock-agent-linux.mjs doesn't match the release's SHA256SUMS: the download is damaged or was changed. Nothing was installed"] };
       return;
     }
-    const target = newestRelease("linux", channel);
+    const target = newestRelease(h.agentPlatform, channel);
     if (!target || target === h.agentVersion) {
       h.update = { state: "idle" };
       return;
@@ -1187,6 +1191,7 @@ async function applyScenario(h, patch) {
   }
   if (patch.pull) h.scenario.pull = patch.pull;
   if (patch.agent_update) h.scenario.agent_update = patch.agent_update;
+  if (patch.agent_platform) h.agentPlatform = patch.agent_platform;
   if (patch.create) h.scenario.create = patch.create;
   if (patch.ollama) await setOllama(h, patch.ollama);
   if (patch.agent) await setAgent(h, patch.agent);
