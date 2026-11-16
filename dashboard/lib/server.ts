@@ -166,7 +166,8 @@ class InstanceState {
     else if (this.agent_incompatible === "update-dashboard") manual = "the agent is newer than this dashboard supports";
     else if (!this.agent_ok && !this.agent_incompatible) manual = "the agent isn't answering";
     else if (!this.agent_self_update) {
-      manual = platform === "windows" ? "Windows agents are updated on the PC: run the installer from the latest release"
+      // Windows agents update themselves from 0.10.0 (the C# service); the ones before it are run by a scheduled task
+      manual = platform === "windows" ? "this agent is too old to update itself: run the newest setup on the PC once"
         : "this agent is too old to update itself: run update-llama-paddock-agent on the host once";
     }
     let run = this.agent_update_run;
@@ -780,7 +781,8 @@ async function followAgentUpdate(st: InstanceState) {
     return;
   }
   if (Date.now() / 1000 - run.started > AGENT_UPDATE_TIMEOUT_S) {
-    settle(run, "failed", "the agent didn't come back with a new version within 10 minutes: see journalctl -u llama-paddock-agent-update on the host");
+    const where = st.agent_platform === "windows" ? "%ProgramData%\\llama-paddock-agent\\update\\update.log on the PC" : "journalctl -u llama-paddock-agent-update on the host";
+    settle(run, "failed", `the agent didn't come back with a new version within 10 minutes: see ${where}`);
     return;
   }
   // restarting, most likely

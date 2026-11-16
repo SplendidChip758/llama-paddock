@@ -378,11 +378,11 @@ Each host in `/api/instances` has `agent_update` (`null` without an agent):
 | `platform` | `linux` or `windows`, as the agent reports it; `null` until it answers |
 | `latest` | The newest agent release for that platform on the dashboard's channel ([`agent_updates`](configuration.md)); `null` when unknown or when the check is off |
 | `outdated` | The agent runs an older version than `latest` |
-| `can_update` | The dashboard can update it. Linux agents from 0.10.0 that the installer set up can; older agents and Windows agents are updated on the host |
+| `can_update` | The dashboard can update it. Linux agents from 0.10.0 that the installer set up can, and Windows agents from 0.10.0 run by their service; older agents are updated on the host |
 | `manual_reason` | Why the dashboard can't, when it can't |
 | `run` | The update started from the dashboard: `{state, started, ended, from, to, detail, log}`. `state` is `running`, `done` or `failed`; `detail` says why it failed, or that the agent already was on the newest release; `log` is the end of the updater's output after a failure. A finished update is shown for 10 minutes, a failed one until the next attempt |
 
-The dashboard asks GitHub for the agent releases every 6 hours (every 30 minutes after a failure) and keeps the last answer. An update runs on the host: the agent starts its installer's `update-llama-paddock-agent` with the dashboard's channel, which checks the release against its `SHA256SUMS`, keeps the token and key, and restarts the agent. Ollama keeps running. Starting updates is logged in the [audit log](#audit-log) as `host.agent_update`.
+The dashboard asks GitHub for the agent releases every 6 hours (every 30 minutes after a failure) and keeps the last answer. An update runs on the host. A Linux agent starts its installer's `update-llama-paddock-agent` with the dashboard's channel; a Windows agent downloads the setup and runs it silently, and puts the previous version back if that fails. Both check the release against its `SHA256SUMS`, keep the token and key, and restart the agent. Ollama keeps running. Starting updates is logged in the [audit log](#audit-log) as `host.agent_update`.
 
 ### Dashboard updates
 
@@ -420,8 +420,8 @@ The agent listens separately, normally on port 11435, for HTTPS and (unless `PAD
 | GET | `/gpu-check` | `{ts, platform, log, nvidia_uvm?}`: the GPU-related lines of Ollama's log since it last started (`log.lines`, and `log.error` when it can't be read), and on Linux the `nvidia_uvm` state (agents from 0.8.0) |
 | GET | `/runner-starts?since=…` | `{ts, starts}`: the times (unix seconds, the agent's clock) Ollama logged a model runner starting since `since` (at most a day back; default an hour), and `error` when the log can't be read (agents from 0.8.0) |
 | POST | `/gpu/reload-uvm` | Linux, as root, outside a container: stops Ollama, reloads `nvidia_uvm` and starts Ollama → `{ok, steps, stderr}`; 409 where it can't. The Windows agent answers 400 (agents from 0.8.0) |
-| GET | `/update` | `{state, result?, log?}`: the agent updater's last run, `idle`, `running` or `failed`; a failed run has systemd's `result` and the end of the updater's output in `log` (Linux agents from 0.10.0) |
-| POST | `/update` | `{channel}`: `stable` (default) or `dev`. Starts `update-llama-paddock-agent` for the newest release on that channel as the transient unit `llama-paddock-agent-update`, which restarts the agent → `{ok, channel}`; 409 while one is running or when the installer's updater is missing. Agents that can do this report `self_update: true` in `/health` and `/stats` (Linux agents from 0.10.0) |
+| GET | `/update` | `{state, result?, log?}`: the agent updater's last run, `idle`, `running` or `failed`; a failed run says why in `result` (on Linux, systemd's result) and has the end of the updater's output in `log` (agents from 0.10.0) |
+| POST | `/update` | `{channel}`: `stable` (default) or `dev`. Updates to the newest release on that channel, which restarts the agent → `{ok, channel}`; 409 while one is running or when the agent can't update itself. Linux: starts `update-llama-paddock-agent` as the transient unit `llama-paddock-agent-update`. Windows: the service downloads and checks the setup, and runs it from outside the service. Agents that can do this report `self_update: true` in `/health` and `/stats` (agents from 0.10.0) |
 | GET | `/requests?since=…` | `{requests, until, more, skipped}`: the request lines in Ollama's log after `since` (unix seconds), at most 5000. A log file has whole-second times, so agents reading one (Windows, `PADDOCK_OLLAMA_LOG`) also return the lines from the second `since` falls in; drop the ones you already have. Ask again from `until` while `more` is true; `skipped` counts lines in an unknown format (agents from 0.8.0) |
 
 ### Agent protocol

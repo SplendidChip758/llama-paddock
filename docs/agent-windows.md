@@ -73,12 +73,19 @@ Settings live in `%ProgramData%\llama-paddock-agent\agent.json`, which only admi
 | `PADDOCK_OLLAMA_APP` | the Ollama user's `%LOCALAPPDATA%\Programs\Ollama\ollama app.exe` | Ollama desktop executable. Without it, the agent restarts Ollama as `ollama.exe serve` from the same folder |
 | `PADDOCK_DISK_PATHS` | empty | Extra drives or folders to report, comma-separated |
 | `PADDOCK_AGENT_ENV_ALLOW` | empty | Extra variables the dashboard may set, comma-separated; a trailing `*` allows a prefix (`HSA_*,MY_VAR`). See [Environment](usage.md#environment) |
+| `PADDOCK_UPDATE_URL` | GitHub | Where updates come from, for tests: a server with `/releases/latest`, `/releases` and `/releases/download/<tag>/<file>` as GitHub has them |
 
 The agent logs to `%ProgramData%\llama-paddock-agent\logs\agent.log`.
 
 To replace the agent's HTTPS key, stop the service, delete `agent.key` and `agent.crt` and start it again; the dashboard then shows that the key changed, and you accept the new one there after comparing it with the fingerprint in `agent.log`.
 
-The dashboard flags a Windows agent older than the latest [release](https://github.com/SplendidChip758/llama-paddock-win-agent/releases), but can't update it yet. To update, run the newer release's setup: it keeps the token, the HTTPS key and the settings.
+The dashboard flags a Windows agent older than the latest [release](https://github.com/SplendidChip758/llama-paddock-win-agent/releases) and updates it with **Update** on the host's page, or **Update all**, like a Linux agent. The service:
+
+1. downloads the newest setup on the dashboard's channel and checks it against the release's `SHA256SUMS`;
+2. keeps a copy of the program folder and runs the setup silently, which keeps the token, the HTTPS key and the settings;
+3. puts the copy back and starts the previous version if the setup fails or the new agent doesn't keep running.
+
+The service restarts during an update, and so do the tray apps; Ollama keeps running. Each step is logged to `%ProgramData%\llama-paddock-agent\update\update.log`, and the dashboard shows the end of it when an update fails. Agents from before 0.10.0, run by the Node.js scheduled task, can't update themselves: run the newest setup on the PC once. Running a newer setup yourself works too.
 
 The agent targets the standard Ollama desktop install, not an `ollama serve` process managed by NSSM or another Windows service wrapper. See [Troubleshooting](operations.md#troubleshooting) for firewall and GPU limitations.
 

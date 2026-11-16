@@ -104,6 +104,22 @@ test("Update all starts every agent the dashboard can update and lists the rest"
   await c.waitInstance("sim-2", (x) => x.agent_update?.run?.state === "done" && x.agent_version === "9.0.0-dev.1", "sim-2 to be updated");
 });
 
+test("a Windows agent is updated to the newest Windows release, or told to run the setup", async () => {
+  // sim-3 still can't update itself, as an agent run by the Node.js scheduled task
+  await sim.scenario("sim-3", { agent_platform: "windows" });
+  let i = await c.waitInstance("sim-3", (x) => x.agent_update?.platform === "windows" && !x.agent_update.can_update, "a Windows agent that can't update itself");
+  assert.match(i.agent_update.manual_reason, /newest setup on the PC/);
+  assert.equal(i.agent_update.latest, "0.11.0-dev.1");
+
+  await sim.scenario("sim-3", { agent_update: "normal" });
+  await c.waitInstance("sim-3", (x) => x.agent_update?.can_update && x.agent_update.outdated, "a Windows agent that can update itself");
+  const r = await c.post("/api/instances/sim-3/agent-update");
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  i = await c.waitInstance("sim-3", (x) => x.agent_update?.run?.state === "done", "the Windows agent to be updated");
+  assert.equal(i.agent_version, "0.11.0-dev.1");
+  assert.equal(i.agent_update.outdated, false);
+});
+
 test("the release check is cached, not repeated on every poll", async () => {
   const reads = async () => (await fetch(`${sim.control}/github/requests`).then((r) => r.json())).reads;
   const before = await reads();
