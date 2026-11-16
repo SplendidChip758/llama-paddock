@@ -87,6 +87,8 @@ The dashboard flags a Windows agent older than the latest [release](https://gith
 
 The service restarts during an update, and so do the tray apps; Ollama keeps running. Each step is logged to `%ProgramData%\llama-paddock-agent\update\update.log`, and the dashboard shows the end of it when an update fails. Agents from before 0.10.0, run by the Node.js scheduled task, can't update themselves: run the newest setup on the PC once. Running a newer setup yourself works too.
 
+On the PC, the tray app's menu shows the agent's version. **About and updates…** opens a window with the version, the update channel (dev for a prerelease, else stable) and **Check for updates**. **Update** there asks for an administrator, then runs the same update as the dashboard; the tray app closes and comes back with a notification saying how it went. To make that notification possible, users can read (but not change) `%ProgramData%\llama-paddock-agent\update`, which holds the update's state, its log and the downloaded setup.
+
 The agent targets the standard Ollama desktop install, not an `ollama serve` process managed by NSSM or another Windows service wrapper. See [Troubleshooting](operations.md#troubleshooting) for firewall and GPU limitations.
 
 ## The earlier Node.js agent
