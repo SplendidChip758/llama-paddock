@@ -1,3 +1,9 @@
+## [0.10.0-dev.15](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.14...v0.10.0-dev.15) (2026-11-20)
+
+### Bug Fixes
+
+* **deps:** bump next from 16.4.5 to 16.4.6 in /dashboard in the dashboard-minor-patch group ([#206](https://github.com/SplendidChip758/llama-paddock/issues/206)) ([3e84f05](https://github.com/SplendidChip758/llama-paddock/commit/3e84f0594392b41d490cbfc98a0ca941ac87b68e))
+
 ## [0.10.0-dev.14](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.13...v0.10.0-dev.14) (2026-11-16)
 
 ### Features
