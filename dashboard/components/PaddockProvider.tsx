@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "@/lib/format";
 import type { ActiveAlert, InstanceSnapshot, JobInfo, SecuritySummary } from "@/lib/types";
+import type { StorageFailure } from "@/lib/storage";
 
 interface Toast {
   id: number;
@@ -38,6 +39,8 @@ interface Ctx {
   alertsStoreError: string | null;
   /** failing and dismissed security checks; null from a dashboard before they existed */
   security: SecuritySummary | null;
+  /** what the dashboard is failing to save to its database right now */
+  storageFailures: StorageFailure[];
 }
 
 const PaddockCtx = createContext<Ctx | null>(null);
@@ -60,6 +63,7 @@ export function PaddockProvider({ children }: { children: ReactNode }) {
   const [alerts, setAlerts] = useState<ActiveAlert[]>([]);
   const [alertsStoreError, setAlertsStoreError] = useState<string | null>(null);
   const [security, setSecurity] = useState<SecuritySummary | null>(null);
+  const [storageFailures, setStorageFailures] = useState<StorageFailure[]>([]);
   const seenDone = useRef<Set<string> | null>(null);
   const toastId = useRef(0);
   const pollRef = useRef(3);
@@ -72,13 +76,15 @@ export function PaddockProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshInstances = useCallback(async () => {
-    const [d, a] = await Promise.all([
+    const [d, a, st] = await Promise.all([
       api<{ poll_interval: number; instances: InstanceSnapshot[]; security?: SecuritySummary }>("/api/instances"),
       api<{ active: ActiveAlert[]; store_error: string | null }>("/api/alerts").catch(() => null),
+      api<{ failures: StorageFailure[] }>("/api/storage").catch(() => null),
     ]);
     setPollInterval(d.poll_interval);
     setInstances(d.instances);
     setSecurity(d.security ?? null);
+    if (st) setStorageFailures(st.failures);
     if (a) {
       setAlerts(a.active);
       setAlertsStoreError(a.store_error);
@@ -133,7 +139,7 @@ export function PaddockProvider({ children }: { children: ReactNode }) {
   }, [refreshJobs]);
 
   return (
-    <PaddockCtx.Provider value={{ instances, refreshInstances, me, readOnly: me?.role === "viewer", loaded, pollInterval, jobs, refreshJobs, toast, jobsOpen, setJobsOpen, jobsDoneTick, alerts, alertsStoreError, security }}>
+    <PaddockCtx.Provider value={{ instances, refreshInstances, me, readOnly: me?.role === "viewer", loaded, pollInterval, jobs, refreshJobs, toast, jobsOpen, setJobsOpen, jobsDoneTick, alerts, alertsStoreError, security, storageFailures }}>
       {children}
       <div className="toasts">
         {toasts.map((t) => (

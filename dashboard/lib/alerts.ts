@@ -5,6 +5,7 @@
 // directory; firing and resolved transitions go to paddock.db, so a firing alert is still firing
 // after a restart.
 import "server-only";
+import { saved, saveFailed } from "./storage";
 import { deleteSilences, firingAlerts, insertSilence, loadSilences, recentFirings, recordAlertTransitions } from "./db";
 import { HttpError } from "./http-error";
 import { reloadChurn, type LoadStats } from "./modelcheck";
@@ -217,7 +218,7 @@ function restore(a: AlertsState) {
     a.silences = loadSilences();
   } catch (e) {
     a.store_error = e instanceof Error ? e.message : String(e);
-    console.error("[llama-paddock] loading firing alerts failed:", e);
+    saveFailed("alerts", e, "loading firing alerts");
   }
 }
 
@@ -637,10 +638,11 @@ export function evaluateAlerts(polled: PolledHost[], hostIds: string[], gapAfter
   try {
     recordAlertTransitions(out);
     a.store_error = null;
+    saved("alerts");
   } catch (e) {
     // the alerts still fire and resolve; only a restart could lose track of them
     a.store_error = e instanceof Error ? e.message : String(e);
-    console.error("[llama-paddock] saving alert transitions failed:", e);
+    saveFailed("alerts", e, "saving alert transitions");
   }
   notify(a, out);
 }

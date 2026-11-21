@@ -2,6 +2,7 @@
 // since the last ones read and stores them in paddock.db. The requests that the dashboard and other
 // monitors make every few seconds are left out, or they would bury everything else.
 import "server-only";
+import { saved, saveFailed } from "./storage";
 import { insertRequests, lastRequestT, modelsAt, requestLog, requestStats } from "./db";
 import { HttpError } from "./http-error";
 import { readJson, writeJson } from "./store";
@@ -73,7 +74,13 @@ function store(id: string, requests: AgentRequest[], lag: number) {
     }
     return { ...r, model };
   });
-  insertRequests(id, rows);
+  try {
+    insertRequests(id, rows);
+    saved("requests");
+  } catch (e) {
+    saveFailed("requests", e);
+    throw e;
+  }
 }
 
 /**

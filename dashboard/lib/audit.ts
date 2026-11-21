@@ -1,6 +1,7 @@
 // The audit log: who changed what, from which address, and when. Routes call audit() after a change
 // succeeds; the caller (session or API token) is read from the request, as proxy.ts let it in.
 import "server-only";
+import { saved, saveFailed } from "./storage";
 import { clientIp, currentCaller } from "./auth";
 import { insertAudit } from "./db";
 import { paddock } from "./server";
@@ -57,8 +58,9 @@ export function audit(req: Request, e: AuditInput) {
       target: e.target ?? null,
       detail: detail.length > MAX_DETAIL ? `${detail.slice(0, MAX_DETAIL - 1)}…` : detail,
     });
+    saved("audit");
   } catch (err) {
-    console.error(`[llama-paddock] writing the audit log failed (${e.action}):`, err);
+    saveFailed("audit", err, `writing the audit log (${e.action})`);
   }
 }
 
