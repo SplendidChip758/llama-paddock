@@ -33,6 +33,12 @@
 #                        (an update otherwise stops with "already on the latest version")
 #   PADDOCK_YES=1        non-interactive
 #   PADDOCK_UNINSTALL=1  remove the agent instead (Ollama and its settings are left alone)
+#   For tests (CI runs real updates against a fake GitHub); update-llama-paddock-agent keeps them:
+#   PADDOCK_GITHUB_API   the GitHub API releases are read from (default: https://api.github.com)
+#   PADDOCK_GITHUB_URL   where release downloads and the releases feed are (default: https://github.com)
+#   PADDOCK_GITHUB_RAW   where a repository's files are (default: https://raw.githubusercontent.com)
+#   PADDOCK_SELF_URL     where update-llama-paddock-agent downloads this script from (default: the
+#                        PADDOCK_BRANCH copy on raw.githubusercontent.com)
 set -euo pipefail
 
 REPO="${PADDOCK_REPO:-SplendidChip758/llama-paddock}"
@@ -41,7 +47,10 @@ BRANCH="${PADDOCK_BRANCH:-main}"
 VERSION="${PADDOCK_VERSION:-latest}"
 [[ $VERSION == stable ]] && VERSION=latest
 AGENT_PORT="${PADDOCK_AGENT_PORT:-11435}"
-SELF_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/install/agent.sh"
+GITHUB_API="${PADDOCK_GITHUB_API:-https://api.github.com}"
+GITHUB_URL="${PADDOCK_GITHUB_URL:-https://github.com}"
+GITHUB_RAW="${PADDOCK_GITHUB_RAW:-https://raw.githubusercontent.com}"
+SELF_URL="${PADDOCK_SELF_URL:-${GITHUB_RAW}/${REPO}/${BRANCH}/install/agent.sh}"
 PREFIX=/opt/llama-paddock-agent
 ENV_FILE=/etc/llama-paddock-agent.env
 UNIT_FILE=/etc/systemd/system/llama-paddock-agent.service
@@ -263,7 +272,7 @@ pick_release() {
 # when neither the API nor the feed answered
 resolve_release() {
   [[ -n $RELEASE_TAG ]] && return 0
-  local api="https://api.github.com/repos/${AGENT_REPO}/releases" out code
+  local api="${GITHUB_API}/repos/${AGENT_REPO}/releases" out code
   if [[ $VERSION == dev ]]; then api+="?per_page=30"; else api+="/latest"; fi
   local f; f=$(mktemp)
   code=$(curl -sSL --connect-timeout 10 --max-time 30 -H "Accept: application/vnd.github+json" -w '%{http_code}' -o "$f" "$api" 2>/dev/null) || code=000
@@ -271,7 +280,7 @@ resolve_release() {
     out=$(pick_release "$VERSION" < "$f" 2>/dev/null) || out=""
   elif [[ $code == 404 && $VERSION != dev ]]; then
     out=""   # no stable release yet
-  elif get "https://github.com/${AGENT_REPO}/releases.atom" "$f"; then
+  elif get "${GITHUB_URL}/${AGENT_REPO}/releases.atom" "$f"; then
     # 403/429: this address has used up its API calls
     out=$(pick_release "$VERSION" < "$f" 2>/dev/null) || out=""
   else
@@ -318,18 +327,18 @@ api_asset() {
   local tag="$1" name="$2" out="$3" id
   if [[ -z $RELEASE_ASSETS || $tag != "$RELEASE_TAG" ]]; then
     RELEASE_TAG="$tag"
-    RELEASE_ASSETS=$(curl -fsSL --max-time 30 -H "Accept: application/vnd.github+json" "https://api.github.com/repos/${AGENT_REPO}/releases/tags/${tag}" 2>/dev/null \
+    RELEASE_ASSETS=$(curl -fsSL --max-time 30 -H "Accept: application/vnd.github+json" "${GITHUB_API}/repos/${AGENT_REPO}/releases/tags/${tag}" 2>/dev/null \
       | pick_release dev 2>/dev/null | sed -n 's/^asset //p') || RELEASE_ASSETS=""
   fi
   id=$(awk -v n="$name" '$1 == n { print $2 }' <<<"$RELEASE_ASSETS")
   [[ -n $id ]] || return 1
-  curl -fsSL --max-time 120 -H "Accept: application/octet-stream" "https://api.github.com/repos/${AGENT_REPO}/releases/assets/${id}" -o "$out" 2>/dev/null
+  curl -fsSL --max-time 120 -H "Accept: application/octet-stream" "${GITHUB_API}/repos/${AGENT_REPO}/releases/assets/${id}" -o "$out" 2>/dev/null
 }
 
 # release_file TAG NAME FILE — a release download, then the API; stops the install when neither works
 release_file() {
   local tag="$1" name="$2" out="$3"
-  get "https://github.com/${AGENT_REPO}/releases/download/${tag}/${name}" "$out" && return 0
+  get "${GITHUB_URL}/${AGENT_REPO}/releases/download/${tag}/${name}" "$out" && return 0
   api_asset "$tag" "$name" "$out" && return 0
   die "could not download $name of ${tag} from GitHub. Nothing was installed; try again in a few minutes"
 }
@@ -339,7 +348,7 @@ release_file() {
 # before the agents had their own releases (0.9.0-dev.N and older) only have the files in the repo
 fetch_release() {
   local tmp="$1" tag="$2" sums="$1/SHA256SUMS" rc=0
-  get "https://github.com/${AGENT_REPO}/releases/download/${tag}/SHA256SUMS" "$sums" || rc=$?
+  get "${GITHUB_URL}/${AGENT_REPO}/releases/download/${tag}/SHA256SUMS" "$sums" || rc=$?
   if (( rc == 4 )); then
     return 1
   elif (( rc )); then
@@ -350,7 +359,7 @@ fetch_release() {
   local agent=llama-paddock-agent/paddock-agent.mjs unit=llama-paddock-agent/llama-paddock-agent.service
   [[ -n $(sum_of "$sums" "$agent") ]] || { agent=paddock-agent-linux.mjs; unit=llama-paddock-agent.service; }
 
-  local raw="https://raw.githubusercontent.com/${AGENT_REPO}/${tag}/linux"
+  local raw="${GITHUB_RAW}/${AGENT_REPO}/${tag}/linux"
   if get "$raw/paddock-agent.mjs" "$tmp/paddock-agent.mjs" && get "$raw/llama-paddock-agent.service" "$tmp/llama-paddock-agent.service" \
     && [[ $(sha256sum "$tmp/paddock-agent.mjs" | awk '{print $1}') == "$(sum_of "$sums" "$agent")" ]] \
     && [[ $(sha256sum "$tmp/llama-paddock-agent.service" | awk '{print $1}') == "$(sum_of "$sums" "$unit")" ]]; then
@@ -391,7 +400,7 @@ fetch_agent() {
   AGENT_REF="$ref"
   if [[ $ref == v* ]] && fetch_release "$tmp" "$ref"; then return; fi
   [[ $ref == v* ]] && msg_warn "${ref} has no SHA256SUMS to check against — using the files at that tag"
-  local base="https://raw.githubusercontent.com/${AGENT_REPO}/${ref}/linux"
+  local base="${GITHUB_RAW}/${AGENT_REPO}/${ref}/linux"
   get "$base/paddock-agent.mjs" "$tmp/paddock-agent.mjs" || die "could not download the agent from $base"
   get "$base/llama-paddock-agent.service" "$tmp/llama-paddock-agent.service" || die "could not download the service unit from $base"
 }
@@ -406,8 +415,10 @@ local_uninstall() {
   fi
   confirm "Remove the llama-paddock agent from $(hostname)?" n || die "cancelled, nothing was removed"
   systemctl disable --now llama-paddock-agent >/dev/null 2>&1 || true
-  rm -f "$UNIT_FILE" "$ENV_FILE" "$TLS_KEY" "$TLS_CERT" /usr/local/bin/update-llama-paddock-agent /usr/local/bin/uninstall-llama-paddock-agent
-  rm -rf "$PREFIX"
+  systemctl disable llama-paddock-agent-recover >/dev/null 2>&1 || true
+  rm -f "$UNIT_FILE" "$ENV_FILE" "$TLS_KEY" "$TLS_CERT" /usr/local/bin/update-llama-paddock-agent /usr/local/bin/uninstall-llama-paddock-agent \
+    "$RECOVER_CMD" "$RECOVER_UNIT"
+  rm -rf "$PREFIX" "$UPDATE_DIR"
   systemctl daemon-reload 2>/dev/null || true
   msg_ok "Agent removed from $(hostname)"
   echo "   Kept: Ollama's settings (ollama.service.d/override.conf) and Node.js."
@@ -420,7 +431,7 @@ write_uninstaller() {
     echo '#!/usr/bin/env bash'
     echo '# Remove the llama-paddock agent from this machine (written by install/agent.sh; PADDOCK_YES=1 skips the question)'
     echo 'set -euo pipefail'
-    declare -p PREFIX ENV_FILE UNIT_FILE TLS_KEY TLS_CERT
+    declare -p PREFIX ENV_FILE UNIT_FILE TLS_KEY TLS_CERT RECOVER_CMD RECOVER_UNIT UPDATE_DIR
     declare -f init_colors msg_info msg_ok msg_warn die confirm local_uninstall
     echo 'init_colors'
     echo 'local_uninstall'
@@ -437,6 +448,10 @@ write_updater() {
 # Update the llama-paddock agent to the newest ${CHANNEL} release.
 # Pass "stable", "dev" (prereleases) or a tag like v1.2.0 to switch channel or pin one
 export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_AGENT_REPO="${AGENT_REPO}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
+${PADDOCK_GITHUB_API:+export PADDOCK_GITHUB_API="${PADDOCK_GITHUB_API}"}
+${PADDOCK_GITHUB_URL:+export PADDOCK_GITHUB_URL="${PADDOCK_GITHUB_URL}"}
+${PADDOCK_GITHUB_RAW:+export PADDOCK_GITHUB_RAW="${PADDOCK_GITHUB_RAW}"}
+${PADDOCK_SELF_URL:+export PADDOCK_SELF_URL="${PADDOCK_SELF_URL}"}
 exec bash -c "\$(curl -fsSL ${SELF_URL})"
 EOF
   chmod 755 /usr/local/bin/update-llama-paddock-agent
@@ -486,9 +501,130 @@ configure_ollama_host() {
   fi
 }
 
+# ================================================================= safe updates
+# An update keeps a copy of the agent it replaces until the new one answers; if it doesn't, the
+# copy is put back. A marker says an update is under way, so one that was interrupted (killed, a
+# reboot) is put back the next time this installer, the updater or the machine starts. The token,
+# the HTTPS key and the env file aren't touched by an update, so they need no copy.
+# These functions are also copied into llama-paddock-agent-recover, which runs them at boot.
+UPDATE_DIR=/var/lib/llama-paddock-agent-update
+UPDATE_MARKER=$UPDATE_DIR/in-progress
+PREVIOUS=$UPDATE_DIR/previous
+RECOVER_CMD=/usr/local/sbin/llama-paddock-agent-recover
+RECOVER_UNIT=/etc/systemd/system/llama-paddock-agent-recover.service
+# exit code of an update that failed and was rolled back, as the dashboard installer's
+ROLLED_BACK=3
+
+# marker_get KEY — a value from the marker (lines of key=value)
+marker_get() { sed -n "s/^$1=//p" "$UPDATE_MARKER" 2>/dev/null | head -1; }
+
+# True when the marker belongs to no running update: its process is gone, or the machine rebooted
+marker_stale() {
+  [[ -f $UPDATE_MARKER ]] || return 1
+  local pid boot; pid=$(marker_get pid); boot=$(marker_get boot)
+  [[ $boot != "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" ]] && return 0
+  [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null && return 1
+  return 0
+}
+
+# rollback_agent WHY [boot] — put back the agent from before the update in the marker. "boot" when
+# run before the agent starts at boot: starting it from here would wait on that start
+rollback_agent() {
+  local why=$1 boot=${2-} from
+  from=$(marker_get from)
+  msg_warn "Rolling back to ${from:-the previous agent}: $why"
+  [[ -z $boot ]] && systemctl stop llama-paddock-agent 2>/dev/null || true
+  if [[ -f $PREVIOUS/paddock-agent.mjs ]]; then
+    install -m 0755 "$PREVIOUS/paddock-agent.mjs" "$PREFIX/paddock-agent.mjs"
+    [[ -f $PREVIOUS/VERSION ]] && cp "$PREVIOUS/VERSION" "$PREFIX/VERSION"
+    [[ -f $PREVIOUS/llama-paddock-agent.service ]] && install -m 0644 "$PREVIOUS/llama-paddock-agent.service" "$UNIT_FILE"
+    systemctl daemon-reload 2>/dev/null || true
+  fi
+  rm -rf "$PREVIOUS"
+  rm -f "$UPDATE_MARKER"
+  [[ -z $boot ]] && { systemctl start llama-paddock-agent 2>/dev/null || true; }
+  msg_ok "Rolled back to ${from:-the previous agent}"
+}
+
+# recover_update [boot] — put back the agent an interrupted update replaced
+recover_update() {
+  marker_stale || return 0
+  rollback_agent "an earlier update to $(marker_get to) didn't finish" "${1-}"
+}
+
+# begin_update TO — keep a copy of the installed agent, then the marker
+begin_update() {
+  rm -rf "$PREVIOUS"
+  install -d -m 700 "$UPDATE_DIR" "$PREVIOUS"
+  cp -p "$PREFIX/paddock-agent.mjs" "$PREVIOUS/"
+  [[ -f $PREFIX/VERSION ]] && cp -p "$PREFIX/VERSION" "$PREVIOUS/"
+  [[ -f $UNIT_FILE ]] && cp -p "$UNIT_FILE" "$PREVIOUS/llama-paddock-agent.service"
+  printf 'from=%s\nto=%s\npid=%s\nboot=%s\n' "$(cat "$PREFIX/VERSION" 2>/dev/null || echo unknown)" "$1" "$$" \
+    "$(cat /proc/sys/kernel/random/boot_id 2>/dev/null)" >"$UPDATE_MARKER"
+  chmod 600 "$UPDATE_MARKER"
+}
+
+finish_update() {
+  rm -rf "$PREVIOUS"
+  rm -f "$UPDATE_MARKER"
+}
+
+# The installer's exit trap: clean up, and roll back an update this run started but didn't finish
+on_install_exit() {
+  local rc=$?
+  rm -rf "${TMP_DIR:-}"
+  if ((rc != 0 && rc != ROLLED_BACK)) && [[ -f $UPDATE_MARKER && $(marker_get pid) == "$$" ]]; then
+    rollback_agent "the update stopped with an error"
+    exit $ROLLED_BACK
+  fi
+}
+
+# agent_answers PORT VERSION SECONDS — /health answers, from VERSION when it is a release tag
+agent_answers() {
+  local port=$1 want="" body
+  [[ $2 =~ ^v[0-9]+\.[0-9]+\.[0-9]+ ]] && want=${2#v}
+  for _ in $(seq 1 "$3"); do
+    if body=$(curl -fsSk --max-time 3 "https://127.0.0.1:${port}/health" 2>/dev/null || curl -fsS --max-time 3 "http://127.0.0.1:${port}/health" 2>/dev/null); then
+      [[ -z $want || $body == *"\"version\":\"${want}\""* ]] && return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# llama-paddock-agent-recover and its unit: put back an interrupted update at boot, before the agent starts
+write_recover() {
+  {
+    echo '#!/usr/bin/env bash'
+    echo '# Put back the llama-paddock agent an interrupted update replaced, at boot (written by install/agent.sh)'
+    echo 'set -euo pipefail'
+    declare -p PREFIX UNIT_FILE UPDATE_DIR UPDATE_MARKER PREVIOUS
+    declare -f init_colors msg_info msg_ok msg_warn marker_get marker_stale rollback_agent recover_update
+    echo 'init_colors'
+    echo 'recover_update boot'
+  } >"$RECOVER_CMD"
+  chmod 700 "$RECOVER_CMD"
+  cat >"$RECOVER_UNIT" <<EOF
+[Unit]
+Description=llama-paddock: roll back an interrupted agent update
+Before=llama-paddock-agent.service
+ConditionPathExists=${UPDATE_MARKER}
+
+[Service]
+Type=oneshot
+ExecStart=${RECOVER_CMD}
+
+[Install]
+WantedBy=multi-user.target
+EOF
+  systemctl daemon-reload
+  systemctl enable llama-paddock-agent-recover.service >/dev/null 2>&1 || true
+}
+
 local_install() {
   [[ $EUID -eq 0 ]] || die "run as root"
   [[ -d /run/systemd/system ]] || die "systemd is required (this agent manages ollama.service)"
+  recover_update
   command -v curl >/dev/null || { apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq curl ca-certificates >/dev/null; }
   ensure_node
   if agent_is_current; then
@@ -505,11 +641,14 @@ local_install() {
   command -v nvidia-smi >/dev/null || [[ -x /usr/lib/wsl/lib/nvidia-smi ]] || msg_warn "nvidia-smi not found — GPU stats will be unavailable"
 
   TMP_DIR=$(mktemp -d)
-  trap 'rm -rf "${TMP_DIR:-}"' EXIT
+  trap on_install_exit EXIT
   local tmp="$TMP_DIR"
   fetch_agent "$tmp"
   if is_prerelease; then msg_warn "Installing a prerelease agent (${AGENT_REF}): for testing, may be unstable. update-llama-paddock-agent stays on prereleases; 'update-llama-paddock-agent stable' goes back."; fi
 
+  # an update keeps the agent it replaces until the new one answers
+  local updating=""
+  [[ -f $PREFIX/paddock-agent.mjs ]] && updating=1 && begin_update "$AGENT_REF"
   mkdir -p "$PREFIX"
   install -m 0755 "$tmp/paddock-agent.mjs" "$PREFIX/paddock-agent.mjs"
   echo "$AGENT_REF" > "$PREFIX/VERSION"
@@ -554,16 +693,26 @@ EOF
 
   write_updater
   write_uninstaller
+  write_recover
 
   systemctl daemon-reload
   systemctl enable llama-paddock-agent >/dev/null 2>&1
   systemctl restart llama-paddock-agent
   local ok=""
   local port; port=$(sed -n 's/^PADDOCK_AGENT_PORT=//p' "$ENV_FILE")
-  for _ in $(seq 1 10); do
-    { curl -fsSk "https://127.0.0.1:${port}/health" || curl -fsS "http://127.0.0.1:${port}/health"; } >/dev/null 2>&1 && { ok=1; break; }
-    sleep 1
-  done
+  if [[ -n $updating ]]; then
+    # the new agent has to answer as the release it is, or the one before it goes back
+    if agent_answers "$port" "$AGENT_REF" 30; then
+      finish_update
+      ok=1
+    else
+      journalctl -u llama-paddock-agent -n 20 --no-pager 2>/dev/null >&2 || true
+      rollback_agent "${AGENT_REF} didn't answer on /health within 30 seconds"
+      exit $ROLLED_BACK
+    fi
+  elif agent_answers "$port" "" 10; then
+    ok=1
+  fi
   [[ -n $ok ]] && msg_ok "Agent is running" || msg_warn "Agent not answering yet — check: journalctl -u llama-paddock-agent"
   [[ -n $ok ]] && configure_ollama_host
 

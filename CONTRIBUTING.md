@@ -129,6 +129,15 @@ bash .github/scripts/installer-update-test.sh "/tmp/stable/$tag" dist/llama-padd
 
 The container runs privileged, for systemd. It has its own network: the fake GitHub listens on Docker's bridge address and the dashboard on `127.0.0.1:18081`.
 
+The `agent-update` job does the same for `install/agent.sh` (`.github/scripts/agent-update-test.sh`): it installs the latest stable agent and updates it to the agent in `test/agent-release`, published under new versions, then checks a damaged download, an agent that doesn't start, the agent's `POST /update` (what the dashboard uses), an update killed half way and uninstalling. About 3 minutes:
+
+```bash
+tag=$(gh release list -R SplendidChip758/llama-paddock-agent --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName')
+gh release download -R SplendidChip758/llama-paddock-agent "$tag" -D "/tmp/agent-stable/$tag"
+gh release download -R SplendidChip758/llama-paddock-agent "$(cat test/agent-release)" -D /tmp/agent-new -p paddock-agent-linux.mjs
+bash .github/scripts/agent-update-test.sh "/tmp/agent-stable/$tag" /tmp/agent-new/paddock-agent-linux.mjs
+```
+
 ### Browser automation for AI agents
 
 `.mcp.json` registers the [Playwright MCP server](https://github.com/microsoft/playwright-mcp), so Claude Code (and other MCP clients) can open the dashboard, click through it, read the page and take screenshots while working on a change. Claude Code asks you to approve the server the first time. It needs its own browser build once:
