@@ -151,6 +151,33 @@ jobs:
         timeout-minutes: 25
         run: bash .github/scripts/installer-update-test.sh "$STABLE" dist/llama-paddock-dashboard-v64.0.0.tar.gz
 
+  # The Linux agent installer's updates (#34), run the same way: install/agent.sh installs the latest
+  # stable agent and updates it to the one in test/agent-release, then a damaged download, an agent that
+  # doesn't start, the agent's POST /update, an interrupted update and an uninstall
+  # (.github/scripts/agent-update-test.sh).
+  agent-update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Download the latest stable agent and the one to update to
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          repo=SplendidChip758/llama-paddock-agent
+          tag=$(gh release list -R $repo --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName')
+          gh release download -R $repo "$tag" -D "$RUNNER_TEMP/agent-stable/$tag"
+          gh release download -R $repo "$(cat test/agent-release)" -D "$RUNNER_TEMP/agent-new" -p paddock-agent-linux.mjs
+          echo "STABLE=$RUNNER_TEMP/agent-stable/$tag" >> "$GITHUB_ENV"
+
+      - name: Install, update, refuse, roll back and recover
+        timeout-minutes: 15
+        run: bash .github/scripts/agent-update-test.sh "$STABLE" "$RUNNER_TEMP/agent-new/paddock-agent-linux.mjs"
+
   # The rulesets require a check named "agents". The agents themselves are checked in
   # SplendidChip758/llama-paddock-agent; the scenario tests run the dashboard against one.
   agents:
