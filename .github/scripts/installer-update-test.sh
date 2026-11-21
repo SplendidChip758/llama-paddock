@@ -3,7 +3,8 @@
 # install/dashboard.sh installs the latest stable release in an Ubuntu container with systemd,
 # against a fake GitHub (fake-github.mjs) that serves that release and ones built from this
 # checkout. Then, on the same data:
-#   1. update-llama-paddock to this checkout's build: config, login and hosts are kept
+#   1. update-llama-paddock to this checkout's build: config, login and hosts are kept, and every
+#      documented GET /api endpoint still answers with the fields it had (api-shapes.mjs)
 #   2. a release that doesn't match its SHA256SUMS is refused and changes nothing
 #   3. a release that doesn't start is rolled back, with the data from before it
 #   4. an update asked for from the dashboard runs through llama-paddock-update.path
@@ -126,6 +127,8 @@ api -d '{"name":"kept-host","ollama_url":"http://192.168.30.101:11434"}' "$url/a
 in_ct sed -i "1a agent_releases_url: $gh" /etc/llama-paddock/config.yaml
 config_sums=$(in_ct sha256sum /etc/llama-paddock/config.yaml /etc/llama-paddock/llama-paddock.env)
 ok "installed $stable, with a changed password, a host and a config change"
+node "$repo/.github/scripts/api-shapes.mjs" snapshot "$url" password-1 "$repo/docs/api.md" >"$work/api-$stable.json" \
+  || fail "couldn't record $stable's API"
 
 # ---------------------------------------------------------------- 1. update from stable
 release 64.0.0
@@ -137,6 +140,9 @@ check_data "after updating from $stable"
 in_ct paddock-backup list | grep -q "${stable}-pre-update" || fail "no pre-update backup of $stable"
 [[ $(last_history | field state) == done ]] || fail "the history doesn't record the update: $(last_history)"
 ok "updated $stable → 64.0.0 with update-llama-paddock: data kept, pre-update backup taken"
+node "$repo/.github/scripts/api-shapes.mjs" compare "$url" password-1 "$repo/docs/api.md" "$work/api-$stable.json" \
+  || fail "the API lost fields $stable had (above)"
+ok "every documented GET endpoint of $stable still answers with its fields"
 
 # ---------------------------------------------------------------- 2. a damaged download
 release 64.0.1

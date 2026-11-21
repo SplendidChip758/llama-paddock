@@ -16,6 +16,28 @@ Take a [backup](#backups) before upgrading, especially when changing release cha
 
 Installer updates keep configuration and existing agent tokens, and take a full backup first. If the new release doesn't start, the installer puts the previous one and the backup back. Docker updates retain the data volume.
 
+### Supported upgrades
+
+From 1.0, updating a stable install to a newer stable release keeps your configuration, data and API without editing files by hand. Starting the update (the dashboard's **Update to …**, `update-llama-paddock`, or the Docker commands above) is the only step. In detail:
+
+- **Any newer stable release, skipping releases in between.** The database is upgraded one schema version at a time on the first start, from whatever version it was at. CI updates the newest stable release to every change before it's merged, with the installer and with Docker (`installer-update` and `docker-update` in `.github/workflows/ci.yml`).
+- **Configuration:** `config.yaml` keys, environment variables and installer options keep their meaning. New ones are optional, with a default that keeps the old behaviour.
+- **API:** the documented [`/api` endpoints](api.md) keep their fields and what they mean; new endpoints and fields can appear. CI checks every documented `GET` endpoint of the newest stable release against the update.
+- **Agents:** update the dashboard first. A dashboard supports the [agent protocols](api.md#agent-protocol) of older agents, and then updates them, so an agent never has to be newer than its dashboard.
+- **A failed update** is rolled back with its pre-update backup (installer, Linux agent, Windows agent). With Docker, roll back by hand: see [Docker updates](#docker-updates).
+
+Not covered by that promise:
+
+| Case | What to do |
+|---|---|
+| Before 1.0 (0.x releases) | Settings and APIs can still change between minor releases; the release notes say what to do |
+| [Prereleases](#prereleases) | Each can change the data format. Going from a prerelease back to stable is a downgrade: wait for the next stable release, or restore a backup taken on stable |
+| Installing an older version | Not supported, apart from rolling back an update with its pre-update backup (**Roll back to …**, `paddock-backup restore`) |
+| Linux agents before 0.10.0, Windows agents run by the Node.js scheduled task | They can't update themselves: update them once on the host (`update-llama-paddock-agent`, or the Windows setup) |
+| Docker | The dashboard can't replace its own image or roll it back: use the [documented commands](#docker-updates) for both |
+| Source installs | Update your checkout and rebuild; the updater and its rollback don't cover them |
+| A new major version (2.0 …) | Read its release notes first: it changes something listed above, as the [versioning policy](https://github.com/SplendidChip758/llama-paddock/blob/main/ROADMAP.md#versioning) explains |
+
 ### Updating the dashboard
 
 The dashboard looks for a newer release of itself every 6 hours, on its channel: stable releases, or prereleases too on the prerelease channel. When one is out, the version in the header shows **update**. Click it to open **Updates**, with the release notes of every release since yours and the way to update this install. **Check now** asks GitHub straight away. To stop the dashboard asking GitHub at all, set [`update_check: false`](configuration.md#dashboard-settings).
@@ -168,7 +190,7 @@ To try the newest prerelease (`vX.Y.Z-dev.N`), use the prerelease installer. It 
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/SplendidChip758/llama-paddock/dev/install/dashboard-dev.sh)"
 ```
 
-`update-llama-paddock` then stays on prereleases. To go back to stable, run `update-llama-paddock stable` inside the existing dashboard container or VM, after checking data compatibility. With Docker, select `:dev` for prereleases or `:latest` for stable, then pull and recreate the container.
+`update-llama-paddock` then stays on prereleases. To go back to stable, run `update-llama-paddock stable` inside the existing dashboard container or VM, after checking data compatibility. Going back is a downgrade, which the [upgrade promise](#supported-upgrades) doesn't cover: when the prerelease is newer than the newest stable release, the install stays on it until a newer stable release is out, and if the data has to go back too, restore a backup taken on stable. With Docker, select `:dev` for prereleases or `:latest` for stable, then pull and recreate the container.
 
 ## Uninstall
 
