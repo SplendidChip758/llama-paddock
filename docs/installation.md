@@ -52,6 +52,8 @@ See [Updates and backups](operations.md) before upgrading or switching channels.
 | `PADDOCK_CHANNEL` | the tag's | with a release tag in `PADDOCK_VERSION`: the channel `update-llama-paddock` follows afterwards, `latest` or `dev`. The dashboard's updater sets it, so an update from the dashboard never switches channel |
 | `PADDOCK_NO_DOWNGRADE=1` | | never install a release older than the installed one: a channel switch to stable then only switches, and the newer prerelease stays |
 | `PADDOCK_RESTORE_BACKUP` | | a pre-update backup to restore after installing the release in `PADDOCK_VERSION`: [rolls an update back](operations.md#rolling-back-an-update) to that version and its data |
+| `PADDOCK_GITHUB_API` | `https://api.github.com` | for tests: the GitHub API the releases are read from. `update-llama-paddock` keeps using it |
+| `PADDOCK_SELF_URL` | this script on the `PADDOCK_BRANCH` branch | for tests: where `update-llama-paddock` downloads the installer from. It keeps using it |
 
 For prereleases and uninstall instructions, see [Operations](operations.md).
 

@@ -116,6 +116,19 @@ npx playwright show-report        # traces, screenshots and videos of failures
 
 CI runs them in the `e2e` job and uploads the report when a test fails. Find elements by role, label or visible text (`getByRole`, `getByLabel`), not by CSS where you can avoid it, and wait with `expect(...)` instead of fixed sleeps. Tests share one dashboard and simulator and run one at a time, so a test that changes a host's scenario puts it back in a `finally`.
 
+### Installer update tests
+
+CI's `installer-update` job runs `install/dashboard.sh` for real (`.github/scripts/installer-update-test.sh`), in an Ubuntu container with systemd, against a fake GitHub (`.github/scripts/fake-github.mjs`, set with `PADDOCK_GITHUB_API` and `PADDOCK_SELF_URL`). It installs the latest stable release and updates it to the PR's build, then checks a download that doesn't match `SHA256SUMS`, a release that doesn't start, an update asked for from the dashboard, an update killed half way and a rollback from the dashboard. It needs Docker and about 10 minutes. To run it yourself:
+
+```bash
+bash .github/scripts/prepare-release.sh 64.0.0 && git checkout dashboard/package.json dashboard/package-lock.json
+tag=$(gh release list --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName')
+gh release download "$tag" -D "/tmp/stable/$tag" -p 'llama-paddock-dashboard-*.tar.gz' -p SHA256SUMS
+bash .github/scripts/installer-update-test.sh "/tmp/stable/$tag" dist/llama-paddock-dashboard-v64.0.0.tar.gz
+```
+
+The container runs privileged, for systemd. It has its own network: the fake GitHub listens on Docker's bridge address and the dashboard on `127.0.0.1:18081`.
+
 ### Browser automation for AI agents
 
 `.mcp.json` registers the [Playwright MCP server](https://github.com/microsoft/playwright-mcp), so Claude Code (and other MCP clients) can open the dashboard, click through it, read the page and take screenshots while working on a change. Claude Code asks you to approve the server the first time. It needs its own browser build once:
