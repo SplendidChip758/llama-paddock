@@ -1,3 +1,9 @@
+## [0.10.0-dev.17](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.16...v0.10.0-dev.17) (2026-11-21)
+
+### Bug Fixes
+
+* **dashboard:** say "active" instead of "firing" for alerts ([#212](https://github.com/SplendidChip758/llama-paddock/issues/212)) ([ade1ab6](https://github.com/SplendidChip758/llama-paddock/commit/ade1ab6480fdc2a8211d0d98043b10bd07de67d7))
+
 ## [0.10.0-dev.16](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.15...v0.10.0-dev.16) (2026-11-21)
 
 ### Features
