@@ -118,7 +118,7 @@ CI runs them in the `e2e` job and uploads the report when a test fails. Find ele
 
 ### Installer update tests
 
-CI's `installer-update` job runs `install/dashboard.sh` for real (`.github/scripts/installer-update-test.sh`), in an Ubuntu container with systemd, against a fake GitHub (`.github/scripts/fake-github.mjs`, set with `PADDOCK_GITHUB_API` and `PADDOCK_SELF_URL`). It installs the latest stable release and updates it to the PR's build, then checks a download that doesn't match `SHA256SUMS`, a release that doesn't start, an update asked for from the dashboard, an update killed half way and a rollback from the dashboard. It needs Docker and about 10 minutes. To run it yourself:
+CI's `installer-update` job runs `install/dashboard.sh` for real (`.github/scripts/installer-update-test.sh`), in an Ubuntu container with systemd, against a fake GitHub (`.github/scripts/fake-github.mjs`, set with `PADDOCK_GITHUB_API` and `PADDOCK_SELF_URL`). It installs the latest stable release and updates it to the PR's build, and checks that every `GET` endpoint in `docs/api.md` still answers with the fields the stable release had (`.github/scripts/api-shapes.mjs`: a field that's gone or changed type fails the job, so document an intended change and say so in the PR). Then it checks a download that doesn't match `SHA256SUMS`, a release that doesn't start, an update asked for from the dashboard, an update killed half way and a rollback from the dashboard. It needs Docker and about 10 minutes. To run it yourself:
 
 ```bash
 bash .github/scripts/prepare-release.sh 64.0.0 && git checkout dashboard/package.json dashboard/package-lock.json

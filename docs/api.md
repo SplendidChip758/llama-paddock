@@ -1,6 +1,6 @@
 # API reference
 
-The dashboard exposes the JSON endpoints used by its UI. Paths below are relative to the dashboard URL, for example `http://192.168.30.100:8080`. These APIs are pre-1.0 and may change; use the documentation matching your installed version.
+The dashboard exposes the JSON endpoints used by its UI. Paths below are relative to the dashboard URL, for example `http://192.168.30.100:8080`. Before 1.0, they can change between minor releases, so use the documentation of your installed version. From 1.0, the documented endpoints are stable within a major version: fields and endpoints can be added, but documented ones keep their names, types and meaning (see [Supported upgrades](operations.md#supported-upgrades)). CI checks that every documented `GET` endpoint still answers with the fields the newest stable release had.
 
 ## Authentication
 

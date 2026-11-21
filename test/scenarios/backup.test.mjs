@@ -1,6 +1,7 @@
 // Full backups (#87): paddock-backup takes a consistent backup while the dashboard runs, refuses to
 // restore over a running dashboard, a damaged backup or one from a newer version, and a restore puts
-// back the database, the login and API data and config.yaml, and removes what was added since.
+// back the database, the login and API data and config.yaml, and removes what was added since. A
+// copy of a backup also restores onto a fresh install, as after replacing the machine's disk.
 import { after, before, test as nodeTest } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
@@ -25,10 +26,14 @@ before(async () => {
 });
 after(() => holder.stack?.stop());
 
+/** paddock-backup on this install, or on another one's data directory, config and env file. */
 function cli(...args) {
+  return cliOn({ data: stack.data.data, config: stack.data.config, env: envFile }, ...args);
+}
+function cliOn(install, ...args) {
   const env = { ...process.env };
   for (const k of Object.keys(env)) if (k.startsWith("PADDOCK_")) delete env[k];
-  Object.assign(env, { PADDOCK_DATA_DIR: stack.data.data, PADDOCK_CONFIG: stack.data.config, PADDOCK_ENV_FILE: envFile });
+  Object.assign(env, { PADDOCK_DATA_DIR: install.data, PADDOCK_CONFIG: install.config, PADDOCK_ENV_FILE: install.env });
   const r = spawnSync(process.execPath, [CLI, ...args], { env, encoding: "utf8" });
   return { code: r.status, out: r.stdout.trim(), err: r.stderr.trim() };
 }
@@ -174,4 +179,40 @@ test("automatic backups are pruned to the newest few; manual ones are kept", asy
   const list = JSON.parse(cli("list", "--json").out);
   assert.equal(list.filter((b) => b.reason === "pre-update").length, 5);
   assert.ok(list.some((b) => b.name === first.name), "the manual backup is still there");
+});
+
+test("a copy of a backup restores onto a fresh install, with the UI unavailable until it's done", async () => {
+  // the machine is gone: the backup was copied off it, and a fresh install gets it
+  const fresh = fs.mkdtempSync(path.join(os.tmpdir(), "paddock-fresh-"));
+  try {
+    const copy = path.join(fresh, "copied-backup");
+    fs.cpSync(first.path, copy, { recursive: true });
+    const install = { data: path.join(fresh, "data"), config: path.join(fresh, "config.yaml"), env: path.join(fresh, "llama-paddock.env") };
+    fs.mkdirSync(install.data, { mode: 0o700 });
+    // what the installer writes before the first start
+    fs.writeFileSync(install.config, "poll_interval: 3\n", { mode: 0o600 });
+    fs.writeFileSync(install.env, "PADDOCK_USERNAME=admin\nPADDOCK_PASSWORD=a-new-install-password\n", { mode: 0o600 });
+
+    // nothing is running on it: the restore is the only tool, by its path
+    const r = cliOn(install, "restore", copy, "--json");
+    assert.equal(r.code, 0, r.err);
+    const res = JSON.parse(r.out);
+    assert.equal(res.before, null, "an empty data directory has nothing to keep");
+    assert.equal(fs.readFileSync(install.config, "utf8"), fs.readFileSync(path.join(first.path, "config/config.yaml"), "utf8"));
+    assert.equal(fs.readFileSync(install.env, "utf8"), "PADDOCK_USERNAME=admin\n");
+    for (const f of ["paddock.db", "auth.json"]) assert.equal(mode(path.join(install.data, f)), 0o600, f);
+
+    const dashboard = await startDashboard({ data: install.data, config: install.config });
+    try {
+      // the backup's login, not the fresh install's, and the backup's hosts, users and history
+      const c3 = await new Client(dashboard.url).login();
+      assert.deepEqual(await users(c3), ["admin", "kept"]);
+      assert.ok((await c3.instance("sim-1")), "the host from the backup's config.yaml");
+      assert.ok((await points(c3)) >= pointsBefore, "the history from before the backup");
+    } finally {
+      await dashboard.stop();
+    }
+  } finally {
+    fs.rmSync(fresh, { recursive: true, force: true });
+  }
 });
