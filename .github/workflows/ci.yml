@@ -120,6 +120,37 @@ jobs:
           OLD_IMAGE: ${{ steps.old.outputs.image }}
         run: bash .github/scripts/docker-update-test.sh "$OLD_IMAGE" llama-paddock:pr
 
+  # The installer's updates (#34), run for real: install/dashboard.sh installs the latest stable
+  # release in an Ubuntu container with systemd, against a fake GitHub, and updates it to the build
+  # of this PR. Then a damaged download, a release that doesn't start, an update from the dashboard,
+  # an interrupted update and a rollback (.github/scripts/installer-update-test.sh).
+  installer-update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      # as the release workflow builds it; the test publishes it as 64.0.0 and a few more versions
+      - name: Build this PR as a release
+        run: bash .github/scripts/prepare-release.sh 64.0.0
+
+      - name: Download the latest stable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag=$(gh release list --exclude-pre-releases --limit 1 --json tagName --jq '.[0].tagName')
+          gh release download "$tag" -D "$RUNNER_TEMP/stable/$tag" -p 'llama-paddock-dashboard-*.tar.gz' -p SHA256SUMS
+          echo "STABLE=$RUNNER_TEMP/stable/$tag" >> "$GITHUB_ENV"
+
+      - name: Install, update, refuse, roll back and recover
+        timeout-minutes: 25
+        run: bash .github/scripts/installer-update-test.sh "$STABLE" dist/llama-paddock-dashboard-v64.0.0.tar.gz
+
   # The rulesets require a check named "agents". The agents themselves are checked in
   # SplendidChip758/llama-paddock-agent; the scenario tests run the dashboard against one.
   agents:

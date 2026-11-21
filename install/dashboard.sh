@@ -33,6 +33,10 @@
 #   PADDOCK_RESTORE_BACKUP  a pre-update backup (paddock-backup list) to restore after installing
 #                     PADDOCK_VERSION: rolls an update back to the version and data from before it
 #   CT_OS, CT_ID, CT_PASSWORD, CT_ROOT_SSH, CT_SSH_KEY, CT_IP, …  preset the Proxmox settings
+#   For tests (CI runs real updates against a fake GitHub); update-llama-paddock keeps them:
+#   PADDOCK_GITHUB_API  the GitHub API releases are read from (default: https://api.github.com)
+#   PADDOCK_SELF_URL    where update-llama-paddock downloads this script from (default: the
+#                     PADDOCK_BRANCH copy on raw.githubusercontent.com)
 set -euo pipefail
 
 REPO="${PADDOCK_REPO:-SplendidChip758/llama-paddock}"
@@ -40,7 +44,8 @@ BRANCH="${PADDOCK_BRANCH:-main}"
 VERSION="${PADDOCK_VERSION:-latest}"
 [[ $VERSION == stable ]] && VERSION=latest
 PORT="${PADDOCK_PORT:-8080}"
-SELF_URL="https://raw.githubusercontent.com/${REPO}/${BRANCH}/install/dashboard.sh"
+SELF_URL="${PADDOCK_SELF_URL:-https://raw.githubusercontent.com/${REPO}/${BRANCH}/install/dashboard.sh}"
+GITHUB_API="${PADDOCK_GITHUB_API:-https://api.github.com}"
 APP_DIR=/opt/llama-paddock
 CFG_DIR=/etc/llama-paddock
 DATA_DIR=/var/lib/llama-paddock
@@ -516,13 +521,17 @@ ensure_deps() {
   if (( ${#need[@]} )) || [[ -z $have ]] || ! version_ge "$have" "$NODE_MIN"; then
     command -v apt-get >/dev/null || die "missing ${need[*]:-} Node.js >= $NODE_MIN and no apt-get — install them yourself, or use Docker"
   fi
+  local updated=""
   if (( ${#need[@]} )); then
     msg_info "Installing ${need[*]}"
     apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${need[@]}" >/dev/null
+    updated=1
   fi
 
   if [[ -z $have ]] || ! version_ge "$have" "$NODE_MIN"; then
     msg_info "Installing Node.js 22 (NodeSource)${have:+ — found $have, need >= $NODE_MIN}"
+    # a fresh system can have empty package lists even with curl and tar installed
+    [[ -n $updated ]] || apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq gnupg >/dev/null
     quiet bash -o pipefail -c "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -" \
       || die "NodeSource setup failed"
@@ -534,7 +543,7 @@ ensure_deps() {
 # Sets RELEASE_TAG, ASSET_URL and SUMS_URL from the GitHub API (empty if there is no release)
 resolve_release() {
   RELEASE_TAG=""; ASSET_URL=""; SUMS_URL=""
-  local api="https://api.github.com/repos/${REPO}/releases"
+  local api="${GITHUB_API}/repos/${REPO}/releases"
   case $VERSION in
     latest) api+="/latest" ;;
     dev) api+="?per_page=30" ;;  # prereleases included
@@ -760,6 +769,8 @@ write_updater() {
 # Update llama-paddock to the newest ${CHANNEL} release.
 # Pass "stable", "dev" (prereleases) or a tag like v1.2.0 to switch channel or pin one
 export PADDOCK_LOCAL=1 PADDOCK_YES=1 PADDOCK_REPO="${REPO}" PADDOCK_BRANCH="${BRANCH}" PADDOCK_VERSION="\${1:-${CHANNEL}}"
+${PADDOCK_GITHUB_API:+export PADDOCK_GITHUB_API="${PADDOCK_GITHUB_API}"}
+${PADDOCK_SELF_URL:+export PADDOCK_SELF_URL="${PADDOCK_SELF_URL}"}
 exec bash -c "\$(curl -fsSL ${SELF_URL})"
 EOF
   chmod 755 /usr/local/bin/update-llama-paddock
