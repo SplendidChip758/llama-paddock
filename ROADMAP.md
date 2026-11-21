@@ -79,7 +79,7 @@ This is the release gate; [#34](https://github.com/SplendidChip758/llama-paddock
 
 - M1's done-when checks pass, including verified connections and simulator regression checks. History and observed availability/model events survive restarts; missing observations remain unknown, and persistence failures are visible.
 - M2's done-when checks pass: a model can be found in the library and created, a reproducible benchmark compares two hosts, and fit estimates state their assumptions and confidence. Unknown estimates and remote cloud models are clearly identified.
-- Core M3 alerts and GPU/context diagnostics have reproducible simulator checks, including firing, resolution, flapping and observation gaps.
+- Core M3 alerts and GPU/context diagnostics have reproducible simulator checks, including alerting, resolution, flapping and observation gaps.
 - M4 users, scoped API tokens and audit records work; permissions are enforced on the server, viewer/display credentials cannot mutate state, and existing login data migrates.
 - The agent protocol has a documented compatibility range independent of dashboard/agent release numbers. CI covers supported older agents, incompatible agents, and upgrade order.
 - The Windows agent runs as a service and migrates from the scheduled task without losing its token.
@@ -123,14 +123,14 @@ Know when something breaks and why, with evidence. Hardware health, request expl
 
 - **Alert rules.** GPU temperature, VRAM usage, host/agent offline, Ollama crashed or restarting, disk nearly full, model partly on CPU. Rules have thresholds, a duration ("for 2 minutes"), and apply to the whole fleet or to single hosts.
 - **Notification channels.** Generic webhook, Discord, Slack and email (SMTP). Each rule can go to one or more channels, and each channel has a test button.
-- **Alert history and uptime.** Persist firing/resolved transitions, affected-host badges and silences. Suppress repeats and flapping. Show Ollama and agent availability separately, using M1 observations; report observation coverage and unknown intervals rather than treating dashboard downtime as host uptime or failure.
+- **Alert history and uptime.** Persist alert/resolved transitions, affected-host badges and silences. Suppress repeats and flapping. Show Ollama and agent availability separately, using M1 observations; report observation coverage and unknown intervals rather than treating dashboard downtime as host uptime or failure.
 - **GPU check.** Compare detected hardware with Ollama's observed placement and relevant discovery/error logs. Flag unexpected CPU fallback with evidence and a likely fix, while allowing intentional CPU-only/offload configurations. Missing telemetry alone must not be diagnosed as GPU loss.
 - **Context and reload warnings.** Compare observed context with configured intent and flag possible overrides or truncation risk. A smaller context alone does not prove a client overrode it or that a prompt was truncated. Use M1 observed model events and available log evidence to identify reload churn, label incomplete evidence, and suggest likely causes.
 - **Request log.** Requests per host from Ollama's own log: which clients call it, which endpoints, error rates and slow requests. No gateway needed. Prompts aren't recorded.
 - **Security checks.** A page that checks each host and the dashboard itself: Ollama reachable without its key, an agent still on plain HTTP, the default password unchanged, data files readable by others. Each failing check links to the fix, and can send an alert.
-- **Simulator coverage.** Extend M1's simulator for overheating, GPU loss, reload churn, disk pressure and notification delivery failures. Reuse it to verify alert durations, firing/resolution, repeat suppression, restarts and missing observations.
+- **Simulator coverage.** Extend M1's simulator for overheating, GPU loss, reload churn, disk pressure and notification delivery failures. Reuse it to verify alert durations, alerting/resolution, repeat suppression, restarts and missing observations.
 
-**Done when:** offline and overheating scenarios each deliver firing and resolved notifications through configured channels without flapping spam; unexpected GPU fallback and context/reload risks show supporting evidence; and uptime includes observation coverage. The full milestone also delivers request logs and security checks. Core alert/diagnostic behavior is reproducible with the M1 simulator.
+**Done when:** offline and overheating scenarios each deliver alert and resolved notifications through configured channels without flapping spam; unexpected GPU fallback and context/reload risks show supporting evidence; and uptime includes observation coverage. The full milestone also delivers request logs and security checks. Core alert/diagnostic behavior is reproducible with the M1 simulator.
 
 ## M4: Access & displays
 

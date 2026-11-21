@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 
 export const GET = handle(async () => json({ rules: listRules() }));
 
-/** The complete rule list: rules left out are deleted, and their firing alerts resolve. */
+/** The complete rule list: rules left out are deleted, and their active alerts resolve. */
 export const PUT = handle(async (req: Request) => {
   const body = await readBody<{ rules?: unknown }>(req);
   const before = listRules();

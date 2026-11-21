@@ -115,7 +115,7 @@ Admins with a browser session only: an API token gets 403, since an export holds
 | GET | `/api/uptime?range=…` | `{range, hosts}`: every host's `coverage` and, for `ollama` and `agent`, `up_pct` and the number of `outages` |
 | POST | `/api/instances` | Host fields below → `{id}` (201) |
 | PUT | `/api/instances/{id}` | Host fields below → `{id}` |
-| DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history, events and alert transitions; its firing alerts resolve |
+| DELETE | `/api/instances/{id}` | Removes a UI-defined host and its stored metric history, events and alert transitions; its active alerts resolve |
 | POST | `/api/test-connection` | Host fields plus optional existing `id` → separate `ollama` and `agent` results; `agent.fingerprint` is the key the agent presented (`https://`) or reports (`http://`) |
 | POST | `/api/instances/{id}/agent-key` | `{fingerprint}` → pins that key for an `https://` agent, e.g. after its key was replaced; 409 when `config.yaml` sets it |
 | GET | `/api/instances/{id}/gpu-check` | `{check}`: the [GPU check](gpu-check.md) as of the last poll, the same as `gpu_check` in `/api/instances`; `null` without an agent, an NVIDIA GPU or Ollama answering |
@@ -220,16 +220,16 @@ Events follow `history_retention_days`. When an observed span is older than the 
 
 | Method | Path | Body / result |
 |---|---|---|
-| GET | `/api/alerts` | `{active, store_error}`: alerts that are pending or firing, and the last error saving transitions (`null` when fine) |
+| GET | `/api/alerts` | `{active, store_error}`: alerts that are pending or active, and the last error saving transitions (`null` when fine) |
 | GET | `/api/alerts/rules` | `{rules}` |
-| PUT | `/api/alerts/rules` | `{rules}` → `{rules}`; replaces the whole list. Rules left out are deleted, and their firing alerts resolve |
+| PUT | `/api/alerts/rules` | `{rules}` → `{rules}`; replaces the whole list. Rules left out are deleted, and their active alerts resolve |
 | GET | `/api/alerts/channels` | `{channels}`: [notification channels](alerts.md#notifications), without their secrets |
 | PUT | `/api/alerts/channels` | `{channels}` → `{channels}`; replaces the whole list. A blank `url`, `token` or `email.password` keeps the stored one |
 | POST | `/api/alerts/channels/test` | `{channel}` → `{ok, detail}`: sends a test message with these settings, saved or not; with an existing `id`, blank secrets use the stored ones |
 | GET | `/api/alerts/silences` | `{silences}` in force |
 | POST | `/api/alerts/silences` | `{rule, instance, subject, duration_s, note}` → `{silence}` (201); see below |
 | DELETE | `/api/alerts/silences/{id}` | Ends a silence or acknowledgement early |
-| GET | `/api/alerts/transitions?after=…&limit=…` | `{transitions}` in order: alerts firing and resolving after the transition id `after`, or else the latest `limit` (1–1000, default 200) |
+| GET | `/api/alerts/transitions?after=…&limit=…` | `{transitions}` in order: alerts starting and resolving after the transition id `after`, or else the latest `limit` (1–1000, default 200) |
 
 A rule is `{id, name, kind, enabled, threshold, for_s, clear_s, hosts, channels}`:
 
@@ -238,7 +238,7 @@ A rule is `{id, name, kind, enabled, threshold, for_s, clear_s, hosts, channels}
 | `id` | Letters, digits, `_`, `.` or `-`. Omit it for a new rule to get one made from the name. Keep it when editing: alerts belong to the rule's ID |
 | `kind` | `gpu_temp` (°C), `vram` (%), `disk` (%), `host_unreachable`, `agent_unreachable`, `ollama_crash`, `gpu_lost`, `context_short`, `reload_churn` (loads per hour, at most 10000) or `insecure`; see [Alerts](alerts.md#rules) |
 | `threshold` | Above 0, at most 150 for `gpu_temp` and 100 for the percentages; `null` for the kinds without one |
-| `for_s`, `clear_s` | Whole seconds, 0 to 86400: how long the condition has to hold before firing, and be gone before resolving |
+| `for_s`, `clear_s` | Whole seconds, 0 to 86400: how long the condition has to hold before the alert starts, and be gone before resolving |
 | `hosts` | Host IDs, or `null` for every host including ones added later |
 | `channels` | Channel IDs to notify, `null` (or left out) for every channel including ones added later, or `[]` for none |
 | `enabled` | `false` keeps the rule without checking it |
@@ -249,7 +249,7 @@ A silence is `{id, created, rule, instance, subject, until, until_resolved, note
 
 A channel is `{id, name, type, enabled, send_resolved, url, token, email}`, with `type` `webhook`, `discord`, `slack` or `email`. `url` is for the first three, `token` (sent as `Authorization: Bearer`) for `webhook` only, and `email` is `{host, port, security, username, password, from, to}` with `security` `starttls` (default), `tls` or `none`. `clear_token: true` and `email.clear_password: true` remove a stored secret. Responses leave the secrets out: they show `url_hint` (the URL up to its host), `has_token` and `email.has_password`, plus `status`: `{last_ok, last_error, last_error_at, queued}` since the dashboard started. The JSON the generic webhook receives is described under [Notifications](alerts.md#the-webhooks-json).
 
-A transition is `{id, t, rule, name, kind, instance, subject, state, value, detail, flapping}` with `state` `firing` or `resolved`. The rule's name and kind are copied, so they stay readable after the rule changes. Poll with `after` set to the last `id` you saw to follow new transitions. Transitions follow `history_retention_days`, except the latest one of an alert that is still firing.
+A transition is `{id, t, rule, name, kind, instance, subject, state, value, detail, flapping}` with `state` `firing` or `resolved`. The rule's name and kind are copied, so they stay readable after the rule changes. Poll with `after` set to the last `id` you saw to follow new transitions. Transitions follow `history_retention_days`, except the latest one of an alert that is still active.
 
 ## Security checks
 

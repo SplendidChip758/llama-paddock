@@ -20,7 +20,7 @@ export function whenText(t: number): string {
     : { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
-/** Firing alerts nobody has silenced: what the header and host badges count. */
+/** Active alerts nobody has silenced: what the header and host badges count. */
 export const loudAlerts = (alerts: ActiveAlert[]) => alerts.filter((a) => a.state === "firing" && !a.silence);
 
 /** Silence, acknowledge and end silences, with toasts; the alert list refreshes after each. */
@@ -88,13 +88,11 @@ export function AlertLine({ a, host, actions }: { a: ActiveAlert; host: string; 
         </div>
         <div className="hint" style={{ marginTop: 2 }}>{a.detail}</div>
       </div>
+      <div className="alertside">
       <div className="chips" style={{ justifyContent: "flex-end", alignItems: "center" }}>
         {chip && <span className="chip" title={chip.title}>{chip.text}</span>}
         {a.unknown && <span className="chip" title="The last poll had no data for this alert, so it can't resolve yet">no data</span>}
         {a.flapping && <span className="chip warn" title="Fired repeatedly in a short time; it has to stay clear longer before it resolves">flapping</span>}
-        <span className={`chip ${cls}`} title={new Date((a.fired_at ?? a.since) * 1000).toLocaleString()}>
-          {a.state} {fmtDur(now - (a.fired_at ?? a.since))}
-        </span>
         {actions && (a.silence ? (
           <button className="btn sm" onClick={unsilence} disabled={busy}>{a.silence.until_resolved ? "Unacknowledge" : "End silence"}</button>
         ) : (
@@ -109,6 +107,10 @@ export function AlertLine({ a, host, actions }: { a: ActiveAlert; host: string; 
               pick={(s) => silence({ rule: a.rule, instance: a.instance, subject: a.subject, duration_s: s }, `Silenced ${what}`)} />
           </>
         ))}
+      </div>
+      <span className={`alertage ${cls}`} title={new Date((a.fired_at ?? a.since) * 1000).toLocaleString()}>
+        {fmtDur(now - (a.fired_at ?? a.since))} ago
+      </span>
       </div>
     </div>
   );
@@ -145,7 +147,7 @@ const PULSE_MS = 4000;
 
 /**
  * A host's active alerts as a pill next to its name, opening the list with its actions: they don't
- * push the page down. Red while any is firing and not silenced; it pulses briefly when another fires.
+ * push the page down. Red while any is active and not silenced; it pulses briefly when another fires.
  */
 export function HostAlertPill({ id, name }: { id: string; name: string }) {
   const { alerts } = usePaddock();
@@ -165,7 +167,7 @@ export function HostAlertPill({ id, name }: { id: string; name: string }) {
   const n = `${mine.length} alert${mine.length === 1 ? "" : "s"}`;
   return (
     <Popover className={`chip alertpill ${loud ? "bad" : ""} ${pulse ? "pulse" : ""}`} label={<><span className={`dot ${loud ? "bad" : ""}`} /> {n}</>}
-      title={loud === mine.length ? undefined : `${loud} firing; the others are pending, silenced or acknowledged`}>
+      title={loud === mine.length ? undefined : `${loud} active; the others are pending, silenced or acknowledged`}>
       <div className="row" style={{ marginBottom: 2 }}>
         <b className="grow">{n} on {name}</b>
         <Link href={`/alerts?host=${encodeURIComponent(id)}`} className="hint">All alerts and history →</Link>

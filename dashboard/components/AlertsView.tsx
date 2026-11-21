@@ -57,7 +57,7 @@ export function AlertsView({ host: hostFilter }: { host?: string }) {
     if (!r.channels.length) return <span className="faint">dashboard only</span>;
     return r.channels.map((id) => channels?.find((c) => c.id === id)?.name ?? `${id} (deleted)`).join(", ");
   };
-  const firing = alerts.filter((a) => a.state === "firing");
+  const active = alerts.filter((a) => a.state === "firing");
   const pending = alerts.filter((a) => a.state === "pending");
 
   return (
@@ -66,7 +66,7 @@ export function AlertsView({ host: hostFilter }: { host?: string }) {
         <div>
           <h1>Alerts</h1>
           <div className="sub">
-            {firing.length ? `${firing.length} firing` : "Nothing firing"}
+            {active.length ? `${active.length} active` : "Nothing active"}
             {pending.length ? ` · ${pending.length} pending` : ""} · rules are checked on every poll
           </div>
         </div>
@@ -149,7 +149,7 @@ export function AlertsView({ host: hostFilter }: { host?: string }) {
           }}
           onDelete={editing === "new" ? undefined : async () => {
             const r = rules[editing];
-            if (!confirm(`Delete the rule ${r.name}? Its firing alerts resolve.`)) return;
+            if (!confirm(`Delete the rule ${r.name}? Its active alerts resolve.`)) return;
             if (await save(rules.filter((_, j) => j !== editing), `Deleted ${r.name}`)) setEditing(null);
           }}
         />
@@ -203,13 +203,13 @@ interface Episode {
   subject: string;
   /** null: it fired before the oldest transition kept */
   fired: number | null;
-  /** null: still firing */
+  /** null: still active */
   resolved: number | null;
   detail: string;
   flapping: boolean;
 }
 
-/** Pair firing and resolved transitions into episodes, newest first. */
+/** Pair alert and resolved transitions into episodes, newest first. */
 function episodes(list: AlertTransition[]): Episode[] {
   const open = new Map<string, Episode>();
   const out: Episode[] = [];
@@ -274,7 +274,7 @@ function History({ hostName, initialHost }: { hostName: (id: string) => string; 
                       <div className="hint" style={{ marginTop: 2 }}>{e.detail}</div>
                     </td>
                     <td className="mono">{e.fired ? whenText(e.fired) : "earlier"}</td>
-                    <td className="mono">{e.resolved ? whenText(e.resolved) : <span className="chip bad">firing</span>}</td>
+                    <td className="mono">{e.resolved ? whenText(e.resolved) : <span className="chip bad">active</span>}</td>
                     <td className="mono">{e.fired ? fmtDur((e.resolved ?? Date.now() / 1000) - e.fired) : "–"}</td>
                   </tr>
                 ))}

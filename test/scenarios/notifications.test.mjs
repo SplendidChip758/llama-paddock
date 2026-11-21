@@ -169,20 +169,20 @@ test("an alert's firing and resolved messages reach every channel, in order", as
   assert.equal(fired.body.alert.instance, "sim-1");
   assert.equal(fired.body.alert.subject, "gpu0");
   assert.equal(fired.body.alert.value, 91);
-  assert.match(fired.body.summary, /^Firing: GPU hot on sim-1 · GPU0$/);
+  assert.match(fired.body.summary, /^Alert: GPU hot on sim-1 · GPU0$/);
 
   const discord = await waitReceived("discord", 2, "firing and resolved");
-  assert.match(discord[0].body.embeds[0].title, /^Firing: GPU hot/);
+  assert.match(discord[0].body.embeds[0].title, /^Alert: GPU hot/);
   assert.deepEqual(discord[0].body.allowed_mentions, { parse: [] });
   assert.notEqual(discord[0].body.embeds[0].color, discord[1].body.embeds[0].color);
 
   // the Slack channel only wants firing messages
   const slack = await waitReceived("slack", 1, "firing");
-  assert.match(slack[0].body.text, /^Firing: GPU hot/);
+  assert.match(slack[0].body.text, /^Alert: GPU hot/);
 
   await waitFor(() => smtp.messages.length >= 2, { what: "both emails", describe: () => smtp.messages.map((m) => m.head) });
   assert.match(smtp.messages[0].head, /^Subject: =\?UTF-8\?B\?/m);
-  assert.match(smtp.messages[0].text, /^Firing: GPU hot on sim-1/);
+  assert.match(smtp.messages[0].text, /^Alert: GPU hot on sim-1/);
   assert.match(smtp.messages[1].text, /^Resolved: GPU hot on sim-1/);
   // a few polls later, still nothing more for the Slack channel
   await new Promise((r) => setTimeout(r, 2000));

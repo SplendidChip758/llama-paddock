@@ -6,7 +6,7 @@ A tour of the dashboard: monitor hosts and their history, manage models, edit Ol
 
 The home page has one card per host: status, versions, CPU and RAM, and each GPU's utilization and VRAM. Each loaded model is a chip with its GPU/CPU split, such as `qwen3:32b · 62% GPU` (see [GPU/CPU split](#gpucpu-split)). A model that isn't fully on the GPU gets a warning chip and is named under the chips, and the **Models loaded** total counts how many models fleet-wide aren't fully on the GPU.
 
-A host with [alerts](alerts.md) firing gets a red **N alerts** badge that opens its alert history; silenced and acknowledged alerts don't count. **Availability (30d)** is the share of the last 30 days that Ollama and the agent were up, counting only the time the dashboard was watching (see [Monitor](#monitor)).
+A host with active [alerts](alerts.md) gets a red **N alerts** badge that opens its alert history; silenced and acknowledged alerts don't count. **Availability (30d)** is the share of the last 30 days that Ollama and the agent were up, counting only the time the dashboard was watching (see [Monitor](#monitor)).
 
 ## Monitor
 
@@ -16,7 +16,7 @@ The Monitor tab shows loaded models (context window, unload timer and an Unload 
 
 **Availability**, below History, shows timelines of Ollama and the agent over the last 24 hours, 7 days or 30 days: up, down, or not yet seen after the dashboard started watching, with stretches the dashboard wasn't running or polling hatched. Each line shows the share of the watched time it was up; unwatched time doesn't count either way, so restarting the dashboard never lowers a host's availability. Below them is the list of outages with when they started, how long they lasted, and the error the poll got. Hover the timeline for the times of each stretch.
 
-**Alerts** on the host show as a pill next to its name, such as **2 alerts**, red while any is firing and pulsing briefly when another fires. Click it to list them and acknowledge or silence each one.  **Silence host for…** next to **Edit host** silences every alert on the host for a while, for maintenance. See [Silences](alerts.md#silences).
+**Alerts** on the host show as a pill next to its name, such as **2 alerts**, red while any is active and pulsing briefly when another fires. Click it to list them and acknowledge or silence each one.  **Silence host for…** next to **Edit host** silences every alert on the host for a while, for maintenance. See [Silences](alerts.md#silences).
 
 **Versions:** the dashboard's version is shown next to the logo, highlighted for a prerelease. Each host shows its Ollama and agent version on its page and its overview card.
 
