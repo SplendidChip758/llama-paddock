@@ -102,7 +102,7 @@ const pctText = (p: number | null | undefined) => (p == null ? "–" : `${p >= 9
 function InstCard({ st, uptime }: { st: InstanceSnapshot; uptime?: UptimeBrief }) {
   const router = useRouter();
   const { alerts } = usePaddock();
-  const firing = loudAlerts(alerts).filter((a) => a.instance === st.id).length;
+  const active = loudAlerts(alerts).filter((a) => a.instance === st.id).length;
   const [c, label] = statusOf(st);
   const sys = st.stats?.system;
   const gpus = st.stats?.nvidia?.gpus ?? [];
@@ -117,10 +117,10 @@ function InstCard({ st, uptime }: { st: InstanceSnapshot; uptime?: UptimeBrief }
           <h3>{st.name}</h3>
         </div>
         <div className="chips">
-          {firing > 0 && (
+          {active > 0 && (
             <button className="chip bad" title="Open this host's alerts"
               onClick={(e) => { e.stopPropagation(); router.push(`/alerts?host=${encodeURIComponent(st.id)}`); }}>
-              {firing} alert{firing === 1 ? "" : "s"}
+              {active} alert{active === 1 ? "" : "s"}
             </button>
           )}
           <AgentPlainChip st={st} />

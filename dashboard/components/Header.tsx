@@ -20,7 +20,7 @@ export function Header({ version }: { version: string }) {
   const tab = m?.[2] ?? "monitor";
   const running = jobs.filter((j) => j.state === "running").length;
   // silenced and acknowledged alerts still show on the Alerts page, but don't call for attention
-  const firing = loudAlerts(alerts).length;
+  const active = loudAlerts(alerts).length;
 
   return (
     <>
@@ -44,9 +44,9 @@ export function Header({ version }: { version: string }) {
         <Link href="/benchmarks" className={`jobsbtn ${path === "/benchmarks" ? "active" : ""}`} title="Run and compare benchmarks">Benchmarks</Link>
         {!readOnly && <Link href="/prompt" className={`jobsbtn ${path === "/prompt" ? "active" : ""}`} title="Chat with a model and time the answer">Prompt</Link>}
         <Link href="/alerts" className={`jobsbtn ${path === "/alerts" ? "active" : ""}`}
-          title={firing ? `${firing} alert${firing === 1 ? "" : "s"} firing` : "Alert rules"}>
+          title={active ? `${active} active alert${active === 1 ? "" : "s"}` : "Alert rules"}>
           <span>Alerts</span>
-          {firing > 0 && <span className="pill alert">{firing}</span>}
+          {active > 0 && <span className="pill alert">{active}</span>}
         </Link>
         <Link href="/security" className={`jobsbtn ${path === "/security" ? "active" : ""}`}
           title={security?.failing ? `${security.failing} security check${security.failing === 1 ? "" : "s"} failing` : "Security checks"}>

@@ -1,4 +1,4 @@
-// Notification channels: alerts that fire or resolve are sent to webhooks, Discord, Slack or email.
+// Notification channels: alerts that start or resolve are sent to webhooks, Discord, Slack or email.
 // Channels live in alert-channels.json in the data directory, mode 600, since webhook URLs, tokens
 // and SMTP passwords are secrets and never go back to the browser. Each channel has its own queue,
 // so its messages arrive in order, and one that is down retries without holding up the others.
@@ -192,7 +192,7 @@ interface Message {
 
 function messageFor(t: AlertTransition, host: string): Message {
   const what = `${t.name} on ${host}${t.subject ? ` · ${subjectText(t.subject)}` : ""}`;
-  return { state: t.state, summary: `${t.state === "firing" ? "Firing" : "Resolved"}: ${what}`, detail: t.detail, t: t.t, transition: t, host };
+  return { state: t.state, summary: `${t.state === "firing" ? "Alert" : "Resolved"}: ${what}`, detail: t.detail, t: t.t, transition: t, host };
 }
 
 const testMessage = (): Message => ({
@@ -330,7 +330,7 @@ interface NotifyState {
   status: Map<string, ChannelStatus>;
   /** per channel, the end of its chain of deliveries */
   queues: Map<string, Promise<void>>;
-  /** the channels each firing alert went to, so that its resolved message goes to the same ones */
+  /** the channels each active alert went to, so that its resolved message goes to the same ones */
   routed: Map<string, string[]>;
   started: boolean;
 }
@@ -402,7 +402,7 @@ function route(n: NotifyState, t: AlertTransition, host: string) {
     targets = channelsOf(n, t.rule);
     n.routed.set(key, targets);
   } else {
-    // after a restart the firing's channels aren't known: fall back to the rule's (all, if it was deleted)
+    // after a restart the alert's channels aren't known: fall back to the rule's (all, if it was deleted)
     targets = (n.routed.get(key) ?? channelsOf(n, t.rule)).filter((id) => n.channels.find((c) => c.id === id)?.send_resolved);
     n.routed.delete(key);
   }

@@ -331,6 +331,10 @@ select.btn.sm { width: auto; }
 }
 @media (max-width: 720px) { .popover { position: fixed; top: auto; left: 16px; right: 16px; width: auto; } }
 .alertline .grow { flex: 1; min-width: 0; word-break: break-word; }
+.alertside { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.alertage { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+.alertage.bad { color: var(--bad, #f87171); }
+.alertage.warn { color: var(--warn, #fbbf24); }
 .alertline a:hover { color: var(--accent2); }
 tr.off td { opacity: .55; }
 div.field { margin-bottom: 14px; }

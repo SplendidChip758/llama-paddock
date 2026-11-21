@@ -97,7 +97,7 @@ export function ChannelsSection({ channels, onSaved }: { channels: NotifyChannel
                           onChange={() => save(channels.map((x, j) => ({ ...toInput(x), enabled: j === i ? !x.enabled : x.enabled })),
                             `${c.enabled ? "Disabled" : "Enabled"} ${c.name}`)} />
                       </td>
-                      <td><b>{c.name}</b><div className="faint" style={{ fontSize: 12 }}>{CHANNEL_TYPES[c.type].label}{c.send_resolved ? "" : " · firing only"}</div></td>
+                      <td><b>{c.name}</b><div className="faint" style={{ fontSize: 12 }}>{CHANNEL_TYPES[c.type].label}{c.send_resolved ? "" : " · not when resolved"}</div></td>
                       <td className="mono" style={{ fontSize: 12.5, wordBreak: "break-all" }}>{target(c)}</td>
                       <td className="chstatus">
                         {st.cls && <span className={`dot ${st.cls}`} />} <span className={st.cls === "bad" ? "" : "faint"}>{st.text}</span>

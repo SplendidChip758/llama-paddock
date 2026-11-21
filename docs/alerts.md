@@ -1,6 +1,6 @@
 # Alerts
 
-The dashboard checks alert rules against every poll of every host: GPU temperature, VRAM usage, disk space, unreachable hosts and agents, Ollama crashing, Ollama losing the GPU, models with less context allocated than configured, models reloading constantly, and failing [security checks](security-checks.md). Open **Alerts** in the header to see what is firing and to edit the rules. The header shows how many alerts are firing.
+The dashboard checks alert rules against every poll of every host: GPU temperature, VRAM usage, disk space, unreachable hosts and agents, Ollama crashing, Ollama losing the GPU, models with less context allocated than configured, models reloading constantly, and failing [security checks](security-checks.md). Open **Alerts** in the header to see what is active and to edit the rules. The header shows how many alerts are active.
 
 Alerts are shown in the dashboard, logged, recorded in `paddock.db`, and sent to the [notification channels](#notifications) you set up: Discord, Slack, email or any webhook.
 
@@ -24,25 +24,25 @@ The GPU, disk, Ollama crash and lost GPU rules need the agent. The first poll af
 A new installation starts with these ten rules for every host. An installation that saved its rules before the **Ollama lost the GPU**, **Context below configured**, **Model reloading constantly** or **Security check failing** rules existed keeps its saved list: add them on the Alerts page. Each rule has:
 
 - **For:** how long the condition has to hold before the alert fires. Until then it shows as *pending*. `0` fires on the first poll that sees it.
-- **Clear for:** how long the condition has to be gone before a firing alert resolves (default 1 minute), so a value hovering around the threshold doesn't fire and resolve on every poll.
+- **Clear for:** how long the condition has to be gone before an active alert resolves (default 1 minute), so a value hovering around the threshold doesn't fire and resolve on every poll.
 - **Hosts:** every host, including ones added later, or a chosen list.
 - **Notify:** every [notification channel](#notifications), including ones added later, or a chosen list. Choosing none keeps the rule's alerts in the dashboard only.
 
-Add several rules of the same kind for different thresholds or hosts, for example a lower temperature limit for one GPU host. Disabling or deleting a rule, or taking a host out of it, resolves its firing alerts.
+Add several rules of the same kind for different thresholds or hosts, for example a lower temperature limit for one GPU host. Disabling or deleting a rule, or taking a host out of it, resolves its active alerts.
 
 ## Flapping
 
-An alert that fires three times within 30 minutes is marked *flapping*. It then has to stay clear for ten times its rule's **Clear for** before it resolves, so a host that keeps dropping out produces one long alert instead of a stream of them. The mark goes away once it stops firing that often.
+An alert that fires three times within 30 minutes is marked *flapping*. It then has to stay clear for ten times its rule's **Clear for** before it resolves, so a host that keeps dropping out produces one long alert instead of a stream of them. The mark goes away once it stops alerting that often.
 
 ## Missing data
 
 An alert only changes with data. When a poll has no value for it, because the agent is down, a GPU disappeared from `nvidia-smi`, or the dashboard wasn't running, the alert neither fires nor resolves:
 
 - A *pending* alert is dropped: its duration starts again when the condition is seen again.
-- A *firing* alert stays firing, marked *no data*. It resolves only after the condition has been seen clear for its **Clear for**.
+- An *active* alert stays active, marked *no data*. It resolves only after the condition has been seen clear for its **Clear for**.
 - A condition that started while nothing could be seen counts from the first poll that sees it.
 
-A pause in polling longer than `3 × poll_interval + 30` seconds, such as a dashboard restart, breaks every duration the same way. Alerts that were firing when the dashboard stopped are still firing after it starts, and they don't fire a second time.
+A pause in polling longer than `3 × poll_interval + 30` seconds, such as a dashboard restart, breaks every duration the same way. Alerts that were active when the dashboard stopped are still active after it starts, and they don't fire a second time.
 
 ## Notifications
 
@@ -55,7 +55,7 @@ Under **Notifications** on the Alerts page, add the channels alerts are sent to.
 | **Email** | Your mail provider's SMTP server, port and encryption (STARTTLS on 587, TLS on 465), a user name and password (for Gmail or Microsoft 365, an app password), the sender address, and up to 20 recipients. *None* (port 25) is only for a relay on your own network, and can't log in, so a password is never sent unencrypted. The server's certificate is checked |
 | **Webhook** | Any URL that takes a JSON `POST`, such as an n8n, Node-RED or Home Assistant webhook. An optional token is sent as `Authorization: Bearer <token>` |
 
-Messages name the rule, the host and what it applies to, such as `Firing: GPU temperature on gpu-01 · GPU0`, followed by the reading, such as `GPU0 (NVIDIA GeForce RTX 3090) at 91°C`. Resolved messages go to the channels that got the firing one.
+Messages name the rule, the host and what it applies to, such as `Alert: GPU temperature on gpu-01 · GPU0`, followed by the reading, such as `GPU0 (NVIDIA GeForce RTX 3090) at 91°C`. Resolved messages go to the channels that got the alert message.
 
 ### The webhook's JSON
 
@@ -64,7 +64,7 @@ Messages name the rule, the host and what it applies to, such as `Firing: GPU te
   "source": "llama-paddock",
   "version": "0.8.0",
   "state": "firing",
-  "summary": "Firing: GPU temperature on gpu-01 · GPU0",
+  "summary": "Alert: GPU temperature on gpu-01 · GPU0",
   "detail": "GPU0 (NVIDIA GeForce RTX 3090) at 91°C",
   "time": "2026-11-02T09:14:07.000Z",
   "alert": {
@@ -99,8 +99,8 @@ A silenced alert still shows on the Alerts page and is still recorded, but it do
 
 ## Where rules and alerts are stored
 
-Rules are saved in `alert-rules.json` in the [data directory](configuration.md#data-directory) when you first change them. Until then the built-in defaults apply. Each alert firing and resolving, and each silence, is recorded in `paddock.db`, kept for `history_retention_days` like the other history; an alert that is still firing keeps its record however old it is.
+Rules are saved in `alert-rules.json` in the [data directory](configuration.md#data-directory) when you first change them. Until then the built-in defaults apply. Each alert starting and resolving, and each silence, is recorded in `paddock.db`, kept for `history_retention_days` like the other history; an alert that is still active keeps its record however old it is.
 
-If saving to `paddock.db` fails, the Alerts page says so. Alerts keep working, but a restart may forget which ones were firing.
+If saving to `paddock.db` fails, the Alerts page says so. Alerts keep working, but a restart may forget which ones were active.
 
 Channels are saved in `alert-channels.json` in the same directory. Rules, channels, active alerts and the recorded transitions are also available through the [API](api.md#alerts).

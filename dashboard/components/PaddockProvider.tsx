@@ -33,9 +33,9 @@ interface Ctx {
   setJobsOpen: (open: boolean) => void;
   /** Bumped when a pull/create job finishes, so model lists can reload. */
   jobsDoneTick: number;
-  /** firing and pending alerts, refreshed with the fleet */
+  /** active and pending alerts, refreshed with the fleet */
   alerts: ActiveAlert[];
-  /** saving alert transitions failed: firing alerts may not survive a dashboard restart */
+  /** saving alert transitions failed: active alerts may not survive a dashboard restart */
   alertsStoreError: string | null;
   /** failing and dismissed security checks; null from a dashboard before they existed */
   security: SecuritySummary | null;
