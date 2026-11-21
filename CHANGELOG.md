@@ -1,3 +1,15 @@
+## [0.10.0-dev.16](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.15...v0.10.0-dev.16) (2026-11-21)
+
+### Features
+
+* **install:** roll back a Linux agent update that doesn't start ([#208](https://github.com/SplendidChip758/llama-paddock/issues/208)) ([3259315](https://github.com/SplendidChip758/llama-paddock/commit/3259315e67d4d6717824067f16bc7207eabf472a)), closes [#34](https://github.com/SplendidChip758/llama-paddock/issues/34) [#34](https://github.com/SplendidChip758/llama-paddock/issues/34)
+
+### Bug Fixes
+
+* **dashboard:** show when the database can't save, instead of only logging it ([#210](https://github.com/SplendidChip758/llama-paddock/issues/210)) ([0e58b2e](https://github.com/SplendidChip758/llama-paddock/commit/0e58b2e99d3ce5fc27290402e93b6e4fe3e2bd0e)), closes [#34](https://github.com/SplendidChip758/llama-paddock/issues/34)
+* **dashboard:** widen the model library drawer ([#211](https://github.com/SplendidChip758/llama-paddock/issues/211)) ([974e2cf](https://github.com/SplendidChip758/llama-paddock/commit/974e2cf84bd0b89603ccdba25e5ad5b47cddab35))
+* **install:** refresh apt's package lists before installing Node.js ([#207](https://github.com/SplendidChip758/llama-paddock/issues/207)) ([061b971](https://github.com/SplendidChip758/llama-paddock/commit/061b971dcbe78751acbc21420ca369be26253258)), closes [#34](https://github.com/SplendidChip758/llama-paddock/issues/34)
+
 ## [0.10.0-dev.15](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.14...v0.10.0-dev.15) (2026-11-20)
 
 ### Bug Fixes
