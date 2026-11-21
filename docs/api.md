@@ -19,7 +19,8 @@ The browser uses a session cookie. Scripts, Home Assistant and cron jobs use an 
 | GET | `/api/auth/me` | `{auth, username, role, must_change, min_password}` when auth is enabled; `{auth: false, role: "admin"}` otherwise. With a token, `{auth, username, role, must_change, token: {id, kind, name, scopes}}`, where `scopes` is what the token may do now |
 | POST | `/api/auth/password` | `{current, password}`; `current` is optional during the forced first-login change |
 | POST | `/api/auth/logout` | Clears the session cookie |
-| GET | `/api/healthz` | `{ok, version, agent_protocol: {min, max}}`: the dashboard's version and the [agent protocols](#agent-protocol) it supports; no login required |
+| GET | `/api/healthz` | `{ok, version, agent_protocol: {min, max}, storage_ok}`: the dashboard's version, the [agent protocols](#agent-protocol) it supports, and `storage_ok: false` while it fails to save to its database (details in `/api/storage`); no login required |
+| GET | `/api/storage` | `{failures}`: what the dashboard is failing to save to `paddock.db` right now, oldest first; empty when every write works. Each is `{area, label, loss, error, since, last, count}`: `area` is `history`, `events`, `alerts`, `requests`, `audit`, `jobs`, `benchmarks` or `model_sizes`, `loss` says what is lost meanwhile, `since` and `last` are the first and latest failure (unix seconds). An area clears on its next successful write |
 | GET | `/metrics` | Prometheus metrics; needs the scrape token instead of a login, and is off unless configured. See [Prometheus](prometheus.md) |
 
 `PADDOCK_AUTH=off` disables dashboard authentication, and every request has admin rights. Only use it when another layer protects access. See [Login](configuration.md#login). Unauthenticated API requests normally return 401, and failed requests use a JSON `detail` field.

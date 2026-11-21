@@ -60,6 +60,7 @@ All metrics are gauges, in base units: bytes, seconds, hertz, watts, degrees Cel
 | Metric | Extra labels | Meaning |
 |---|---|---|
 | `paddock_build_info` | `version` | Dashboard version; always 1, and the only series without `instance` |
+| `paddock_storage_failing` | `area` | 1 while the dashboard fails to save that area to its database (see [`/api/storage`](api.md)), 0 when it works; no `instance` either. Alert on any 1: the history of that time is being lost |
 | `paddock_ollama_up` | | 1 if the last poll of Ollama's API succeeded, 0 if not |
 | `paddock_agent_up` | | 1 if the last poll of the agent succeeded, 0 if not. Only for hosts with an agent |
 | `paddock_last_poll_timestamp_seconds` | | Unix time of the last poll of the host |

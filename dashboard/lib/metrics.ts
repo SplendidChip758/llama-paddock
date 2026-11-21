@@ -1,6 +1,7 @@
 import "server-only";
 import { version } from "@/package.json";
 import { paddock } from "./server";
+import { STORAGE_AREAS, storageFailures } from "./storage";
 
 // Prometheus text exposition format 0.0.4, built from the poller's latest state (not the SQLite
 // history), so a scrape costs no upstream calls. Units are Prometheus base units: bytes, seconds,
@@ -46,6 +47,7 @@ const ratio = (pct: number | null | undefined) => (pct == null ? null : pct / 10
 export function renderMetrics(): string {
   const x = new Exposition();
   const buildInfo = x.gauge("paddock_build_info", "llama-paddock dashboard version; always 1");
+  const storageFailing = x.gauge("paddock_storage_failing", "1 while the dashboard fails to save this area to paddock.db (see /api/storage)");
   const ollamaUp = x.gauge("paddock_ollama_up", "1 if the last poll of Ollama's API succeeded");
   const agentUp = x.gauge("paddock_agent_up", "1 if the last poll of the agent succeeded; only for hosts with an agent");
   const lastPoll = x.gauge("paddock_last_poll_timestamp_seconds", "Unix time of the last completed poll of the host");
@@ -91,6 +93,8 @@ export function renderMetrics(): string {
   const ollamaRunners = x.gauge("paddock_ollama_runners", "Ollama runner processes");
 
   buildInfo({ version }, 1);
+  const failing = new Set(storageFailures().map((f) => f.area));
+  for (const area of STORAGE_AREAS) storageFailing({ area }, failing.has(area) ? 1 : 0);
 
   for (const st of paddock().instances.values()) {
     // not polled yet since the dashboard started: report nothing rather than a false "down"

@@ -24,6 +24,7 @@ import { startNotifications } from "./notify";
 import { writeLock } from "./store";
 import { dashboardChecks, forgetDismissals, hostChecks, probeOllama, summarize, type OllamaProbe } from "./security";
 import { forgetRequests, syncRequests } from "./requests";
+import { saved, saveFailed } from "./storage";
 import { isCloudModel, withSplit } from "./split";
 import {
   DASHBOARD_TARGET,
@@ -1033,8 +1034,9 @@ async function pollAll(p: Paddock, round: number, started: number, maintained: n
   });
   try {
     recordModelSizes(observed.flatMap(newSizes));
+    saved("model_sizes");
   } catch (e) {
-    console.error("[llama-paddock] saving model sizes failed:", e);
+    saveFailed("model_sizes", e);
   }
   for (const st of observed) {
     hostStep(st, "reading model details", () => {
@@ -1057,8 +1059,9 @@ async function pollAll(p: Paddock, round: number, started: number, maintained: n
   }
   try {
     recordObservations(changes.map((c) => c.span), changes.flatMap((c) => c.events));
+    saved("events");
   } catch (e) {
-    console.error("[llama-paddock] saving host events failed:", e);
+    saveFailed("events", e);
     // these changes weren't stored, so start over: the next poll opens new spans with the state as found
     for (const st of observed) st.observed = null;
   }
@@ -1069,12 +1072,14 @@ async function pollAll(p: Paddock, round: number, started: number, maintained: n
       maintainHistory(p.settings.history_retention_days);
       try {
         trimAudit(p.settings.audit_retention_days);
+        saved("audit");
       } catch (e) {
-        console.error("[llama-paddock] trimming the audit log failed:", e);
+        saveFailed("audit", e, "trimming the audit log");
       }
     }
+    saved("history");
   } catch (e) {
-    console.error("[llama-paddock] saving metric history failed:", e);
+    saveFailed("history", e);
   }
   return maintained;
 }
@@ -1347,8 +1352,9 @@ function persistJob(job: Job) {
   job.savedAt = Date.now();
   try {
     saveJob({ info: jobInfo(job), path: job.path, body: job.body });
+    saved("jobs");
   } catch (e) {
-    console.error(`[llama-paddock] saving job ${job.id} failed:`, e);
+    saveFailed("jobs", e, `saving job ${job.id}`);
   }
 }
 

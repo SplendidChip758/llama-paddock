@@ -1,4 +1,5 @@
 import "server-only";
+import { saved, saveFailed } from "./storage";
 import crypto from "node:crypto";
 import { version as dashboardVersion } from "@/package.json";
 import type { Instance } from "./config";
@@ -131,8 +132,9 @@ export function parseBenchRequest(b: Record<string, unknown>): BenchRequest {
 function persist(b: StoredBenchmark) {
   try {
     saveBenchmark(b);
+    saved("benchmarks");
   } catch (e) {
-    console.error(`[llama-paddock] saving benchmark ${b.id} failed:`, e);
+    saveFailed("benchmarks", e, `saving benchmark ${b.id}`);
   }
 }
 
