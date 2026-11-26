@@ -263,6 +263,8 @@ function currentRun(dir: string | null, req: UpdateRequest | null): DashboardUpd
   // turning automatic updates on or off isn't a run
   if (!req || req.action === "auto") return status;
   const waited = Date.now() / 1000 - req.requested_at;
+  // the updater took the request but an automatic update holds the lock: it runs when that's done
+  const queued = readUpdaterFile(dir, "waiting") !== null;
   return {
     state: "requested",
     action: req.action ?? "update",
@@ -270,9 +272,11 @@ function currentRun(dir: string | null, req: UpdateRequest | null): DashboardUpd
     from: version,
     started: req.requested_at,
     finished: null,
-    message: waited > PICKUP_S
-      ? "The updater hasn't started. Check it on the dashboard's machine: systemctl status llama-paddock-update.path"
-      : null,
+    message: queued
+      ? "Waiting for an automatic update that is running to finish"
+      : waited > PICKUP_S
+        ? "The updater hasn't started. Check it on the dashboard's machine: systemctl status llama-paddock-update.path"
+        : null,
     backup: req.backup ?? null,
     by: req.requested_by,
     log: [],

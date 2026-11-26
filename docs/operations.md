@@ -68,7 +68,7 @@ The updater writes its status and output to `/var/lib/llama-paddock-update/` (`s
 The top of **Updates** has the install's channel and the automatic updates switch:
 
 - **Channel:** **Stable** or **Prerelease**, the same as `update-llama-paddock stable` or `dev`. Switching to prereleases installs the newest prerelease straight away, with the same backup and rollback. Switching back to stable never installs an older release: a newer prerelease stays until a stable release newer than it is out, because the data format can't go backwards. Both ask first.
-- **Automatic updates:** off by default, and for the stable channel only (the switch is greyed out on prereleases). When it is on, `llama-paddock-auto-update.timer` looks for a newer stable release every 6 hours and installs it the same way as **Update to …**, with the backup, the health check and the rollback. Runs that find nothing new aren't recorded. Logged as `dashboard.auto_update`.
+- **Automatic updates:** off by default, and for the stable channel only (the switch is greyed out on prereleases). When it is on, `llama-paddock-auto-update.timer` looks for a newer stable release every 6 hours and installs it the same way as **Update to …**, with the backup, the health check and the rollback. Runs that find nothing new aren't recorded. Logged as `dashboard.auto_update`. An update, rollback or channel switch asked for while an automatic update runs waits for it to finish (up to 30 minutes), and the dashboard says it is waiting.
 
 #### Rolling back an update
 

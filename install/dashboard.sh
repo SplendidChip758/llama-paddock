@@ -828,6 +828,9 @@ UPDATE_REQUEST=$DATA_DIR/update-request.json
 # can write the backups directory, so a rollback trusts only what is listed here
 TRUSTED_BACKUPS=$UPDATER_DIR/pre-update-backups
 UPDATE_LOCK=/run/llama-paddock-update.lock
+# how long a request from the dashboard waits for an automatic update that holds the lock (seconds);
+# the update service's TimeoutStartSec leaves room for that wait and the update after it
+LOCK_WAIT=1800
 UPDATE_CMD=/usr/local/bin/update-llama-paddock
 # exit code of an update that failed and was rolled back
 ROLLED_BACK=3
@@ -1121,11 +1124,38 @@ run_install() {
 updater_run() {
   local log=$UPDATER_DIR/update.log action want backup channel by enabled from to
   exec 9>"$UPDATE_LOCK"
-  flock -n 9 || return 0
+  if ! flock -n 9; then
+    # an automatic update is running. Wait for it rather than return: while the request is there,
+    # llama-paddock-update.path starts this again at once, and after a few tries systemd stops
+    # starting it, so no update from the dashboard would run until someone restarted the path unit
+    [[ -e $UPDATE_REQUEST || -L $UPDATE_REQUEST ]] || return 0
+    read -r action want backup channel by enabled < <(parse_request)
+    # turning automatic updates on or off is a setting: it needn't wait (and the running update reads it at its start)
+    if [[ $action == auto ]]; then
+      rm -f "$UPDATE_REQUEST"
+      [[ $enabled == - ]] || write_root_file auto-update 644 <<<"$enabled"
+      return 0
+    fi
+    # the dashboard shows that the request is waiting, not lost
+    date +%s | write_root_file waiting 644
+    if ! flock -w "$LOCK_WAIT" 9; then
+      rm -f "$UPDATE_REQUEST" "$UPDATER_DIR/waiting"
+      [[ $action == - ]] && action=update
+      [[ $want == - ]] && want=""; [[ $by == - ]] && by=""
+      write_status failed "$action" "$want" "$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)" \
+        "another update was still running after $((LOCK_WAIT / 60)) minutes; ask again once it has finished" "" "$by"
+      return 0
+    fi
+  fi
+  # this run answers the request, even if it stops with an error: one left behind would start it again and again
+  trap 'rm -f "$UPDATE_REQUEST" "$UPDATER_DIR/waiting"' EXIT
+  rm -f "$UPDATER_DIR/waiting"
   recover_update
   [[ -e $UPDATE_REQUEST || -L $UPDATE_REQUEST ]] || return 0
   read -r action want backup channel by enabled < <(parse_request)
   rm -f "$UPDATE_REQUEST"
+  # answered: a request written after this point is the next run's
+  trap - EXIT
   [[ $want == - ]] && want=""; [[ $backup == - ]] && backup=""; [[ $channel == - ]] && channel=""
   [[ $by == - ]] && by=""; [[ $enabled == - ]] && enabled=""
   from=$(cat "$APP_DIR/VERSION" 2>/dev/null || echo unknown)
@@ -1220,7 +1250,7 @@ write_self_updater() {
     echo '# at boot (written by install/dashboard.sh).'
     echo '#   llama-paddock-updater run | auto | recover'
     echo 'set -euo pipefail'
-    declare -p APP_DIR CFG_DIR DATA_DIR SVC_USER CHANNEL UPDATER_DIR UPDATE_MARKER UPDATE_REQUEST TRUSTED_BACKUPS UPDATE_LOCK UPDATE_CMD ROLLED_BACK
+    declare -p APP_DIR CFG_DIR DATA_DIR SVC_USER CHANNEL UPDATER_DIR UPDATE_MARKER UPDATE_REQUEST TRUSTED_BACKUPS UPDATE_LOCK LOCK_WAIT UPDATE_CMD ROLLED_BACK
     declare -f init_colors msg_info msg_ok msg_warn die marker_get marker_stale data_links trusted_backup run_backup_tool find_backup_tool \
       rollback_update recover_update newer_version write_root_file write_status log_backup log_rollback_reason \
       parse_request backup_version run_install updater_run updater_auto
@@ -1255,7 +1285,8 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/llama-paddock-updater run
-TimeoutStartSec=30min
+# up to 30 minutes waiting for an automatic update, then the update itself
+TimeoutStartSec=65min
 EOF
   cat >/etc/systemd/system/llama-paddock-auto-update.service <<EOF
 [Unit]

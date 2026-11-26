@@ -107,6 +107,26 @@ test("a pending request isn't in a backup, so a restore can't start the update a
   assert.ok(!manifest.files.some((f) => f.path.endsWith("update-request.json")));
 });
 
+test("a request waiting for an automatic update says so, instead of that the updater hasn't started", async () => {
+  const original = fs.readFileSync(request, "utf8");
+  // long enough ago that a request nobody picked up would be reported as stuck
+  fs.writeFileSync(request, JSON.stringify({ ...JSON.parse(original), requested_at: Date.now() / 1000 - 600 }), { mode: 0o600 });
+  try {
+    let run = (await c.get("/api/dashboard-update")).data.run;
+    assert.equal(run.state, "requested");
+    assert.match(run.message, /updater hasn't started/);
+
+    // the updater writes this while it waits for the lock an automatic update holds
+    fs.writeFileSync(path.join(updater, "waiting"), `${Math.floor(Date.now() / 1000)}\n`);
+    run = (await c.get("/api/dashboard-update")).data.run;
+    assert.equal(run.state, "requested");
+    assert.match(run.message, /Waiting for an automatic update/);
+  } finally {
+    fs.rmSync(path.join(updater, "waiting"), { force: true });
+    fs.writeFileSync(request, original, { mode: 0o600 });
+  }
+});
+
 test("what the updater reports is shown, with its output", async () => {
   // as llama-paddock-updater does: take the request, report, then the outcome
   fs.rmSync(request);
