@@ -158,6 +158,57 @@ test("restore never writes through a link in the data directory, and changes not
   }
 });
 
+test("backup and restore never read through a link the dashboard's user could plant", () => {
+  // run as root, following one would copy a root-only file into the data directory, or chown it
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), "paddock-outside-"));
+  const secret = path.join(outside, "secret");
+  fs.writeFileSync(secret, "root only", { mode: 0o600 });
+  const before = fs.readdirSync(backups);
+  const planted = [];
+  const plant = (target, at) => {
+    fs.symlinkSync(target, at);
+    planted.push(at);
+  };
+  try {
+    // the database's own files
+    for (const f of ["paddock.db-wal", "paddock.db-shm", "paddock.db-journal"]) {
+      plant(secret, path.join(stack.data.data, f));
+      const r = cli("backup", "--reason", "pre-restore");
+      assert.notEqual(r.code, 0, f);
+      assert.match(r.err, /is a link; not following it/);
+      fs.rmSync(planted.pop());
+    }
+    assert.deepEqual(fs.readdirSync(backups), before, "no backup was written");
+
+    // a file in a backup, and a whole backup, pointing elsewhere
+    const b = JSON.parse(cli("backup", "--json").out);
+    const db = path.join(b.path, "data/paddock.db");
+    fs.rmSync(db);
+    plant(secret, db);
+    assert.match(cli("verify", b.name).out, /data\/paddock\.db: not a regular file/);
+    assert.notEqual(cli("restore", b.name).code, 0);
+    fs.rmSync(planted.pop());
+    fs.renameSync(b.path, path.join(outside, "moved"));
+    plant(path.join(outside, "moved"), b.path);
+    assert.match(cli("restore", b.name).err, /is a link; not following it/);
+    fs.rmSync(planted.pop());
+
+    // the backups directory itself
+    fs.renameSync(backups, path.join(outside, "backups"));
+    plant(path.join(outside, "backups"), backups);
+    assert.match(cli("backup").err, /not a directory \(a link\?\); not writing there/);
+    fs.rmSync(planted.pop());
+    fs.renameSync(path.join(outside, "backups"), backups);
+
+    assert.ok(!fs.readdirSync(stack.data.data).some((f) => f.endsWith(".tmp")), "no half-written files");
+  } finally {
+    for (const p of planted) fs.rmSync(p, { force: true });
+    if (!fs.existsSync(backups) && fs.existsSync(path.join(outside, "backups"))) fs.renameSync(path.join(outside, "backups"), backups);
+    for (const n of fs.readdirSync(backups)) if (!before.includes(n)) fs.rmSync(path.join(backups, n), { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  }
+});
+
 test("restore replaces a damaged database, and keeps its files as they were", async () => {
   const db = path.join(stack.data.data, "paddock.db");
   fs.writeFileSync(db, "not a database");

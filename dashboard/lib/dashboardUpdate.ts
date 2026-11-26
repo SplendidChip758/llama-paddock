@@ -214,8 +214,21 @@ function backupVersion(name: string | null): string | null {
   }
 }
 
-/** Finished runs, newest first. A done run can be rolled back while its backup is kept and it is older than this version. */
+/**
+ * The pre-update backups the updater took and recorded. It rolls back only with one of these: the
+ * backups directory is ours to write, so a backup that is merely there proves nothing to root.
+ */
+function trustedBackups(dir: string | null): Set<string> {
+  const names = (readUpdaterFile(dir, "pre-update-backups") ?? "").split("\n").map((l) => l.split(" ")[0]);
+  return new Set(names.filter((n) => BACKUP_RE.test(n)));
+}
+
+/**
+ * Finished runs, newest first. A done run can be rolled back while its backup is kept and recorded
+ * by the updater, and it is older than this version.
+ */
 function readHistory(dir: string | null): DashboardUpdateEntry[] {
+  const trusted = trustedBackups(dir);
   const lines = (readUpdaterFile(dir, "history.jsonl") ?? "").split("\n").filter(Boolean).slice(-MAX_HISTORY).reverse();
   const out: DashboardUpdateEntry[] = [];
   for (const line of lines) {
@@ -229,7 +242,7 @@ function readHistory(dir: string | null): DashboardUpdateEntry[] {
     const e = fromRecord(r);
     if (e.state === "running") continue;
     const from = e.from?.replace(/^v/, "") ?? null;
-    const can = e.state === "done" && !!from && backupVersion(e.backup) === from && (compareVersions(version, from) ?? 0) > 0;
+    const can = e.state === "done" && !!from && !!e.backup && trusted.has(e.backup) && backupVersion(e.backup) === from && (compareVersions(version, from) ?? 0) > 0;
     out.push({ ...e, can_roll_back: can });
   }
   return out;
@@ -341,7 +354,7 @@ export function requestDashboardUpdate(settings: Settings, body: UpdateBody, use
     }
     case "rollback": {
       const e = u.history.find((h) => h.backup === body.backup && h.can_roll_back);
-      if (!e) throw new HttpError(409, "that update can't be rolled back: its pre-update backup is gone, or it isn't older than this version");
+      if (!e) throw new HttpError(409, "that update can't be rolled back: its pre-update backup is gone or wasn't taken by the updater, or it isn't older than this version");
       request({ action: "rollback", version: `v${e.from!.replace(/^v/, "")}`, backup: e.backup!, requested_by: user });
       return { target: e.from!, detail: `from ${u.current}, with backup ${e.backup}` };
     }

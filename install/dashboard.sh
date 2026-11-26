@@ -801,6 +801,15 @@ if (( stop )) && systemctl is-active --quiet llama-paddock 2>/dev/null; then
   systemctl stop llama-paddock
   trap 'systemctl start llama-paddock' EXIT
 fi
+# run as root, an older paddock-backup follows links that the dashboard's user can put here
+links=\$(find "${DATA_DIR}" -maxdepth 1 \( -name backups -o -name 'paddock.db*' \) -type l 2>/dev/null || true)
+[[ -L "${DATA_DIR}/backups" ]] || links+=\$'\n'\$(find "${DATA_DIR}/backups" -mindepth 1 -type l 2>/dev/null || true)
+links=\$(sed '/^\$/d' <<<"\$links")
+if [[ -n \$links ]]; then
+  echo "paddock-backup: not running as root with these links in ${DATA_DIR}; remove them first:" >&2
+  echo "\$links" | sed 's/^/  /' >&2
+  exit 1
+fi
 $(command -v node) ${APP_DIR}/bin/paddock-backup.mjs "\$@"
 EOF
   chmod 755 /usr/local/bin/paddock-backup
@@ -815,6 +824,9 @@ EOF
 UPDATER_DIR=/var/lib/llama-paddock-update
 UPDATE_MARKER=$UPDATER_DIR/in-progress
 UPDATE_REQUEST=$DATA_DIR/update-request.json
+# The pre-update backups this installer took, with their manifest's sha256. The dashboard's user
+# can write the backups directory, so a rollback trusts only what is listed here
+TRUSTED_BACKUPS=$UPDATER_DIR/pre-update-backups
 UPDATE_LOCK=/run/llama-paddock-update.lock
 UPDATE_CMD=/usr/local/bin/update-llama-paddock
 # exit code of an update that failed and was rolled back
@@ -835,9 +847,39 @@ marker_stale() {
 # run_backup_tool TOOL ARGS… — paddock-backup with the service's paths. TOOL may come from the
 # other release: the version it records and checks is always the one installed in $APP_DIR
 run_backup_tool() {
-  local tool=$1; shift
+  local tool=$1 links; shift
+  if links=$(data_links) && [[ -n $links ]]; then
+    msg_warn "Not running paddock-backup as root: it could follow these links in $DATA_DIR. Remove them first:" >&2
+    sed 's/^/     /' <<<"$links" >&2
+    return 1
+  fi
   PADDOCK_APP_DIR=$APP_DIR PADDOCK_DATA_DIR=$DATA_DIR PADDOCK_CONFIG=$CFG_DIR/config.yaml \
     PADDOCK_ENV_FILE=$CFG_DIR/llama-paddock.env node "$tool" "$@"
+}
+
+# data_links — links where paddock-backup, run as root, reads and writes: the database files, the
+# backups directory and everything in it. The dashboard's user can create them, and older
+# releases have a paddock-backup that follows some of them
+data_links() {
+  find "$DATA_DIR" -maxdepth 1 \( -name backups -o -name 'paddock.db*' \) -type l 2>/dev/null || true
+  [[ -L $DATA_DIR/backups ]] || find "$DATA_DIR/backups" -mindepth 1 -type l 2>/dev/null || true
+}
+
+# record_backup NAME — list a pre-update backup this installer just took as one a rollback may use
+record_backup() {
+  local m=$DATA_DIR/backups/$1/manifest.json sum
+  [[ -n $1 && -f $m && ! -L $m ]] || return 1
+  sum=$(sha256sum "$m" | cut -d' ' -f1)
+  { tail -n 49 "$TRUSTED_BACKUPS" 2>/dev/null || true; echo "$1 $sum"; } | write_root_file "${TRUSTED_BACKUPS##*/}" 640
+}
+
+# trusted_backup NAME — NAME is a pre-update backup in record_backup's list, unchanged since: its
+# manifest has the sha256 recorded then, and paddock-backup checks every file against the manifest
+trusted_backup() {
+  local d=$DATA_DIR/backups/$1 want
+  [[ -n $1 && ! -L $DATA_DIR/backups && -d $d && ! -L $d && -f $d/manifest.json && ! -L $d/manifest.json ]] || return 1
+  want=$(awk -v n="$1" '$1 == n { s = $2 } END { print s }' "$TRUSTED_BACKUPS" 2>/dev/null)
+  [[ -n $want && $(sha256sum "$d/manifest.json" | cut -d' ' -f1) == "$want" ]]
 }
 
 # The first paddock-backup of the given app directories that exists
@@ -865,7 +907,9 @@ rollback_update() {
     fi
     # the new release may have upgraded the data: the backup has it as the old release left it
     if [[ -n $backup ]]; then
-      if tool=$(find_backup_tool "$APP_DIR" "${APP_DIR}.failed") \
+      if ! trusted_backup "$backup"; then
+        msg_warn "Backup $backup isn't the one taken before the update, or it changed since: not restoring it"
+      elif tool=$(find_backup_tool "$APP_DIR" "${APP_DIR}.failed") \
         && run_backup_tool "$tool" restore "$backup" >/dev/null; then
         msg_ok "Restored backup $backup"
       else
@@ -904,6 +948,7 @@ begin_update() {
     fi
     rm -f "$err"
     backup=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(0, "utf8")).name)' <<<"$out")
+    record_backup "$backup" || msg_warn "couldn't record backup $backup: it can't be used to roll back"
     msg_ok "Pre-update backup: $backup"
   else
     msg_warn "No paddock-backup to take a backup with: updating without one"
@@ -1102,6 +1147,9 @@ updater_run() {
       if [[ -z $backup ]] || ! to=$(backup_version "$backup"); then
         write_status failed rollback "$want" "$from" "there is no pre-update backup ${backup:-by that name} to roll back with" "" "$by"; return 0
       fi
+      if ! trusted_backup "$backup"; then
+        write_status failed rollback "$want" "$from" "backup $backup isn't one the updater took before an update, or it changed since" "" "$by"; return 0
+      fi
       if [[ ${want#v} != "$to" ]] || ! newer_version "$from" "$want"; then
         write_status failed rollback "$want" "$from" "backup $backup is from $to; it can only roll back an install newer than that" "" "$by"; return 0
       fi
@@ -1172,8 +1220,8 @@ write_self_updater() {
     echo '# at boot (written by install/dashboard.sh).'
     echo '#   llama-paddock-updater run | auto | recover'
     echo 'set -euo pipefail'
-    declare -p APP_DIR CFG_DIR DATA_DIR SVC_USER CHANNEL UPDATER_DIR UPDATE_MARKER UPDATE_REQUEST UPDATE_LOCK UPDATE_CMD ROLLED_BACK
-    declare -f init_colors msg_info msg_ok msg_warn die marker_get marker_stale run_backup_tool find_backup_tool \
+    declare -p APP_DIR CFG_DIR DATA_DIR SVC_USER CHANNEL UPDATER_DIR UPDATE_MARKER UPDATE_REQUEST TRUSTED_BACKUPS UPDATE_LOCK UPDATE_CMD ROLLED_BACK
+    declare -f init_colors msg_info msg_ok msg_warn die marker_get marker_stale data_links trusted_backup run_backup_tool find_backup_tool \
       rollback_update recover_update newer_version write_root_file write_status log_backup log_rollback_reason \
       parse_request backup_version run_install updater_run updater_auto
     echo 'init_colors'
@@ -1383,6 +1431,8 @@ local_install() {
     [[ $PADDOCK_RESTORE_BACKUP =~ ^[0-9]{8}T[0-9]{6}Z-v[0-9A-Za-z.-]+-pre-update(-[0-9]+)?$ ]] \
       || die "PADDOCK_RESTORE_BACKUP must name a pre-update backup (paddock-backup list)"
     [[ -n $updating && -n $has_systemd ]] || die "PADDOCK_RESTORE_BACKUP needs an existing install run by systemd"
+    trusted_backup "$PADDOCK_RESTORE_BACKUP" \
+      || die "backup $PADDOCK_RESTORE_BACKUP isn't one this installer took before an update, or it changed since. Check it, then restore it by hand: paddock-backup restore $PADDOCK_RESTORE_BACKUP"
     UPDATE_ACTION=rollback
   fi
 
@@ -1440,6 +1490,8 @@ local_install() {
   if [[ -n ${PADDOCK_RESTORE_BACKUP-} ]]; then
     local rtool
     rtool=$(find_backup_tool "$APP_DIR" "${APP_DIR}.old") || die "no paddock-backup to restore $PADDOCK_RESTORE_BACKUP with"
+    # again, now that the dashboard is stopped and can't change it
+    trusted_backup "$PADDOCK_RESTORE_BACKUP" || die "backup $PADDOCK_RESTORE_BACKUP changed since the update started; not restoring it"
     run_backup_tool "$rtool" restore "$PADDOCK_RESTORE_BACKUP" >/dev/null || die "couldn't restore backup $PADDOCK_RESTORE_BACKUP"
     msg_ok "Restored backup $PADDOCK_RESTORE_BACKUP"
   fi
