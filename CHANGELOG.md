@@ -1,3 +1,9 @@
+## [0.10.0-dev.18](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.17...v0.10.0-dev.18) (2026-11-27)
+
+### Bug Fixes
+
+* **install:** stop root backups and rollbacks from following links ([#213](https://github.com/SplendidChip758/llama-paddock/issues/213)) ([d7b8733](https://github.com/SplendidChip758/llama-paddock/commit/d7b873343e01c5524939d4aec7725db263437126))
+
 ## [0.10.0-dev.17](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.16...v0.10.0-dev.17) (2026-11-21)
 
 ### Bug Fixes
