@@ -1,3 +1,9 @@
+## [0.10.0-dev.19](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.18...v0.10.0-dev.19) (2026-11-27)
+
+### Bug Fixes
+
+* **install:** let a dashboard update wait for an automatic one ([#214](https://github.com/SplendidChip758/llama-paddock/issues/214)) ([e0b49ba](https://github.com/SplendidChip758/llama-paddock/commit/e0b49ba3107dcfb99ece187d4bf69cdbb50f6e14))
+
 ## [0.10.0-dev.18](https://github.com/SplendidChip758/llama-paddock/compare/v0.10.0-dev.17...v0.10.0-dev.18) (2026-11-27)
 
 ### Bug Fixes
