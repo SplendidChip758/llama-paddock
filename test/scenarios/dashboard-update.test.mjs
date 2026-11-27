@@ -131,15 +131,20 @@ test("what the updater reports is shown, with its output", async () => {
 });
 
 // ============================================================================ history, rollback, channel, automatic updates
-/** A pre-update backup taken by an older version, as the updater keeps it in the data directory. */
-function olderBackup(older) {
+/**
+ * A pre-update backup taken by an older version, as the updater keeps it in the data directory.
+ * `recorded`: listed in the updater's pre-update-backups, as the updater does for those it takes.
+ */
+function olderBackup(older, { recorded = true } = {}) {
   const app = fs.mkdtempSync(path.join(os.tmpdir(), "paddock-oldapp-"));
   fs.writeFileSync(path.join(app, "package.json"), JSON.stringify({ version: older }));
   const env = { ...process.env, PADDOCK_DATA_DIR: holder.stack.data.data, PADDOCK_CONFIG: holder.stack.data.config, PADDOCK_APP_DIR: app };
   const r = spawnSync(process.execPath, [path.join(REPO, "dashboard/bin/paddock-backup.mjs"), "backup", "--reason", "pre-update", "--json"], { env, encoding: "utf8" });
   fs.rmSync(app, { recursive: true, force: true });
   assert.equal(r.status, 0, r.stderr);
-  return JSON.parse(r.stdout).name;
+  const name = JSON.parse(r.stdout).name;
+  if (recorded) fs.appendFileSync(path.join(updater, "pre-update-backups"), `${name} ${"0".repeat(64)}\n`);
+  return name;
 }
 
 const history = (entries) =>
@@ -147,15 +152,20 @@ const history = (entries) =>
 
 test("the history lists finished runs newest first; an update can be rolled back while its backup is kept", async () => {
   const kept = olderBackup("0.0.2");
+  // the dashboard's user can write a backup into the data directory, but only the updater records one
+  const planted = olderBackup("0.0.3", { recorded: false });
   const now = Date.now() / 1000;
   history([
     { state: "done", action: "update", version: "0.0.2", from: "0.0.1", started: now - 900, finished: now - 860, backup: "20200101T000000Z-v0.0.1-pre-update", by: "terminal" },
     { state: "rolled_back", action: "automatic", version: "9.9.9", from: "0.0.2", started: now - 600, finished: now - 560, message: "it didn't answer", backup: null, by: "automatic" },
     { state: "done", action: "update", version: VERSION, from: "0.0.2", started: now - 300, finished: now - 260, backup: kept, by: "admin" },
+    { state: "done", action: "update", version: VERSION, from: "0.0.3", started: now - 200, finished: now - 160, backup: planted, by: "admin" },
     "not json",
   ]);
   const u = (await c.get("/api/dashboard-update")).data;
   assert.deepEqual(u.history.map((h) => [h.action, h.state, h.by, h.can_roll_back]), [
+    // its backup isn't one the updater recorded
+    ["update", "done", "admin", false],
     ["update", "done", "admin", true],
     ["automatic", "rolled_back", "automatic", false],
     // its backup is gone
@@ -163,6 +173,7 @@ test("the history lists finished runs newest first; an update can be rolled back
   ]);
 
   assert.equal((await c.post("/api/dashboard-update", { action: "rollback", backup: "20200101T000000Z-v0.0.1-pre-update" })).status, 409);
+  assert.equal((await c.post("/api/dashboard-update", { action: "rollback", backup: planted })).status, 409);
   const r = await c.post("/api/dashboard-update", { action: "rollback", backup: kept });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.run.state, "requested");

@@ -45,6 +45,8 @@ test("the channel, automatic updates and a rollback each go to the updater after
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ format: 1, reason: "pre-update", app_version: "0.0.1", files: [] }));
   const now = Date.now() / 1000;
+  // the updater records the backups it takes; only those can roll back
+  fs.writeFileSync(updater("pre-update-backups"), `${backup} ${"0".repeat(64)}\n`);
   fs.writeFileSync(updater("history.jsonl"), JSON.stringify({
     state: "done", action: "update", version: "0.0.2", from: "0.0.1", started: now - 3600, finished: now - 3500, backup, by: "admin",
   }) + "\n");
@@ -79,6 +81,6 @@ test("the channel, automatic updates and a rollback each go to the updater after
 
   // leave the page as the other tests expect it
   fs.rmSync(request());
-  for (const f of ["history.jsonl", "auto-update", "channel"]) fs.rmSync(updater(f), { force: true });
+  for (const f of ["history.jsonl", "pre-update-backups", "auto-update", "channel"]) fs.rmSync(updater(f), { force: true });
   fs.rmSync(dir, { recursive: true, force: true });
 });

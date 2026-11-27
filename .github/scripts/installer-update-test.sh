@@ -204,6 +204,19 @@ backup=$(api "$url/api/dashboard-update" | node -p '
   const u = JSON.parse(require("fs").readFileSync(0, "utf8"));
   (u.history.find((h) => h.state === "done" && h.version === "64.0.1" && h.can_roll_back) ?? {}).backup ?? ""')
 [[ -n $backup ]] || fail "the dashboard offers no rollback of the update to 64.0.1"
+# a backup the updater didn't take: the dashboard's user can write one, but root must not restore it
+forged=20200101T000000Z-v64.0.0-pre-update
+in_ct runuser -u llama-paddock -- cp -a "/var/lib/llama-paddock/backups/$backup" "/var/lib/llama-paddock/backups/$forged"
+in_ct runuser -u llama-paddock -- sh -c "printf '%s' '{\"action\":\"rollback\",\"version\":\"v64.0.0\",\"backup\":\"$forged\",\"requested_at\":0}' \
+  > /var/lib/llama-paddock/update-request.json"
+for _ in $(seq 1 60); do [[ $(in_ct cat /var/lib/llama-paddock-update/status.json | field backup) == "" \
+  && $(in_ct cat /var/lib/llama-paddock-update/status.json | field action) == rollback ]] && break; sleep 1; done
+status=$(in_ct cat /var/lib/llama-paddock-update/status.json)
+[[ $(field state <<<"$status") == failed && $(field message <<<"$status") == *"isn't one the updater took"* ]] \
+  || fail "the updater didn't refuse a backup it hadn't taken: $status"
+[[ $(in_ct cat /opt/llama-paddock/VERSION) == v64.0.1 ]] || fail "a refused rollback changed the installed version"
+in_ct rm -rf "/var/lib/llama-paddock/backups/$forged"
+ok "a backup the updater didn't take is refused for a rollback"
 # changed after the backup, so the rollback must undo it
 api -d '{"current":"password-1","password":"password-after-backup"}' "$url/api/auth/password" >/dev/null
 # changing the password ends the session

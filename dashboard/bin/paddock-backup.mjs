@@ -115,7 +115,28 @@ function owner() {
 }
 function chownToData(p) {
   const o = owner();
-  if (o) fs.chownSync(p, o.uid, o.gid);
+  // never through a link: the dashboard's user could point one at any file root can change
+  if (o) fs.lchownSync(p, o.uid, o.gid);
+}
+
+/** What is at `p` itself (a link is not followed), or null when nothing is. */
+function lstat(p) {
+  try {
+    return fs.lstatSync(p);
+  } catch (e) {
+    if (e.code === "ENOENT") return null;
+    throw e;
+  }
+}
+
+/**
+ * Throws unless `p` is a regular file. Run as root by the installer's updater, this reads files in
+ * a directory the dashboard's user can change: a link there must not make root copy, open or
+ * chown whatever it points to.
+ */
+function assertRegularFile(p) {
+  const st = lstat(p);
+  if (!st?.isFile()) throw new Error(`${p} is ${st?.isSymbolicLink() ? "a link" : "not a regular file"}; not following it`);
 }
 
 function mkdirPrivate(dir) {
@@ -232,7 +253,10 @@ function snapshotDb(src, dest) {
   } finally {
     db.close();
     // opening it as root may have created the -wal/-shm files, which the service must still write
-    for (const f of fs.readdirSync(path.dirname(src))) if (isDbFile(f)) chownToData(path.join(path.dirname(src), f));
+    for (const f of fs.readdirSync(path.dirname(src))) {
+      const p = path.join(path.dirname(src), f);
+      if (isDbFile(f) && lstat(p)?.isFile()) chownToData(p);
+    }
   }
 }
 
@@ -253,7 +277,8 @@ function backupsDir(opts) {
 }
 
 function readManifest(dir) {
-  const m = JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
+  assertRegularFile(path.join(dir, "manifest.json"));
+  const m =JSON.parse(fs.readFileSync(path.join(dir, "manifest.json"), "utf8"));
   if (typeof m.format !== "number" || !Array.isArray(m.files)) throw new Error(`${dir}: not a llama-paddock backup`);
   return m;
 }
@@ -283,7 +308,10 @@ function resolveBackup(arg, opts) {
   if (!arg) throw new UsageError("which backup? Give its name (see paddock-backup list) or its path");
   const inDir = path.join(backupsDir(opts), arg);
   for (const p of arg.includes("/") ? [path.resolve(arg)] : [inDir, path.resolve(arg)]) {
-    if (fs.existsSync(path.join(p, "manifest.json"))) return p;
+    if (!fs.existsSync(path.join(p, "manifest.json"))) continue;
+    // a backup in the backups directory is a directory there, not a link to one somewhere else
+    if (p === inDir && !lstat(p)?.isDirectory()) throw new Error(`${p} is a link; not following it`);
+    return p;
   }
   throw new Error(`no backup ${arg} in ${backupsDir(opts)}`);
 }
@@ -328,6 +356,8 @@ export function backup(opts = {}) {
   const data = dataDir();
   if (!fs.existsSync(data)) throw new Error(`the data directory ${data} doesn't exist: nothing to back up (set PADDOCK_DATA_DIR)`);
   const dir = backupsDir(opts);
+  // the default one is in the data directory: a link there would send root's writes elsewhere
+  if (!opts.dir && lstat(dir) && !lstat(dir).isDirectory()) throw new Error(`${dir} is not a directory (a link?); not writing there`);
   mkdirPrivate(dir);
   removeStalePartials(dir);
 
@@ -349,6 +379,8 @@ export function backup(opts = {}) {
       files.push({ path: rel, role, source, size: fs.statSync(abs).size, sha256: sha256(abs) });
     };
     const copy = (role, rel, source) => {
+      // config.yaml and the env file are the installer's own paths; data files are the dashboard user's
+      if (role === "data") assertRegularFile(path.resolve(data, source));
       fs.mkdirSync(path.dirname(path.join(partial, rel)), { recursive: true, mode: 0o700 });
       fs.copyFileSync(path.resolve(data, source), path.join(partial, rel));
       add(role, rel, source);
@@ -356,7 +388,9 @@ export function backup(opts = {}) {
 
     const db = path.join(data, DB);
     let warning = null;
-    if (fs.existsSync(db)) {
+    // SQLite would open (and write) whatever a paddock.db, -wal or -shm link points to
+    for (const f of fs.readdirSync(data)) if (isDbFile(f)) assertRegularFile(path.join(data, f));
+    if (lstat(db)) {
       fs.mkdirSync(path.join(partial, "data"), { mode: 0o700 });
       try {
         schema = snapshotDb(db, path.join(partial, `data/${DB}`));
@@ -416,7 +450,10 @@ export function verify(dir) {
       problems.push(`${f.path}: outside the backup`);
       continue;
     }
-    if (!fs.existsSync(abs)) problems.push(`${f.path}: missing`);
+    const st = lstat(abs);
+    if (!st) problems.push(`${f.path}: missing`);
+    // never read through a link: run as root, a restore would copy its target into the data directory
+    else if (!st.isFile()) problems.push(`${f.path}: not a regular file`);
     else if (sha256(abs) !== f.sha256) problems.push(`${f.path}: checksum doesn't match`);
   }
   if (!problems.length && m.files.some((f) => f.path === `data/${DB}`)) {
