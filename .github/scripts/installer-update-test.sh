@@ -171,13 +171,23 @@ release 64.0.1
 login password-1
 latest=$(api "$url/api/dashboard-update?refresh=1" | field latest)
 [[ $latest == 64.0.1 ]] || fail "the dashboard doesn't offer 64.0.1 (latest: ${latest:-none})"
+# an automatic update holds the lock: the request must wait for it, not leave the path unit
+# restarting the updater until systemd gives up on it
+in_ct bash -c 'setsid flock /run/llama-paddock-update.lock sleep 20 </dev/null >/dev/null 2>&1 &'
+sleep 1
 api -d '{"version":"64.0.1"}' "$url/api/dashboard-update" >/dev/null || fail "the dashboard refused to ask for the update"
+for _ in $(seq 1 10); do in_ct test -f /var/lib/llama-paddock-update/waiting && break; sleep 1; done
+in_ct test -f /var/lib/llama-paddock-update/waiting || fail "the updater isn't waiting for the lock"
+api "$url/api/dashboard-update" | grep -q 'Waiting for an automatic update' || fail "the dashboard doesn't say the update is waiting"
+[[ $(version) == 64.0.0 ]] || fail "the update ran while another one held the lock"
 wait_version 64.0.1 300
+if in_ct systemctl is-failed --quiet llama-paddock-update.path; then fail "llama-paddock-update.path failed while the request waited"; fi
+in_ct test ! -e /var/lib/llama-paddock-update/waiting || fail "the updater left its waiting file"
 for _ in $(seq 1 60); do [[ $(in_ct cat /var/lib/llama-paddock-update/status.json | field state) == done ]] && break; sleep 1; done
 [[ $(in_ct cat /var/lib/llama-paddock-update/status.json | field state) == done ]] \
   || fail "the updater's status isn't done: $(in_ct cat /var/lib/llama-paddock-update/status.json)"
 check_data "after an update from the dashboard"
-ok "64.0.0 → 64.0.1 asked for from the dashboard, run by llama-paddock-update.path"
+ok "64.0.0 → 64.0.1 asked for from the dashboard while another update held the lock, run by llama-paddock-update.path once it was free"
 
 # ---------------------------------------------------------------- 5. an update killed half way
 # a release that never answers keeps the installer waiting for it, with the releases swapped
